@@ -11,6 +11,7 @@ from campusflow.bedrock.config.settings import get_settings
 from campusflow.bedrock.db.session import async_session_factory
 from campusflow.bedrock.middleware.request_id import RequestIDMiddleware
 from campusflow.bedrock.rbac.service import seed_roles_and_permissions
+from campusflow.domain.analytics.router import router as analytics_router
 from campusflow.domain.announcements.router import router as announcements_router
 from campusflow.domain.assignments.router import router as assignments_router
 from campusflow.domain.courses.router import router as courses_router
@@ -106,8 +107,10 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router, prefix="/api/v1")
     app.include_router(question_banks_router, prefix="/api/v1")
     app.include_router(exams_router, prefix="/api/v1")
+    app.include_router(analytics_router, prefix="/api/v1")
 
     return app
+
 
 
 app = create_app()

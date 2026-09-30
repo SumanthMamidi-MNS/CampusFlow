@@ -6,10 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from campusflow.bedrock.api.responses import success_response
 from campusflow.bedrock.auth.dependencies import get_current_active_user
 from campusflow.bedrock.db.session import get_db
-from campusflow.domain.notifications.schemas import NotificationResponse
+from campusflow.domain.notifications.schemas import (
+    NotificationPreferenceResponse,
+    NotificationPreferenceUpdate,
+    NotificationResponse,
+)
 from campusflow.domain.notifications.service import (
+    get_or_create_user_preferences,
     list_user_notifications,
     mark_all_notifications_as_read,
+    update_user_preferences,
 )
 from campusflow.domain.notifications.service import (
     mark_notification_as_read as mark_as_read,
@@ -59,3 +65,27 @@ async def mark_all_read_endpoint(
 ):
     count = await mark_all_notifications_as_read(db, user_id=current_user.id)
     return success_response({"marked_read_count": count})
+
+
+@router.get("/preferences")
+async def get_notification_preferences_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    pref = await get_or_create_user_preferences(db, user_id=current_user.id)
+    return success_response(
+        NotificationPreferenceResponse.model_validate(pref).model_dump(mode="json")
+    )
+
+
+@router.put("/preferences")
+async def update_notification_preferences_endpoint(
+    payload: NotificationPreferenceUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    pref = await update_user_preferences(db, user_id=current_user.id, payload=payload)
+    return success_response(
+        NotificationPreferenceResponse.model_validate(pref).model_dump(mode="json")
+    )
+

@@ -1,3 +1,5 @@
+import csv
+import io
 import math
 import uuid
 from datetime import UTC, datetime
@@ -36,7 +38,10 @@ from campusflow.domain.exams.schemas import (
 from campusflow.domain.exams.schemas import (
     ExamResponse as ExamResponseSchema,
 )
-from campusflow.domain.notifications.service import create_notification
+from campusflow.domain.notifications.service import (
+    create_notification,
+    send_notification_email_if_enabled,
+)
 from campusflow.domain.question_banks.models import Question
 from campusflow.domain.users.models import User
 
@@ -829,6 +834,14 @@ async def publish_exam_results(
             notification_type="exam_results_published",
             link=f"/exams/{exam.id}/results",
         )
+        await send_notification_email_if_enabled(
+            db=db,
+            user_id=s_id,
+            category="exams",
+            subject=f"Exam Results Published: {exam.title}",
+            body_text=f"Results for '{exam.title}' are now available to view.",
+        )
+
 
     return exam
 
@@ -976,3 +989,53 @@ async def get_proctoring_timeline(
     res = await db.execute(query)
     events = list(res.scalars().all())
     return [ProctoringEventResponse.model_validate(e) for e in events]
+
+
+async def export_exam_results_csv(
+    db: AsyncSession, exam_id: uuid.UUID
+) -> tuple[str, str]:
+    exam = await db.get(Exam, exam_id)
+    if not exam:
+        raise NotFoundError("Exam not found")
+
+    attempts = await list_attempts_for_exam(db, exam_id=exam_id)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Attempt ID",
+        "Student ID",
+        "Student Name",
+        "Student Email",
+        "Attempt Number",
+        "Status",
+        "Started At",
+        "Submitted At",
+        "Proctor Violations",
+        "Total Score",
+        "Max Marks",
+        "Percentage",
+    ])
+
+    for att in attempts:
+        name = f"{att.student.first_name} {att.student.last_name}" if att.student else ""
+        email = att.student.email if att.student else ""
+        writer.writerow([
+            str(att.id),
+            str(att.student_id),
+            name,
+            email,
+            att.attempt_number,
+            att.status,
+            att.started_at.isoformat() if att.started_at else "",
+            att.submitted_at.isoformat() if att.submitted_at else "",
+            att.proctor_violations_count,
+            att.total_score if att.total_score is not None else "",
+            exam.total_marks,
+            att.percentage if att.percentage is not None else "",
+        ])
+
+    sanitized_title = "".join(c if c.isalnum() else "_" for c in exam.title)
+    filename = f"{sanitized_title}_results.csv"
+    return output.getvalue(), filename
+

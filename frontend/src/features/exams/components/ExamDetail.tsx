@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { ExamAnalyticsView } from '@/features/analytics/components/ExamAnalyticsView';
 import { useQuestionBanks, useQuestions } from '@/features/question-banks/api';
 import {
   useAddQuestionsToExam,
@@ -34,7 +35,8 @@ export function ExamDetail() {
   const { data: exam, isLoading: isExamLoading } = useExam(examId);
   const { data: attempts } = useExamAttempts(examId);
 
-  const [activeTab, setActiveTab] = useState<'questions' | 'grading'>('questions');
+  const [activeTab, setActiveTab] = useState<'questions' | 'grading' | 'analytics'>('questions');
+
 
   // Add questions modal state
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -228,7 +230,18 @@ export function ExamDetail() {
         >
           Student Submissions & Grading ({attempts?.length || 0})
         </button>
+        <button
+          onClick={() => setActiveTab('analytics')}
+          className={`pb-3 text-sm font-semibold transition-colors border-b-2 ${
+            activeTab === 'analytics'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Performance & Analytics
+        </button>
       </div>
+
 
       {/* Tab Content: Questions */}
       {activeTab === 'questions' && (
@@ -406,6 +419,16 @@ export function ExamDetail() {
           )}
         </div>
       )}
+
+      {/* Tab Content: Performance & Analytics */}
+      {activeTab === 'analytics' && (
+        <ExamAnalyticsView
+          examId={exam.id}
+          examTitle={exam.title}
+          totalMarks={exam.total_marks}
+        />
+      )}
+
 
       {/* Add Questions from Bank Modal */}
       {isAddOpen && (

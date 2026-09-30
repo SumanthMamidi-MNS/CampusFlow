@@ -138,6 +138,7 @@ ROLE_PERMISSION_MAPPINGS = {
         "exams:create",
         "exams:grade",
         "exams:proctor_view",
+        "analytics:view",
     ],
     "student": ["courses:read", "materials:read", "assignments:submit", "exams:take"],
 }

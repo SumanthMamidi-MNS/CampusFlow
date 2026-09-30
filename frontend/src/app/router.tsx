@@ -13,36 +13,41 @@ import { ExamDetailPage } from './routes/exams/detail';
 import { ExamTakePage } from './routes/exams/take';
 import { ExamResultPage } from './routes/exams/results';
 
+import { useAuth } from '@/core/auth/hooks';
+import { InstitutionalAnalytics } from '@/features/analytics/components/InstitutionalAnalytics';
+import { StudentDashboard } from '@/features/analytics/components/StudentDashboard';
+
 function DashboardPage() {
+  const { user } = useAuth();
+  const isStudent =
+    user?.roles.includes('student') &&
+    !user?.roles.some((r) => ['admin', 'super_admin', 'faculty', 'department_head'].includes(r));
+
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
-        <h1 className="text-2xl font-bold text-slate-900">Welcome to CampusFlow</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Your institution-grade learning management and secure online examination portal.
-        </p>
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">
+            Welcome back, {user ? `${user.first_name} ${user.last_name}` : 'Scholar'}
+          </h1>
+          <p className="mt-1 text-xs text-slate-500">
+            {isStudent
+              ? 'Your active learning hub, deadlines, grades, and upcoming examinations.'
+              : 'Institutional performance overview, academic operations, and analytics.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="rounded-xl bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 capitalize border border-blue-200">
+            Role: {user?.roles[0] || 'User'}
+          </span>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <h3 className="text-sm font-semibold text-slate-700">Course Offerings</h3>
-          <p className="text-2xl font-bold text-blue-600 mt-2">Active</p>
-          <p className="text-xs text-slate-400 mt-1">Syllabus, lectures, and digital resources</p>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <h3 className="text-sm font-semibold text-slate-700">Examinations</h3>
-          <p className="text-2xl font-bold text-emerald-600 mt-2">Scheduled</p>
-          <p className="text-xs text-slate-400 mt-1">Secure tests with observable proctoring</p>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <h3 className="text-sm font-semibold text-slate-700">Assignments</h3>
-          <p className="text-2xl font-bold text-indigo-600 mt-2">Tasks & Labs</p>
-          <p className="text-xs text-slate-400 mt-1">Rubrics, submissions, and gradebook</p>
-        </div>
-      </div>
+      {isStudent ? <StudentDashboard /> : <InstitutionalAnalytics />}
     </div>
   );
 }
+
 
 export const router = createBrowserRouter([
   {

@@ -19,3 +19,22 @@ class Notification(BaseModel):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id])  # noqa: F821
+
+
+class NotificationPreference(BaseModel):
+    __tablename__ = "notification_preferences"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+    )
+    email_assignments: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_grades: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_exams: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_announcements: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    in_app_assignments: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    in_app_grades: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    in_app_exams: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    in_app_announcements: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])  # noqa: F821
+

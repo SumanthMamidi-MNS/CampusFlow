@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/core/api/client';
-import type { NotificationItem, NotificationListResponse } from './types';
+import type {
+  NotificationItem,
+  NotificationListResponse,
+  NotificationPreference,
+  NotificationPreferenceUpdate,
+} from './types';
 
 export function useNotifications() {
   return useQuery({
@@ -42,3 +47,27 @@ export function useMarkAllNotificationsRead() {
     },
   });
 }
+
+export function useNotificationPreferences() {
+  return useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: async () => {
+      const res = await apiClient.get<NotificationPreference>('/notifications/preferences');
+      return res.data;
+    },
+  });
+}
+
+export function useUpdateNotificationPreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: NotificationPreferenceUpdate) => {
+      const res = await apiClient.put<NotificationPreference>('/notifications/preferences', payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notification-preferences'] });
+    },
+  });
+}
+

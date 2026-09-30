@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from campusflow.bedrock.api.responses import success_response
@@ -21,6 +21,7 @@ from campusflow.domain.exams.service import (
     add_questions_to_exam,
     create_exam,
     delete_exam,
+    export_exam_results_csv,
     get_exam,
     get_proctoring_timeline,
     get_student_exam_result,
@@ -284,3 +285,18 @@ async def get_proctoring_timeline_endpoint(
 ):
     events = await get_proctoring_timeline(db=db, attempt_id=attempt_id)
     return success_response([e.model_dump(mode="json") for e in events])
+
+
+@router.get("/exams/{exam_id}/export-results")
+async def export_exam_results_endpoint(
+    exam_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:grade")),
+):
+    csv_content, filename = await export_exam_results_csv(db, exam_id=exam_id)
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+

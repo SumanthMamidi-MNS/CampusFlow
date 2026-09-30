@@ -3,7 +3,10 @@ import uuid
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from campusflow.domain.notifications.models import Notification
+from campusflow.bedrock.mail.service import get_mailer
+from campusflow.domain.notifications.models import Notification, NotificationPreference
+from campusflow.domain.notifications.schemas import NotificationPreferenceUpdate
+from campusflow.domain.users.models import User
 
 
 async def create_notification(
@@ -105,3 +108,72 @@ async def mark_all_notifications_as_read(db: AsyncSession, user_id: uuid.UUID) -
     res = await db.execute(query)
     await db.commit()
     return res.rowcount
+
+
+async def get_or_create_user_preferences(
+    db: AsyncSession, user_id: uuid.UUID
+) -> NotificationPreference:
+    query = select(NotificationPreference).where(NotificationPreference.user_id == user_id)
+    res = await db.execute(query)
+    pref = res.scalar_one_or_none()
+    if not pref:
+        pref = NotificationPreference(
+            user_id=user_id,
+            email_assignments=True,
+            email_grades=True,
+            email_exams=True,
+            email_announcements=True,
+            in_app_assignments=True,
+            in_app_grades=True,
+            in_app_exams=True,
+            in_app_announcements=True,
+        )
+        db.add(pref)
+        await db.commit()
+        await db.refresh(pref)
+    return pref
+
+
+async def update_user_preferences(
+    db: AsyncSession, user_id: uuid.UUID, payload: NotificationPreferenceUpdate
+) -> NotificationPreference:
+    pref = await get_or_create_user_preferences(db, user_id)
+    data = payload.model_dump(exclude_unset=True)
+    for field, val in data.items():
+        if val is not None:
+            setattr(pref, field, val)
+    await db.commit()
+    await db.refresh(pref)
+    return pref
+
+
+async def send_notification_email_if_enabled(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    category: str,  # 'assignments', 'grades', 'exams', 'announcements'
+    subject: str,
+    body_text: str,
+    body_html: str | None = None,
+) -> bool:
+    pref = await get_or_create_user_preferences(db, user_id)
+    attr_name = f"email_{category}"
+    if not getattr(pref, attr_name, True):
+        return False
+
+    user_query = select(User).where(User.id == user_id)
+    res = await db.execute(user_query)
+    user = res.scalar_one_or_none()
+    if not user or not user.email:
+        return False
+
+    mailer = get_mailer()
+    try:
+        return await mailer.send_email(
+            to_email=user.email,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+        )
+    except Exception:
+        return False
+

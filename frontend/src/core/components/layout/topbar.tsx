@@ -1,17 +1,20 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, Check, CheckCheck, LogOut, User as UserIcon } from 'lucide-react';
+import { Bell, Check, CheckCheck, LogOut, Settings, User as UserIcon } from 'lucide-react';
 import { useAuth } from '@/core/auth/hooks';
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
 } from '@/features/notifications/api';
+import { NotificationPreferencesModal } from '@/features/notifications/components/NotificationPreferencesModal';
 import type { NotificationItem } from '@/features/notifications/types';
 
 export function Topbar() {
   const { user, logout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [isPrefModalOpen, setIsPrefModalOpen] = useState(false);
+
 
   const { data: notifData } = useNotifications();
   const markReadMutation = useMarkNotificationRead();
@@ -55,15 +58,27 @@ export function Topbar() {
                     </span>
                   )}
                 </div>
-                {unreadCount > 0 && (
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={() => markAllReadMutation.mutate()}
+                      className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800"
+                    >
+                      <CheckCheck className="h-3.5 w-3.5" />
+                      Mark all read
+                    </button>
+                  )}
                   <button
-                    onClick={() => markAllReadMutation.mutate()}
-                    className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800"
+                    onClick={() => {
+                      setIsOpen(false);
+                      setIsPrefModalOpen(true);
+                    }}
+                    className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                    title="Notification Preferences"
                   >
-                    <CheckCheck className="h-3.5 w-3.5" />
-                    Mark all read
+                    <Settings className="h-3.5 w-3.5" />
                   </button>
-                )}
+                </div>
               </div>
 
               <div className="mt-2 max-h-80 overflow-y-auto divide-y divide-slate-100">
@@ -154,6 +169,11 @@ export function Topbar() {
           </button>
         </div>
       </div>
+
+      <NotificationPreferencesModal
+        isOpen={isPrefModalOpen}
+        onClose={() => setIsPrefModalOpen(false)}
+      />
     </header>
   );
 }

@@ -11,8 +11,8 @@
 | **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | **Completed** | Full suite of question types editable, validated, and bulk-importable; 12/12 backend tests passing; clean UI build. |
 | **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | **Completed** | Complete exam lifecycle works end-to-end: schedule -> delivery -> auto-save -> auto-grading -> manual grading -> results; 13/13 tests passing; clean UI build. |
 | **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | **Completed** | Violation telemetry logged, threshold auto-submit enforced, faculty proctor review modal active, 14/14 tests passing. |
-| **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | **In Progress (Next)** | Multi-channel notification preferences, SMTP integration templates, institutional analytics dashboards. |
-| **Phase 8** | Polish, Hardening & Production Verification (E2E tests, Security audit, Seeding) | Pending | Clean security scan, end-to-end test pass, complete documentation package. |
+| **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | **Completed** | Multi-channel notification preferences, SMTP integration, institutional analytics dashboards, exam score distribution, and CSV export verified with 16/16 backend tests and clean frontend build. |
+| **Phase 8** | Polish, Hardening & Production Verification (E2E tests, Security audit, Seeding) | **In Progress (Active)** | Clean security scan, end-to-end test pass, complete documentation package, seed data verification. |
 
 ---
 
@@ -134,9 +134,31 @@
 
 ---
 
-## Next Actions (Phase 7: Notifications & Analytics)
-1. Multi-channel notification preferences and system alerts (in-app + SMTP templates).
-2. Institutional analytics endpoints and aggregate queries (enrollment stats, course pass rates, exam score distributions, student performance trends).
-3. Analytics dashboard views for administrators and instructors (`/admin/analytics`, `/courses/:id/analytics`).
-4. Automated report generation and CSV export.
-5. End-to-end verification, tests, and documentation sync.
+### Phase 7: Notifications & Analytics
+- **Status:** Completed
+- **Achievements:**
+  - **Notification Preferences & Multi-Channel Delivery:** Created `NotificationPreference` database model and migration (`9efc83260dbd`) for user-configurable channel preferences (`email_notifications`, `in_app_notifications`, `announcement_emails`, `grade_alert_emails`, `exam_alert_emails`). Integrated multi-channel transactional email dispatch via `get_mailer()` on assignment grading and exam score publishing.
+  - **Institutional Analytics Engine:** Implemented `/api/v1/analytics/overview` calculating system-wide key metrics: student, faculty, department, course, and exam totals, pass rates, department enrollment distribution, and audit activity stream.
+  - **Course & Exam Analytics:**
+    - Course-level analytics endpoint (`/api/v1/analytics/courses/{id}`) for completion rates, assignment score averages, exam performance averages, and grade distributions.
+    - Exam-level analytics endpoint (`/api/v1/analytics/exams/{id}`) with score bracket histograms (`0-40`, `41-60`, `61-80`, `81-100`), statistical summaries (mean, median, min, max), pass rates, and proctoring violation telemetry counts.
+  - **Student Personal Analytics:** Implemented `/api/v1/analytics/student/me` computing student-specific KPIs: courses enrolled, submitted vs pending assignments, upcoming exams, and recent score achievements.
+  - **CSV Results Export:** Added `/api/v1/exams/{id}/export-results` producing downloadable CSV spreadsheets of student attempt scores, percentages, pass/fail statuses, and completion timestamps.
+  - **Frontend Dashboards & Preferences UI:**
+    - `InstitutionalAnalytics.tsx`: Executive KPI grid, department enrollment visual bars, and live audit event log table.
+    - `StudentDashboard.tsx`: Personalized student KPI scorecard and recent evaluated work list.
+    - `ExamAnalyticsView.tsx`: Integrated as a dedicated tab in `ExamDetail.tsx` with score distribution histograms, summary statistics, violation telemetry, and one-click "Export Results (CSV)" download.
+    - `NotificationPreferencesModal.tsx`: User modal launched from the topbar notifications popover for granular alert toggles.
+    - `DashboardPage` in `app/router.tsx`: Dynamic role-based dashboard rendering institutional analytics for faculty/admin and academic scorecard for students.
+  - **Verification:** 16/16 backend test suites passing (`test_notifications_and_analytics.py` verifying preference updates, institutional analytics, exam analytics, student metrics, and CSV export); frontend production build verified (`0 errors`).
+
+---
+
+## Next Actions (Phase 8: Polish, Hardening & Production Verification)
+1. Comprehensive database seed script (`scripts/seed.py`) with complete realistic demo data across all roles, departments, courses, questions, exams, assignments, and submissions.
+2. Institution branding and system configuration verification (institutional name, branding customization, theme enforcement).
+3. Security hardening audit: HTTP security headers, CORS verification, rate-limiting, and validation bounds.
+4. Comprehensive test execution across all test suites and full frontend production build.
+5. Complete documentation synchronization (`docs/architecture.md`, `docs/development.md`, `docs/decisions.md`, `docs/memory.md`, `docs/progress.md`).
+6. Final repository verification and git commit.
+

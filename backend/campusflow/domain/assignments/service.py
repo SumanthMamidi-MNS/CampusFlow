@@ -32,6 +32,7 @@ from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.notifications.service import (
     create_notification,
     create_notifications_bulk,
+    send_notification_email_if_enabled,
 )
 from campusflow.domain.users.models import User
 
@@ -542,6 +543,14 @@ async def grade_submission(
         notification_type="submission_graded",
         link=f"/courses/{assignment.course_offering_id}?tab=assignments",
     )
+    await send_notification_email_if_enabled(
+        db=db,
+        user_id=submission.student_id,
+        category="grades",
+        subject=f"Assignment Graded: {assignment.title}",
+        body_text=f"Your submission for '{assignment.title}' was graded. Score: {final_marks}/{assignment.total_marks}.",
+    )
+
 
     await record_audit_event(
         db=db,
