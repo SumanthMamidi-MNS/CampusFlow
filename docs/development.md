@@ -8,9 +8,45 @@
 
 ---
 
-## 2. Quickstart with Docker Compose
+## 2. One-Click Local Development Startup System
 
-To start the full stack including PostgreSQL, Redis, Mailpit, Backend, and Frontend:
+For the fastest local development experience on Windows, use the dedicated one-click automation scripts located in the `startup/` directory:
+
+### Starting the Full Stack
+Double-click `startup/start-campusflow.bat` or run it via your IDE's Run/Play button:
+
+```bat
+startup\start-campusflow.bat
+```
+
+**What it automates:**
+1. Dynamically detects repository root (no hardcoded machine paths).
+2. Verifies required tools (`docker`, `docker compose`, `python`/`uv`, `node`, `npm`).
+3. Checks if CampusFlow is already running to prevent redundant duplicate processes.
+4. Starts Docker infrastructure services (`postgres`, `redis`, `mailpit`).
+5. Launches FastAPI backend on port 8000 in a dedicated titled window (`CampusFlow Backend`) with live reload and tracks its PID.
+6. Launches Vite frontend on port 5173 in a dedicated titled window (`CampusFlow Frontend`) and tracks its PID.
+7. Performs automated HTTP readiness polling on `http://localhost:8000/api/health` and `http://localhost:5173`.
+8. Automatically opens `http://localhost:5173` in Google Chrome when readiness is confirmed.
+
+### Stopping the Full Stack
+Double-click `startup/stop-campusflow.bat` or run:
+
+```bat
+startup\stop-campusflow.bat
+```
+
+**What it cleanly terminates:**
+1. Gracefully terminates the backend and frontend process trees using tracked PIDs (does not blindly kill unrelated system Python/Node processes).
+2. Releases and frees ports 8000 and 5173.
+3. Stops Docker containers (`postgres`, `redis`, `mailpit`) while preserving database state.
+4. Cleans up temporary PID tracking files.
+
+---
+
+## 3. Quickstart with Docker Compose
+
+To start the full stack entirely inside Docker containers including PostgreSQL, Redis, Mailpit, Backend, and Frontend:
 
 ```bash
 docker compose up --build
@@ -26,7 +62,7 @@ docker compose up --build
 
 ---
 
-## 3. Local Backend Development
+## 4. Local Backend Development
 
 ### Environment Setup
 ```bash
@@ -79,7 +115,7 @@ ruff format .
 
 ---
 
-## 4. Local Frontend Development
+## 5. Local Frontend Development
 
 ### Environment Setup
 ```bash
@@ -106,7 +142,7 @@ npm run lint
 
 ---
 
-## 5. Seed Data & Database Initialization
+## 6. Seed Data & Database Initialization
 
 A comprehensive, realistic demo seeder is provided in `scripts/seed.py`:
 ```bash
@@ -133,7 +169,7 @@ uv run python ../scripts/seed.py
 
 ---
 
-## 6. Production Deployment Strategy
+## 7. Production Deployment Strategy
 
 1. **Containers:** Backend and frontend images are built via multi-stage Dockerfiles.
 2. **Reverse Proxy:** A production reverse proxy (e.g. Caddy or Nginx) terminates SSL/TLS, routes `/api/*` to the FastAPI backend, and serves static frontend assets directly.

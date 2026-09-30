@@ -25,6 +25,12 @@ This document preserves durable technical context, implementation constraints, a
 - **Windows Console Encoding:** When running standalone utility scripts (e.g. `scripts/seed.py`), Windows console defaults to `cp1252`. Ensure `sys.stdout.reconfigure(encoding="utf-8")` is called or stick to ASCII markers to prevent `UnicodeEncodeError`.
 - **Audit Logging Signature:** `record_audit_event` in `campusflow.bedrock.audit.service` takes `action`, `resource_type`, `resource_id`, and `user_id` (not `actor_id`). Always pass keyword arguments matching this signature.
 
+### Windows Batch & Local Startup Automation (`startup/*.bat`)
+- **Parentheses in Batch Blocks:** Inside `if (...)` or `for (...)` compound blocks in `cmd.exe`, an unescaped closing parenthesis `)` immediately terminates the compound block, causing syntax errors on subsequent text. Never use literal parentheses in `echo` statements inside compound blocks; use square brackets `[...]` instead (e.g. `echo [OK] Backend ready [HTTP 200].`).
+- **Sleep in Automated / Redirected Shells:** `timeout.exe` fails with `ERROR: Input redirection is not supported` when executed in non-interactive subshells, automated test runners, or IDE tasks. Use `ping 127.0.0.1 -n <N> >nul` for reliable, non-blocking sleeps in Windows batch scripts.
+- **Process ID File Encoding:** When capturing process IDs from PowerShell into file (e.g. `.backend.pid`), standard `>` redirection in Windows PowerShell 5.1 writes UTF-16 LE with BOM, which causes `set /p` in batch to misread the PID with null bytes. Always use `[IO.File]::WriteAllText(path, $p.Id)` or `Out-File -Encoding ascii` to generate clean single-line ASCII files.
+- **Google Chrome Path Discovery:** Chrome can be installed in `%ProgramFiles%\Google\Chrome\Application\chrome.exe`, `%ProgramFiles(x86)%\...`, or `%LOCALAPPDATA%\...`. Check all three candidate locations before falling back to `start chrome <url>`.
+
 ### Frontend (React 19, Tailwind CSS v4, TypeScript)
 - **Tailwind CSS v4:** Configuration uses `@import "tailwindcss";` in `src/index.css` with the `@tailwindcss/vite` plugin.
 - **TypeScript Aliases:** The path alias `@/*` maps to `./src/*` across both `tsconfig.app.json` and `vite.config.ts`. In `vite.config.ts`, use ESM `fileURLToPath(new URL('./src', import.meta.url))` to avoid Node `__dirname` deprecation warnings.

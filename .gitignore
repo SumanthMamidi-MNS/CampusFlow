@@ -62,8 +62,9 @@ coverage.xml
 .pytest_cache/
 .mypy_cache/
 
-# Logs
+# Logs & Runtime PIDs
 *.log
+*.pid
 
 # Alembic
 alembic/versions/__pycache__/
