@@ -16,6 +16,7 @@ from campusflow.domain.assignments.router import router as assignments_router
 from campusflow.domain.courses.router import router as courses_router
 from campusflow.domain.departments.router import router as departments_router
 from campusflow.domain.enrollments.router import router as enrollments_router
+from campusflow.domain.exams.router import router as exams_router
 from campusflow.domain.materials.router import router as materials_router
 from campusflow.domain.notifications.router import router as notifications_router
 from campusflow.domain.question_banks.router import router as question_banks_router
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(assignments_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
     app.include_router(question_banks_router, prefix="/api/v1")
+    app.include_router(exams_router, prefix="/api/v1")
 
     return app
 

@@ -9,8 +9,8 @@
 | **Phase 2** | Academic Structure & Course Management (Depts, Batches, Terms, Courses, Materials) | **Completed** | Academic hierarchy, Course offerings, Materials storage, Announcements, and Enrollment flows verified with 10/10 tests and clean UI build. |
 | **Phase 3** | Assignments & Grading (Submission flows, Gradebook, Rubrics) | **Completed** | Assignment publishing, student file uploads, deadline/late penalty calculations, grading workflows, in-app notifications, and CSV gradebook exports verified with 11/11 tests. |
 | **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | **Completed** | Full suite of question types editable, validated, and bulk-importable; 12/12 backend tests passing; clean UI build. |
-| **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | **In Progress (Next)** | End-to-end exam lifecycle, network resilience, and scoring validated. |
-| **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | Pending | Violation telemetry logged and faculty proctor review interface operating. |
+| **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | **Completed** | Complete exam lifecycle works end-to-end: schedule -> delivery -> auto-save -> auto-grading -> manual grading -> results; 13/13 tests passing; clean UI build. |
+| **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | **In Progress (Next)** | Violation telemetry logged and faculty proctor review interface operating. |
 | **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | Pending | Notifications dispatched; administrative dashboards and report exports working. |
 | **Phase 8** | Polish, Hardening & Production Verification (E2E tests, Security audit, Seeding) | Pending | Clean security scan, end-to-end test pass, complete documentation package. |
 
@@ -94,10 +94,27 @@
 
 ---
 
-## Next Actions (Phase 5: Examination Core)
-1. Design and implement Examination models: `Exam`, `ExamSection`, `ExamQuestion`, `ExamAttempt`, `ExamAnswer`.
-2. Implement Exam scheduling (start/end windows, strict duration, attempts allowed, shuffle questions/options, access code).
-3. Build Exam delivery engine: attempt initiation, question pagination, real-time client auto-save endpoint (`PUT /api/v1/exams/{id}/attempts/{attempt_id}/answers`), and submission finalizing.
-4. Build auto-grading engine for objective questions (MCQ, MSQ, True/False, Numerical) and manual grading queue for descriptive questions.
-5. Create frontend exam management interface for faculty/controllers, and high-focus student exam-taking interface.
-6. Verify with automated test suite and advance to Phase 6 (Observable Proctoring).
+### Phase 5: Examination Core
+- **Status:** Completed
+- **Achievements:**
+  - **Examination Domain Models:** Created `Exam`, `ExamSection`, `ExamQuestion`, `ExamAttempt`, `ExamResponse`, and `ProctoringEvent` models supporting sections, question ordering, marks overrides, attempt tracking, and proctoring logs.
+  - **Exam Scheduling & Configuration:** Built exam lifecycle state machine (`draft` -> `scheduled` -> `live` -> `completed` -> `graded` -> `published`) with time window enforcement, duration limits, proctoring toggles, and question shuffling flags.
+  - **Exam Delivery Engine & Auto-Save:** Implemented student delivery interface (`POST /api/v1/exams/{id}/start`) with server-side duration validation, elapsed time calculation, and safe question serialization hiding correct options. Built batch answer auto-save (`PUT /api/v1/exam-attempts/{id}/answers`) with debounced cloud sync and localStorage client fallback.
+  - **Immediate Auto-Grading Engine:** Built deterministic scoring for objective questions: MCQ (single choice exact match), MSQ (multiple select exact set match), True/False, Numerical (value within tolerance), and Fill in the Blank (case-insensitive accepted list match), with negative marking penalty support.
+  - **Manual Grading Queue & Results Publishing:** Built instructor manual grading interface (`POST /api/v1/exam-responses/{id}/grade`) for evaluating subjective Short Answer and Essay responses. Implemented results publishing (`POST /api/v1/exams/{id}/publish`) with student in-app notifications and official scorecards.
+  - **Database Migrations:** Generated and applied migration `46aa846025a3_create_exams_and_proctoring_tables.py` bringing total active PostgreSQL tables to 32.
+  - **Frontend Examination UI:**
+    - `ExamsIndexPage` (`/exams`): Responsive grid of scheduled, live, and completed examinations with status filters, timing indicators, and exam creation modal.
+    - `ExamDetailPage` (`/exams/:id`): Exam management workspace with question inventory, question bank import modal, and student attempts grading queue.
+    - `ExamTakePage` (`/exams/:id/take`): Focused, full-screen student testing canvas with live countdown timer, question navigator palette (answered/unanswered/flagged), multiple response inputs, and auto-save indicators.
+    - `ExamResultPage` (`/exams/:id/results`): Performance scorecard with score, percentage, pass/fail status, and question-by-question review.
+  - **Verification:** 13/13 backend tests passing (`test_exams_core.py` verifying full lifecycle, auto-save, auto-grading, manual grading, and results publishing); clean frontend Vite production build.
+
+---
+
+## Next Actions (Phase 6: Proctoring & Exam Security)
+1. Build Proctoring event ingestion endpoint (`POST /api/v1/exam-attempts/{attempt_id}/proctoring-events`) supporting event types: `tab_switch`, `window_blur`, `fullscreen_exit`, `copy_paste_attempt`, `context_menu`.
+2. Implement violation thresholds engine: automatic warning dispatch and auto-submit when maximum violation limit is reached.
+3. Build client-side lockdown listeners in `ExamDelivery` (fullscreen lock, visibilitychange, blur, disable context menu and copy/paste shortcuts).
+4. Implement faculty proctor timeline review UI per student attempt showing event chronological trail and severity.
+5. Write automated tests for proctoring event ingestion and violation auto-submit, verify frontend build, and commit Phase 6.

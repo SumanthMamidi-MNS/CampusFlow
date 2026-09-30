@@ -8,6 +8,10 @@ import { CourseDetailPage } from './routes/courses/detail';
 import { AcademicAdminPage } from './routes/admin/academic';
 import { QuestionBanksIndexPage } from './routes/question-banks/index';
 import { QuestionBankDetailPage } from './routes/question-banks/detail';
+import { ExamsIndexPage } from './routes/exams/index';
+import { ExamDetailPage } from './routes/exams/detail';
+import { ExamTakePage } from './routes/exams/take';
+import { ExamResultPage } from './routes/exams/results';
 
 function DashboardPage() {
   return (
@@ -95,7 +99,27 @@ export const router = createBrowserRouter([
               </RoleGuard>
             ),
           },
+          {
+            path: '/exams',
+            element: <ExamsIndexPage />,
+          },
+          {
+            path: '/exams/:id',
+            element: (
+              <RoleGuard allowedRoles={['admin', 'super_admin', 'faculty', 'exam_controller', 'department_head']}>
+                <ExamDetailPage />
+              </RoleGuard>
+            ),
+          },
+          {
+            path: '/exams/:id/results',
+            element: <ExamResultPage />,
+          },
         ],
+      },
+      {
+        path: '/exams/:id/take',
+        element: <ExamTakePage />,
       },
     ],
   },
