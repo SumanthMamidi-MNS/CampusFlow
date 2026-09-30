@@ -1,0 +1,5 @@
+/* Institution branding tokens — loaded from API in production */
+:root {
+  --institution-primary: #2563eb;
+  --institution-name: 'CampusFlow';
+}
