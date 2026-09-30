@@ -12,15 +12,19 @@ This document preserves durable technical context, implementation constraints, a
 - Remember path quoting when dealing with paths containing spaces (e.g. `Anti Gravity`).
 - Use cross-platform path handling in Python (`pathlib.Path`).
 
-### Python & Database (SQLAlchemy 2.x Async)
+### Python & Database (SQLAlchemy 2.x Async & Alembic)
 - **SQLAlchemy 2.0+ Async Style:** All models must use the modern `Mapped[...]` and `mapped_column(...)` declarative syntax.
-- **Async Engine:** Always use `asyncpg` as the database driver (`postgresql+asyncpg://...`).
-- **Session Lifecycle:** Always use the async generator dependency `get_db()` which guarantees proper transaction commit/rollback and connection closure.
+- **Async Engine:** Always use `asyncpg` as the database driver (`postgresql+asyncpg://...`). Ensure `greenlet` is installed.
+- **Async Relationship Loading:** In async SQLAlchemy, accessing or assigning to relationship collections (e.g. `role.permissions = [...]`) triggers implicit lazy queries unless eagerly loaded with `selectinload(Role.permissions)`. Always use `selectinload` or perform direct SQL joins.
+- **SQLite In-Memory Testing:** SQLite returns naive datetimes for `DateTime(timezone=True)` columns. When performing time comparisons in services (e.g. token expiration checks), normalize with `if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)` to prevent `TypeError: can't compare offset-naive and offset-aware datetimes`.
+- **PostgreSQL 15+ Schema Permissions:** PostgreSQL 15+ restricts the default `public` schema. Ensure the application user is granted schema access:
+  `GRANT ALL ON SCHEMA public TO campusflow; ALTER SCHEMA public OWNER TO campusflow;`
+- **Alembic Autogenerate Discovery:** In `alembic/env.py`, import all models with `# noqa: F401` so Ruff does not strip them as unused imports, ensuring `target_metadata = Base.metadata` registers all tables.
 - **Pydantic Settings v2:** `SettingsConfigDict` is configured with `case_sensitive=False` and no prefix, allowing standard environment variables (`DATABASE_URL`, `REDIS_URL`, `DEBUG`, etc.) to map directly to settings fields without prefix duplication.
 
 ### Frontend (React 19, Tailwind CSS v4, TypeScript)
 - **Tailwind CSS v4:** Configuration uses `@import "tailwindcss";` in `src/index.css` with the `@tailwindcss/vite` plugin.
-- **TypeScript Aliases:** The path alias `@/*` maps to `./src/*` across both `tsconfig.app.json` and `vite.config.ts`.
+- **TypeScript Aliases:** The path alias `@/*` maps to `./src/*` across both `tsconfig.app.json` and `vite.config.ts`. In `vite.config.ts`, use ESM `fileURLToPath(new URL('./src', import.meta.url))` to avoid Node `__dirname` deprecation warnings.
 - **UI Guidelines:** Maintain institutional light-theme styling. Do not introduce dark or neon themes.
 - **Client Resilience:** In examination flows, persist unsaved answer drafts in browser `localStorage` as a fallback against network dropouts.
 

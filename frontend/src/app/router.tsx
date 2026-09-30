@@ -1,29 +1,35 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { RootLayout } from './routes/_layout';
-import { ProtectedRoute } from '@/core/auth/guard';
+import { ProtectedRoute, RoleGuard } from '@/core/auth/guard';
+import { LoginPage } from './routes/auth/login';
+import { UsersAdminPage } from './routes/admin/users';
 
 function DashboardPage() {
   return (
-    <div>
-      <h1 className="text-2xl font-bold">Welcome to CampusFlow</h1>
-      <p className="mt-2 text-muted-foreground">
-        Your college learning management and examination platform.
-      </p>
-    </div>
-  );
-}
-
-function LoginPage() {
-  return (
-    <div className="flex h-screen items-center justify-center">
-      <div className="w-full max-w-md space-y-6 rounded-lg border p-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">CampusFlow</h1>
-          <p className="text-sm text-muted-foreground">Sign in to your account</p>
-        </div>
-        <p className="text-center text-sm text-muted-foreground">
-          Login form coming in Phase 1
+    <div className="space-y-4 max-w-7xl mx-auto">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
+        <h1 className="text-2xl font-bold text-slate-900">Welcome to CampusFlow</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Your institution-grade learning management and secure online examination portal.
         </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+          <h3 className="text-sm font-semibold text-slate-700">Course Offerings</h3>
+          <p className="text-2xl font-bold text-blue-600 mt-2">Active</p>
+          <p className="text-xs text-slate-400 mt-1">Syllabus, lectures, and digital resources</p>
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+          <h3 className="text-sm font-semibold text-slate-700">Examinations</h3>
+          <p className="text-2xl font-bold text-emerald-600 mt-2">Scheduled</p>
+          <p className="text-xs text-slate-400 mt-1">Secure tests with observable proctoring</p>
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+          <h3 className="text-sm font-semibold text-slate-700">Assignments</h3>
+          <p className="text-2xl font-bold text-indigo-600 mt-2">Tasks & Labs</p>
+          <p className="text-xs text-slate-400 mt-1">Rubrics, submissions, and gradebook</p>
+        </div>
       </div>
     </div>
   );
@@ -43,6 +49,14 @@ export const router = createBrowserRouter([
           {
             path: '/',
             element: <DashboardPage />,
+          },
+          {
+            path: '/admin/users',
+            element: (
+              <RoleGuard allowedRoles={['admin', 'super_admin']}>
+                <UsersAdminPage />
+              </RoleGuard>
+            ),
           },
         ],
       },

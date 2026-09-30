@@ -1,18 +1,56 @@
+import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
-from campusflow.bedrock.config.settings import get_settings
-from campusflow.bedrock.middleware.request_id import RequestIDMiddleware
 from campusflow.bedrock.api.errors import register_exception_handlers
+from campusflow.bedrock.audit.router import router as audit_router
+from campusflow.bedrock.config.settings import get_settings
+from campusflow.bedrock.db.session import async_session_factory
+from campusflow.bedrock.middleware.request_id import RequestIDMiddleware
+from campusflow.bedrock.rbac.service import seed_roles_and_permissions
+from campusflow.domain.users.auth_router import router as auth_router
+from campusflow.domain.users.router import router as users_router
+
+logger = logging.getLogger("campusflow")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
-    # Startup: initialize DB pool, Redis, etc.
+    # Seed roles and permissions
+    try:
+        async with async_session_factory() as session:
+            await seed_roles_and_permissions(session)
+
+            # Check if default super admin exists
+            from campusflow.domain.users.models import User
+            from campusflow.domain.users.schemas import UserCreate
+            from campusflow.domain.users.service import create_user
+
+            admin_res = await session.execute(
+                select(User).where(User.email == "admin@campusflow.edu")
+            )
+            admin = admin_res.scalar_one_or_none()
+            if not admin:
+                logger.info("Creating initial superadmin user: admin@campusflow.edu")
+                await create_user(
+                    session,
+                    UserCreate(
+                        email="admin@campusflow.edu",
+                        password="Admin@CampusFlow2026",
+                        first_name="System",
+                        last_name="Administrator",
+                        roles=["super_admin", "admin"],
+                        status="active",
+                    ),
+                )
+    except Exception as exc:
+        logger.warning("Database seeding skipped or deferred during startup: %s", exc)
+
     yield
-    # Shutdown: close connections
 
 
 def create_app() -> FastAPI:
@@ -45,6 +83,11 @@ def create_app() -> FastAPI:
     @app.get("/api/health", tags=["system"])
     async def health_check():
         return {"status": "healthy", "service": "campusflow"}
+
+    # Register API v1 routers
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(users_router, prefix="/api/v1")
+    app.include_router(audit_router, prefix="/api/v1")
 
     return app
 

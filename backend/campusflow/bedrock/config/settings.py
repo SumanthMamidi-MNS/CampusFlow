@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
-    cors_origins: List[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["http://localhost:5173"]
     storage_backend: str = "local"
     storage_local_path: str = "./storage"
     email_backend: str = "console"
@@ -25,6 +25,6 @@ class Settings(BaseSettings):
     )
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     return Settings()
