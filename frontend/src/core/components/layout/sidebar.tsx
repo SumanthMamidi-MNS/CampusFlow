@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Users,
   Settings,
+  Building2,
   GraduationCap,
   ChevronLeft,
   ChevronRight,
@@ -26,9 +27,10 @@ const navItems: NavItem[] = [
   { label: 'Courses', href: '/courses', icon: BookOpen },
   { label: 'Assignments', href: '/assignments', icon: FileEdit },
   { label: 'Exams', href: '/exams', icon: ClipboardList },
-  { label: 'Question Banks', href: '/question-banks', icon: GraduationCap, roles: ['admin', 'faculty', 'exam_controller'] },
-  { label: 'Users', href: '/admin/users', icon: Users, roles: ['admin'] },
-  { label: 'Settings', href: '/admin/settings', icon: Settings, roles: ['admin'] },
+  { label: 'Question Banks', href: '/question-banks', icon: GraduationCap, roles: ['admin', 'super_admin', 'faculty', 'exam_controller'] },
+  { label: 'Users', href: '/admin/users', icon: Users, roles: ['admin', 'super_admin'] },
+  { label: 'Academics', href: '/admin/academic', icon: Building2, roles: ['admin', 'super_admin', 'department_head'] },
+  { label: 'Settings', href: '/admin/settings', icon: Settings, roles: ['admin', 'super_admin'] },
 ];
 
 export function Sidebar() {

@@ -33,4 +33,4 @@ extend-exclude = ["alembic"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "UP", "B", "A", "SIM"]
-ignore = ["B008", "N818"]
+ignore = ["B008", "N818", "E501"]

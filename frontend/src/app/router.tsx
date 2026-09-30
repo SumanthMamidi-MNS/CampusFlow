@@ -3,6 +3,9 @@ import { RootLayout } from './routes/_layout';
 import { ProtectedRoute, RoleGuard } from '@/core/auth/guard';
 import { LoginPage } from './routes/auth/login';
 import { UsersAdminPage } from './routes/admin/users';
+import { CoursesListPage } from './routes/courses/index';
+import { CourseDetailPage } from './routes/courses/detail';
+import { AcademicAdminPage } from './routes/admin/academic';
 
 function DashboardPage() {
   return (
@@ -51,10 +54,26 @@ export const router = createBrowserRouter([
             element: <DashboardPage />,
           },
           {
+            path: '/courses',
+            element: <CoursesListPage />,
+          },
+          {
+            path: '/courses/:id',
+            element: <CourseDetailPage />,
+          },
+          {
             path: '/admin/users',
             element: (
               <RoleGuard allowedRoles={['admin', 'super_admin']}>
                 <UsersAdminPage />
+              </RoleGuard>
+            ),
+          },
+          {
+            path: '/admin/academic',
+            element: (
+              <RoleGuard allowedRoles={['admin', 'super_admin', 'department_head']}>
+                <AcademicAdminPage />
               </RoleGuard>
             ),
           },

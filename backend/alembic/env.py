@@ -12,6 +12,13 @@ import campusflow.bedrock.audit.models  # noqa: F401
 import campusflow.bedrock.auth.models  # noqa: F401
 import campusflow.bedrock.rbac.models  # noqa: F401
 import campusflow.domain.users.models  # noqa: F401
+import campusflow.domain.institution.models  # noqa: F401
+import campusflow.domain.departments.models  # noqa: F401
+import campusflow.domain.academic_terms.models  # noqa: F401
+import campusflow.domain.courses.models  # noqa: F401
+import campusflow.domain.enrollments.models  # noqa: F401
+import campusflow.domain.materials.models  # noqa: F401
+import campusflow.domain.announcements.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

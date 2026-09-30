@@ -6,8 +6,8 @@
 |---|---|---|---|
 | **Phase 0** | Project Bootstrap (FastAPI skeleton, React SPA, Docker, Bedrock layout) | **Completed** | Full build passed; Docker Compose configured; Git repository initialized. |
 | **Phase 1** | Foundation & Auth (Bedrock models, JWT auth, RBAC, Audit, User CRUD, Auth UI) | **Completed** | Auth, RBAC, User lifecycle, Audit tests passing (9/9 unit tests); Frontend build clean; Alembic migrations applied to PostgreSQL. |
-| **Phase 2** | Academic Structure & Course Management (Depts, Batches, Terms, Courses, Materials) | **In Progress (Next)** | Academic hierarchy, Course offerings, and Enrollment flows verified. |
-| **Phase 3** | Assignments & Grading (Submission flows, Gradebook, Notifications) | Pending | Assignment submission, rubric/manual grading, and gradebook exports working. |
+| **Phase 2** | Academic Structure & Course Management (Depts, Batches, Terms, Courses, Materials) | **Completed** | Academic hierarchy, Course offerings, Materials storage, Announcements, and Enrollment flows verified with 10/10 tests and clean UI build. |
+| **Phase 3** | Assignments & Grading (Submission flows, Gradebook, Rubrics) | **In Progress (Next)** | Assignment submission, rubric/manual grading, and gradebook exports working. |
 | **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | Pending | Full suite of question types editable, validated, and bulk-importable. |
 | **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | Pending | End-to-end exam lifecycle, network resilience, and scoring validated. |
 | **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | Pending | Violation telemetry logged and faculty proctor review interface operating. |
@@ -43,23 +43,35 @@
   - **Verification:** 9 backend unit & integration tests passing (`test_auth.py`, `test_users.py`, `test_audit.py`, `test_health.py`); frontend build verified (`0 errors`).
 
 ### Phase 2: Academic Structure & Course Management
+- **Status:** Completed
+- **Achievements:**
+  - **Academic Structure Hierarchy:** Implemented models, schemas, and routers for `Department`, `Program`, `Batch`, and `AcademicTerm` under `/api/v1/academic`.
+  - **Courses & Course Offerings:** Implemented `Course` catalog definitions, `CourseOffering` (terms, sections, batches), and `FacultyAssignment` with primary instructor designations under `/api/v1/courses`.
+  - **Enrollments Subsystem:** Implemented `Enrollment` model supporting `enrolled`, `waitlisted`, and `dropped` statuses. Built single-student enrollment, roster retrieval, and CSV bulk enrollment under `/api/v1/enrollments`.
+  - **Learning Materials:** Built hierarchical `MaterialFolder` and `Material` subsystem supporting URLs, text notes, and file attachments with multipart upload and streaming downloads via `StorageBackend` under `/api/v1/materials`.
+  - **Announcements:** Implemented course-level announcements with pinning support under `/api/v1/announcements`.
+  - **Database Migrations:** Generated and applied migration `17c2a4ccd9f2_create_academic_structure_and_courses_tables.py` bringing total active PostgreSQL tables to 20.
+  - **Frontend Course & Academic UI:**
+    - `CoursesPage` (`/courses`): Catalog grid of course offerings with search, status filters, and enrollment counts.
+    - `CourseDetailPage` (`/courses/:id`): Tabbed course workspace with Announcements feed, nested Folder/Material file explorer with downloads, and Student Roster.
+    - `AcademicAdminPage` (`/admin/academic`): Department, Program, and Academic Term configuration.
+  - **Verification:** 10/10 automated tests passing; frontend TypeScript & Tailwind build verified (`0 errors`).
+
+### Phase 3: Assignments & Grading
 - **Status:** In Progress (Next)
 - **Scope & Objectives:**
-  - **Academic Hierarchy:** Departments, Programs, Batches, Academic Terms.
-  - **Courses & Offerings:** Course definitions, CourseOfferings (sections, batches, terms), Faculty assignment.
-  - **Enrollment Management:** Student enrollment roster, bulk enrollment via CSV, enrollment status.
-  - **Learning Materials:** Folder hierarchies, file and URL material publishing, file downloads via storage backend.
-  - **Announcements:** Course-level announcements feed.
-  - **Frontend UI:** Academic structure management, Course Offerings catalog, Course detail workspace, Materials browser, and Enrollment manager.
-  - **Verification:** Unit and integration test coverage for academic models, enrollment constraints, material uploads, and course access controls.
+  - **Assignment Lifecycle:** Creation, instructions, due dates, late-submission policies, max points, and rubric JSON.
+  - **Submissions Subsystem:** Student submissions supporting file uploads (PDF/ZIP/documents via StorageBackend) and rich text responses.
+  - **Grading Workflow:** Instructor grading interface, score assignment, feedback, rubric evaluation, and grade publishing.
+  - **Gradebook:** Course-level aggregate gradebook calculating student totals and status.
+  - **Verification:** Automated tests covering submission deadlines, late penalty calculations, grading workflows, and gradebook rollups.
 
 ---
 
 ## Next Actions
-1. Implement Domain Models for Academic Structure (`Department`, `Program`, `Batch`, `AcademicTerm`).
-2. Implement Domain Models for Courses and Offerings (`Course`, `CourseOffering`, `Enrollment`, `FacultyAssignment`).
-3. Implement Domain Models for Materials and Announcements (`MaterialFolder`, `Material`, `Announcement`).
-4. Build API schemas, services, and routers for Academic Structure, Courses, Materials, and Announcements.
-5. Generate and apply Alembic migration for Phase 2 entities.
-6. Build frontend feature modules for Academic Administration and Course Management.
-7. Write and run tests verifying course creation, enrollment rules, and material access.
+1. Implement Domain Models for Assignments, Submissions, and Grades (`Assignment`, `AssignmentSubmission`, `SubmissionGrade`).
+2. Build schemas, validation, services, and routers for assignment publishing, student uploads, and instructor grading.
+3. Generate and apply Alembic migration for Phase 3 tables.
+4. Build frontend assignment views: Assignment List, Student Submission Dialog with file attachment, Instructor Grading drawer/modal, and Course Gradebook tab.
+5. Write and execute backend automated test suite for Phase 3.
+6. Verify frontend build and commit Phase 3.
