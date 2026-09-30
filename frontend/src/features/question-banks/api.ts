@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/core/api/client';
+import type { ApiResponse } from '@/core/api/types';
 import type {
   BulkImportResult,
   Question,
@@ -18,8 +19,8 @@ export function useQuestionBanks(params?: { department_id?: string; course_id?: 
       if (params?.department_id) searchParams.set('department_id', params.department_id);
       if (params?.course_id) searchParams.set('course_id', params.course_id);
       const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
-      const res = await apiClient.get<QuestionBank[]>(`/question-banks${query}`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<QuestionBank[]>>(`/question-banks${query}`);
+      return res.data.data;
     },
   });
 }
@@ -28,8 +29,8 @@ export function useQuestionBank(bankId: string) {
   return useQuery({
     queryKey: ['question-bank', bankId],
     queryFn: async () => {
-      const res = await apiClient.get<QuestionBank>(`/question-banks/${bankId}`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<QuestionBank>>(`/question-banks/${bankId}`);
+      return res.data.data;
     },
     enabled: Boolean(bankId),
   });
@@ -39,8 +40,8 @@ export function useCreateQuestionBank() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: QuestionBankCreateInput) => {
-      const res = await apiClient.post<QuestionBank>('/question-banks', payload);
-      return res.data;
+      const res = await apiClient.post<ApiResponse<QuestionBank>>('/question-banks', payload);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['question-banks'] });
@@ -52,8 +53,8 @@ export function useDeleteQuestionBank() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (bankId: string) => {
-      const res = await apiClient.delete<{ message: string }>(`/question-banks/${bankId}`);
-      return res.data;
+      const res = await apiClient.delete<ApiResponse<{ message: string }>>(`/question-banks/${bankId}`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['question-banks'] });
@@ -82,8 +83,8 @@ export function useQuestions(
       if (filters?.search) searchParams.set('search', filters.search);
       const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
 
-      const res = await apiClient.get<Question[]>(`/question-banks/${bankId}/questions${query}`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<Question[]>>(`/question-banks/${bankId}/questions${query}`);
+      return res.data.data;
     },
     enabled: Boolean(bankId),
   });
@@ -93,11 +94,11 @@ export function useCreateQuestion(bankId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: QuestionCreateInput) => {
-      const res = await apiClient.post<Question>(
+      const res = await apiClient.post<ApiResponse<Question>>(
         `/question-banks/${bankId}/questions`,
         payload
       );
-      return res.data;
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions', bankId] });
@@ -111,8 +112,8 @@ export function useApproveQuestion(bankId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (questionId: string) => {
-      const res = await apiClient.post<Question>(`/questions/${questionId}/approve`);
-      return res.data;
+      const res = await apiClient.post<ApiResponse<Question>>(`/questions/${questionId}/approve`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions', bankId] });
@@ -124,8 +125,8 @@ export function useDeleteQuestion(bankId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (questionId: string) => {
-      const res = await apiClient.delete<{ message: string }>(`/questions/${questionId}`);
-      return res.data;
+      const res = await apiClient.delete<ApiResponse<{ message: string }>>(`/questions/${questionId}`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions', bankId] });
@@ -141,11 +142,11 @@ export function useBulkImportQuestions(bankId: string) {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await apiClient.post<BulkImportResult>(
+      const res = await apiClient.post<ApiResponse<BulkImportResult>>(
         `/question-banks/${bankId}/import-csv`,
         formData
       );
-      return res.data;
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions', bankId] });

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/core/api/client';
+import type { ApiResponse } from '@/core/api/types';
 import type {
   Exam,
   ExamAttemptSummary,
@@ -23,8 +24,8 @@ export function useExams(courseOfferingId?: string, status?: string) {
       if (courseOfferingId) searchParams.set('course_offering_id', courseOfferingId);
       if (status) searchParams.set('status', status);
       const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
-      const res = await apiClient.get<Exam[]>(`/exams${query}`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<Exam[]>>(`/exams${query}`);
+      return res.data.data;
     },
   });
 }
@@ -33,8 +34,8 @@ export function useExam(examId: string) {
   return useQuery({
     queryKey: ['exam', examId],
     queryFn: async () => {
-      const res = await apiClient.get<Exam>(`/exams/${examId}`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<Exam>>(`/exams/${examId}`);
+      return res.data.data;
     },
     enabled: Boolean(examId),
   });
@@ -44,8 +45,8 @@ export function useCreateExam() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: ExamCreateInput) => {
-      const res = await apiClient.post<Exam>('/exams', payload);
-      return res.data;
+      const res = await apiClient.post<ApiResponse<Exam>>('/exams', payload);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exams'] });
@@ -57,8 +58,8 @@ export function useUpdateExam(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: ExamUpdateInput) => {
-      const res = await apiClient.put<Exam>(`/exams/${examId}`, payload);
-      return res.data;
+      const res = await apiClient.put<ApiResponse<Exam>>(`/exams/${examId}`, payload);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam', examId] });
@@ -71,8 +72,8 @@ export function useDeleteExam() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (examId: string) => {
-      const res = await apiClient.delete<{ message: string }>(`/exams/${examId}`);
-      return res.data;
+      const res = await apiClient.delete<ApiResponse<{ message: string }>>(`/exams/${examId}`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exams'] });
@@ -84,8 +85,8 @@ export function useAddQuestionsToExam(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (questions: { question_id: string; marks_override?: number; sort_order?: number }[]) => {
-      const res = await apiClient.post<Exam>(`/exams/${examId}/questions`, { questions });
-      return res.data;
+      const res = await apiClient.post<ApiResponse<Exam>>(`/exams/${examId}/questions`, { questions });
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam', examId] });
@@ -98,8 +99,8 @@ export function useRemoveQuestionFromExam(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (examQuestionId: string) => {
-      const res = await apiClient.delete<{ message: string }>(`/exams/${examId}/questions/${examQuestionId}`);
-      return res.data;
+      const res = await apiClient.delete<ApiResponse<{ message: string }>>(`/exams/${examId}/questions/${examQuestionId}`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam', examId] });
@@ -113,10 +114,10 @@ export function useRemoveQuestionFromExam(examId: string) {
 export function useStartExam(examId: string) {
   return useMutation({
     mutationFn: async (fingerprint?: string) => {
-      const res = await apiClient.post<ExamDelivery>(`/exams/${examId}/start`, {
+      const res = await apiClient.post<ApiResponse<ExamDelivery>>(`/exams/${examId}/start`, {
         browser_fingerprint: fingerprint || null,
       });
-      return res.data;
+      return res.data.data;
     },
   });
 }
@@ -124,11 +125,11 @@ export function useStartExam(examId: string) {
 export function useSaveExamAnswers(attemptId: string) {
   return useMutation({
     mutationFn: async (answers: SaveAnswerPayload[]) => {
-      const res = await apiClient.put<{ status: string; count: number }>(
+      const res = await apiClient.put<ApiResponse<{ status: string; count: number }>>(
         `/exam-attempts/${attemptId}/answers`,
         { answers }
       );
-      return res.data;
+      return res.data.data;
     },
   });
 }
@@ -137,13 +138,13 @@ export function useSubmitExam(attemptId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await apiClient.post<{
+      const res = await apiClient.post<ApiResponse<{
         attempt_id: string;
         status: string;
         total_score: number | null;
         percentage: number | null;
-      }>(`/exam-attempts/${attemptId}/submit`);
-      return res.data;
+      }>>(`/exam-attempts/${attemptId}/submit`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-attempts'] });
@@ -158,8 +159,8 @@ export function useExamAttempts(examId: string) {
   return useQuery({
     queryKey: ['exam-attempts', examId],
     queryFn: async () => {
-      const res = await apiClient.get<ExamAttemptSummary[]>(`/exams/${examId}/attempts`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<ExamAttemptSummary[]>>(`/exams/${examId}/attempts`);
+      return res.data.data;
     },
     enabled: Boolean(examId),
   });
@@ -169,11 +170,11 @@ export function useGradeExamResponse(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ responseId, marksAwarded, feedback }: { responseId: string; marksAwarded: number; feedback?: string }) => {
-      const res = await apiClient.post<{ response_id: string; attempt_total_score: number; attempt_status: string }>(
+      const res = await apiClient.post<ApiResponse<{ response_id: string; attempt_total_score: number; attempt_status: string }>>(
         `/exam-responses/${responseId}/grade`,
         { marks_awarded: marksAwarded, feedback: feedback || null }
       );
-      return res.data;
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-attempts', examId] });
@@ -186,8 +187,8 @@ export function usePublishExamResults(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await apiClient.post<{ exam_id: string; status: string }>(`/exams/${examId}/publish`);
-      return res.data;
+      const res = await apiClient.post<ApiResponse<{ exam_id: string; status: string }>>(`/exams/${examId}/publish`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam', examId] });
@@ -200,8 +201,8 @@ export function useStudentExamResult(examId: string) {
   return useQuery({
     queryKey: ['my-result', examId],
     queryFn: async () => {
-      const res = await apiClient.get<StudentExamResult>(`/exams/${examId}/my-result`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<StudentExamResult>>(`/exams/${examId}/my-result`);
+      return res.data.data;
     },
     enabled: Boolean(examId),
     retry: false,
@@ -213,11 +214,11 @@ export function useStudentExamResult(examId: string) {
 export function useRecordProctoringEvent(attemptId: string) {
   return useMutation({
     mutationFn: async (payload: ProctoringEventCreate) => {
-      const res = await apiClient.post<ProctoringStatus>(
+      const res = await apiClient.post<ApiResponse<ProctoringStatus>>(
         `/exam-attempts/${attemptId}/proctoring-events`,
         payload
       );
-      return res.data;
+      return res.data.data;
     },
   });
 }
@@ -227,10 +228,10 @@ export function useProctoringTimeline(attemptId: string | null) {
     queryKey: ['proctoring-timeline', attemptId],
     queryFn: async () => {
       if (!attemptId) return [];
-      const res = await apiClient.get<ProctoringEvent[]>(
+      const res = await apiClient.get<ApiResponse<ProctoringEvent[]>>(
         `/exam-attempts/${attemptId}/proctoring-events`
       );
-      return res.data;
+      return res.data.data;
     },
     enabled: Boolean(attemptId),
   });

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/core/api/client';
+import type { ApiResponse } from '@/core/api/types';
 import type {
   Assignment,
   AssignmentSubmission,
@@ -12,10 +13,10 @@ export function useAssignments(offeringId: string) {
   return useQuery({
     queryKey: ['assignments', offeringId],
     queryFn: async () => {
-      const res = await apiClient.get<Assignment[]>(
+      const res = await apiClient.get<ApiResponse<Assignment[]>>(
         `/course-offerings/${offeringId}/assignments`
       );
-      return res.data;
+      return res.data.data;
     },
     enabled: Boolean(offeringId),
   });
@@ -25,11 +26,11 @@ export function useCreateAssignment(offeringId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: CreateAssignmentPayload) => {
-      const res = await apiClient.post<Assignment>(
+      const res = await apiClient.post<ApiResponse<Assignment>>(
         `/course-offerings/${offeringId}/assignments`,
         payload
       );
-      return res.data;
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments', offeringId] });
@@ -42,8 +43,8 @@ export function useDeleteAssignment(offeringId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (assignmentId: string) => {
-      const res = await apiClient.delete<{ deleted: boolean }>(`/assignments/${assignmentId}`);
-      return res.data;
+      const res = await apiClient.delete<ApiResponse<{ deleted: boolean }>>(`/assignments/${assignmentId}`);
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments', offeringId] });
@@ -56,11 +57,11 @@ export function useSubmitAssignmentText(assignmentId: string, offeringId: string
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (contentText: string) => {
-      const res = await apiClient.post<AssignmentSubmission>(
+      const res = await apiClient.post<ApiResponse<AssignmentSubmission>>(
         `/assignments/${assignmentId}/submit`,
         { content_text: contentText }
       );
-      return res.data;
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments', offeringId] });
@@ -79,11 +80,11 @@ export function useSubmitAssignmentFile(assignmentId: string, offeringId: string
       if (contentText) {
         formData.append('content_text', contentText);
       }
-      const res = await apiClient.post<AssignmentSubmission>(
+      const res = await apiClient.post<ApiResponse<AssignmentSubmission>>(
         `/assignments/${assignmentId}/submit-file`,
         formData
       );
-      return res.data;
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments', offeringId] });
@@ -97,10 +98,10 @@ export function useAssignmentSubmissions(assignmentId: string) {
   return useQuery({
     queryKey: ['submissions', assignmentId],
     queryFn: async () => {
-      const res = await apiClient.get<AssignmentSubmission[]>(
+      const res = await apiClient.get<ApiResponse<AssignmentSubmission[]>>(
         `/assignments/${assignmentId}/submissions`
       );
-      return res.data;
+      return res.data.data;
     },
     enabled: Boolean(assignmentId),
   });
@@ -120,7 +121,7 @@ export function useGradeSubmission(assignmentId: string, offeringId: string) {
       feedback?: string;
       rubricEvaluation?: Record<string, any>;
     }) => {
-      const res = await apiClient.post<SubmissionGrade>(
+      const res = await apiClient.post<ApiResponse<SubmissionGrade>>(
         `/submissions/${submissionId}/grade`,
         {
           marks_obtained: marksObtained,
@@ -128,7 +129,7 @@ export function useGradeSubmission(assignmentId: string, offeringId: string) {
           rubric_evaluation: rubricEvaluation,
         }
       );
-      return res.data;
+      return res.data.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['submissions', assignmentId] });
@@ -142,10 +143,10 @@ export function useGradebook(offeringId: string) {
   return useQuery({
     queryKey: ['gradebook', offeringId],
     queryFn: async () => {
-      const res = await apiClient.get<GradebookResponse>(
+      const res = await apiClient.get<ApiResponse<GradebookResponse>>(
         `/course-offerings/${offeringId}/gradebook`
       );
-      return res.data;
+      return res.data.data;
     },
     enabled: Boolean(offeringId),
   });

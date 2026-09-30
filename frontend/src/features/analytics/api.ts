@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/core/api/client';
+import type { ApiResponse } from '@/core/api/types';
 import type {
   CourseAnalytics,
   ExamAnalytics,
@@ -11,8 +12,8 @@ export function useInstitutionalOverview() {
   return useQuery({
     queryKey: ['analytics-overview'],
     queryFn: async () => {
-      const res = await apiClient.get<InstitutionalOverview>('/analytics/overview');
-      return res.data;
+      const res = await apiClient.get<ApiResponse<InstitutionalOverview>>('/analytics/overview');
+      return res.data.data;
     },
   });
 }
@@ -22,8 +23,8 @@ export function useCourseAnalytics(courseOfferingId?: string) {
     queryKey: ['course-analytics', courseOfferingId],
     queryFn: async () => {
       if (!courseOfferingId) return null;
-      const res = await apiClient.get<CourseAnalytics>(`/analytics/courses/${courseOfferingId}`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<CourseAnalytics>>(`/analytics/courses/${courseOfferingId}`);
+      return res.data.data;
     },
     enabled: Boolean(courseOfferingId),
   });
@@ -34,8 +35,8 @@ export function useExamAnalytics(examId?: string) {
     queryKey: ['exam-analytics', examId],
     queryFn: async () => {
       if (!examId) return null;
-      const res = await apiClient.get<ExamAnalytics>(`/analytics/exams/${examId}`);
-      return res.data;
+      const res = await apiClient.get<ApiResponse<ExamAnalytics>>(`/analytics/exams/${examId}`);
+      return res.data.data;
     },
     enabled: Boolean(examId),
   });
@@ -45,8 +46,8 @@ export function useStudentDashboardAnalytics() {
   return useQuery({
     queryKey: ['student-dashboard-analytics'],
     queryFn: async () => {
-      const res = await apiClient.get<StudentDashboardAnalytics>('/analytics/student/me');
-      return res.data;
+      const res = await apiClient.get<ApiResponse<StudentDashboardAnalytics>>('/analytics/student/me');
+      return res.data.data;
     },
   });
 }

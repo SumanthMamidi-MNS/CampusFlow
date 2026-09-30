@@ -109,7 +109,7 @@ export function InstitutionalAnalytics() {
           </div>
 
           <div className="space-y-4">
-            {overview.department_enrollment_breakdown.length === 0 ? (
+            {!overview.department_enrollment_breakdown || overview.department_enrollment_breakdown.length === 0 ? (
               <p className="text-xs text-slate-400 italic py-4">No department records found.</p>
             ) : (
               overview.department_enrollment_breakdown.map((dept) => {
@@ -155,7 +155,7 @@ export function InstitutionalAnalytics() {
           </div>
 
           <div className="space-y-3">
-            {overview.recent_activity.length === 0 ? (
+            {!overview.recent_activity || overview.recent_activity.length === 0 ? (
               <p className="text-xs text-slate-400 italic py-4">No recent activity logged.</p>
             ) : (
               overview.recent_activity.map((act) => (
