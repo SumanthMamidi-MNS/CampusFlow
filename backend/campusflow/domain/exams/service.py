@@ -864,7 +864,7 @@ async def get_student_exam_result(
         .order_by(desc(ExamAttempt.attempt_number))
     )
     res = await db.execute(query)
-    attempt = res.scalar_one_or_none()
+    attempt = res.scalars().first()
     if not attempt:
         raise NotFoundError("No exam attempt found for this student.")
 
