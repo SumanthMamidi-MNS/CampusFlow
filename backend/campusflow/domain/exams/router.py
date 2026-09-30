@@ -14,6 +14,7 @@ from campusflow.domain.exams.schemas import (
     ExamQuestionBatchAdd,
     ExamUpdate,
     GradeSingleResponseRequest,
+    ProctoringEventCreate,
     StartAttemptRequest,
 )
 from campusflow.domain.exams.service import (
@@ -21,11 +22,13 @@ from campusflow.domain.exams.service import (
     create_exam,
     delete_exam,
     get_exam,
+    get_proctoring_timeline,
     get_student_exam_result,
     grade_attempt_response,
     list_attempts_for_exam,
     list_exams,
     publish_exam_results,
+    record_proctoring_event,
     remove_question_from_exam,
     save_answers_batch,
     start_or_resume_attempt,
@@ -253,3 +256,31 @@ async def get_my_exam_result_endpoint(
 ):
     result = await get_student_exam_result(db, exam_id=exam_id, student_user=current_user)
     return success_response(result.model_dump(mode="json"))
+
+
+# ── Proctoring Events & Timeline Review ─────────────────────────────────────
+
+@router.post("/exam-attempts/{attempt_id}/proctoring-events")
+async def record_proctoring_event_endpoint(
+    attempt_id: uuid.UUID,
+    payload: ProctoringEventCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:take")),
+):
+    status_resp = await record_proctoring_event(
+        db=db,
+        attempt_id=attempt_id,
+        payload=payload,
+        student_user=current_user,
+    )
+    return success_response(status_resp.model_dump(mode="json"))
+
+
+@router.get("/exam-attempts/{attempt_id}/proctoring-events")
+async def get_proctoring_timeline_endpoint(
+    attempt_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:proctor_view")),
+):
+    events = await get_proctoring_timeline(db=db, attempt_id=attempt_id)
+    return success_response([e.model_dump(mode="json") for e in events])

@@ -57,3 +57,12 @@ This document records the foundational architectural and technical decisions mad
 * **Context:** Enterprise and academic platforms require clean readability, accessibility (WCAG 2.1 AA), and institutional branding customization rather than dark/hacker aesthetics.
 * **Decision:** Standardize on Tailwind CSS v4 and Radix primitives (shadcn-compatible) with an institutional light theme driven by CSS custom properties.
 * **Consequences:** Consistent, professional appearance with low CSS bundle overhead and easy institutional white-labeling.
+
+---
+
+### ADR-008: Multi-Signal Observable Proctoring & Automated Threshold Enforcement
+* **Status:** Accepted
+* **Context:** Remote and computer-based college examinations require high academic integrity without intrusive or opaque third-party proprietary desktop agents that impair portability.
+* **Decision:** Implement observable browser telemetry combining visibility change, window blur timing, fullscreen tracking, clipboard interception, context-menu prevention, and devtools blocking. Log events with severity tags into append-only tables and enforce an automated violation threshold that triggers an auto-submit of the attempt once breached. Faculty are provided a chronological audit trail.
+* **Consequences:** Highly portable across modern desktop browsers without proprietary native installer dependencies; provides clear, auditable evidence for academic dispute resolution.
+

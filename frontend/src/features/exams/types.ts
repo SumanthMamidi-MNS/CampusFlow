@@ -156,3 +156,28 @@ export interface StudentExamResult {
   percentage?: number | null;
   responses: ExamResponseDetail[];
 }
+
+// ── Proctoring Types ────────────────────────────────────────────────────────
+export interface ProctoringEventCreate {
+  event_type: string;
+  timestamp?: string | null;
+  severity?: 'low' | 'medium' | 'high';
+  details?: Record<string, any> | null;
+}
+
+export interface ProctoringEvent {
+  id: string;
+  attempt_id: string;
+  event_type: string;
+  timestamp: string;
+  severity: string;
+  details?: Record<string, any> | null;
+}
+
+export interface ProctoringStatus {
+  violations_count: number;
+  max_violations: number;
+  auto_submitted: boolean;
+  warning?: string | null;
+}
+

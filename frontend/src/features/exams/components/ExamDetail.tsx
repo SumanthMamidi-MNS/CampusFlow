@@ -6,6 +6,7 @@ import {
   useExam,
   useExamAttempts,
   useGradeExamResponse,
+  useProctoringTimeline,
   usePublishExamResults,
   useRemoveQuestionFromExam,
 } from '../api';
@@ -17,6 +18,8 @@ import {
   HelpCircle,
   Plus,
   Send,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Users,
@@ -44,6 +47,7 @@ export function ExamDetail() {
   const [gradingAttemptId, setGradingAttemptId] = useState<string | null>(null);
   const [manualMarks, setManualMarks] = useState<Record<string, number>>({});
   const [manualFeedback, setManualFeedback] = useState<Record<string, string>>({});
+  const [auditAttemptId, setAuditAttemptId] = useState<string | null>(null);
 
   const addQuestionsMutation = useAddQuestionsToExam(examId);
   const removeQuestionMutation = useRemoveQuestionFromExam(examId);
@@ -317,6 +321,7 @@ export function ExamDetail() {
                   <th className="p-3">Submitted</th>
                   <th className="p-3">Score</th>
                   <th className="p-3">Status</th>
+                  <th className="p-3">Proctoring Log</th>
                   <th className="p-3 pr-5 text-right">Action</th>
                 </tr>
               </thead>
@@ -360,6 +365,31 @@ export function ExamDetail() {
                       >
                         {att.status.replace('_', ' ')}
                       </span>
+                    </td>
+                    <td className="p-3">
+                      {att.proctor_violations_count > 0 ? (
+                        <button
+                          onClick={() => setAuditAttemptId(att.id)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                            att.proctor_violations_count >= 5
+                              ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                              : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                          }`}
+                          title="Click to view full proctoring violation timeline"
+                        >
+                          <ShieldAlert className="h-3.5 w-3.5" />
+                          <span>{att.proctor_violations_count} breaches</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setAuditAttemptId(att.id)}
+                          className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-medium text-[11px] cursor-pointer"
+                          title="Click to view proctoring timeline"
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          <span>Clean (0)</span>
+                        </button>
+                      )}
                     </td>
                     <td className="p-3 pr-5 text-right">
                       <button
@@ -576,6 +606,117 @@ export function ExamDetail() {
           </div>
         </div>
       )}
+
+      {/* Proctoring Timeline Audit Modal */}
+      {auditAttemptId && (
+        <ProctoringAuditModal
+          attemptId={auditAttemptId}
+          studentName={attempts?.find((a) => a.id === auditAttemptId)?.student_name || 'Candidate'}
+          onClose={() => setAuditAttemptId(null)}
+        />
+      )}
     </div>
   );
 }
+
+function ProctoringAuditModal({
+  attemptId,
+  studentName,
+  onClose,
+}: {
+  attemptId: string;
+  studentName: string;
+  onClose: () => void;
+}) {
+  const { data: timeline, isLoading } = useProctoringTimeline(attemptId);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col animate-in fade-in duration-150">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-slate-100 text-slate-700">
+              <ShieldAlert className="h-5 w-5 text-rose-600" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                Proctoring Audit Trail
+              </h2>
+              <p className="text-xs text-slate-500">
+                Candidate: <strong className="text-slate-800">{studentName}</strong>
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-6 flex-1 overflow-y-auto space-y-3">
+          {isLoading ? (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              Loading proctoring event log...
+            </div>
+          ) : !timeline || timeline.length === 0 ? (
+            <div className="py-8 text-center text-slate-500 text-xs">
+              No security violations recorded for this attempt. All activity remained within integrity parameters.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {timeline.map((evt, idx) => (
+                <div
+                  key={evt.id || idx}
+                  className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 flex items-start justify-between gap-4"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-xs text-slate-800 capitalize">
+                        {evt.event_type.replace(/_/g, ' ')}
+                      </span>
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          evt.severity === 'high'
+                            ? 'bg-rose-100 text-rose-800'
+                            : evt.severity === 'medium'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {evt.severity}
+                      </span>
+                    </div>
+                    {evt.details && (
+                      <p className="text-xs text-slate-600 font-mono bg-white rounded-md p-1.5 border border-slate-200/80">
+                        {JSON.stringify(evt.details)}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400 shrink-0">
+                    {new Date(evt.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-slate-200 px-6 py-3 bg-slate-50 rounded-b-2xl flex justify-end">
+          <button
+            onClick={onClose}
+            className="rounded-xl bg-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-300"
+          >
+            Close Log
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

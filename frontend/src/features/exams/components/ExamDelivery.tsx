@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useSaveExamAnswers, useStartExam, useSubmitExam } from '../api';
+import { useRecordProctoringEvent, useSaveExamAnswers, useStartExam, useSubmitExam } from '../api';
 import type { ExamDelivery as ExamDeliveryType } from '../types';
 import {
   AlertTriangle,
@@ -8,8 +8,11 @@ import {
   ArrowRight,
   Clock,
   Flag,
+  Maximize2,
   Save,
   Send,
+  ShieldAlert,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 
@@ -27,11 +30,22 @@ export function ExamDelivery() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Proctoring State
+  const [violationsCount, setViolationsCount] = useState<number>(0);
+  const [maxViolations, setMaxViolations] = useState<number>(5);
+  const [violationWarning, setViolationWarning] = useState<string | null>(null);
+  const [isAutoSubmittedBreach, setIsAutoSubmittedBreach] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   const startExamMutation = useStartExam(examId);
   const saveAnswersMutation = useSaveExamAnswers(delivery?.attempt_id || '');
   const submitExamMutation = useSubmitExam(delivery?.attempt_id || '');
+  const recordProctoringMutation = useRecordProctoringEvent(delivery?.attempt_id || '');
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blurStartRef = useRef<number | null>(null);
+  const lastEventTimeRef = useRef<Record<string, number>>({});
+
 
   // 1. Initial Load / Start Attempt
   useEffect(() => {
@@ -148,6 +162,150 @@ export function ExamDelivery() {
     }
   };
 
+  // 4. Proctoring Event Logger & Violation Handler
+  const recordViolation = async (
+    eventType: string,
+    severity: 'low' | 'medium' | 'high' = 'medium',
+    details?: Record<string, any>
+  ) => {
+    if (!delivery || isAutoSubmittedBreach) return;
+
+    // Rate-limit duplicate events of same type within 2 seconds
+    const now = Date.now();
+    const lastTime = lastEventTimeRef.current[eventType] || 0;
+    if (now - lastTime < 2000) return;
+    lastEventTimeRef.current[eventType] = now;
+
+    try {
+      const res = await recordProctoringMutation.mutateAsync({
+        event_type: eventType,
+        severity,
+        details: details || null,
+      });
+
+      setViolationsCount(res.violations_count);
+      setMaxViolations(res.max_violations);
+
+      if (res.auto_submitted) {
+        setIsAutoSubmittedBreach(true);
+        localStorage.removeItem(`exam_answers_${delivery.attempt_id}`);
+      } else if (res.warning) {
+        setViolationWarning(res.warning);
+        setTimeout(() => setViolationWarning(null), 6000);
+      }
+    } catch (err) {
+      console.error('Proctoring event logging failed:', err);
+    }
+  };
+
+  const handleToggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch {
+      // Browser permissions or user gesture required
+    }
+  };
+
+  // 5. Client Lockdown Listeners (Proctoring)
+  useEffect(() => {
+    if (!delivery) return;
+
+    // A. Visibility / Tab Change
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        recordViolation('tab_switch', 'high', {
+          reason: 'Browser tab switched or window minimized',
+        });
+      }
+    };
+
+    // B. Window Focus / Blur
+    const handleBlur = () => {
+      blurStartRef.current = Date.now();
+    };
+
+    const handleFocus = () => {
+      if (blurStartRef.current) {
+        const blurredSeconds = Math.round((Date.now() - blurStartRef.current) / 1000);
+        blurStartRef.current = null;
+        if (blurredSeconds >= 1) {
+          recordViolation('window_blur', 'medium', {
+            blurred_for_seconds: blurredSeconds,
+          });
+        }
+      }
+    };
+
+    // C. Fullscreen Exit
+    const handleFullscreenChange = () => {
+      const isFull = Boolean(document.fullscreenElement);
+      setIsFullscreen(isFull);
+      if (!isFull) {
+        recordViolation('fullscreen_exit', 'medium', {
+          reason: 'User exited full-screen testing canvas',
+        });
+      }
+    };
+
+    // D. Clipboard & Context Menu Prevention
+    const handleCopyPaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      recordViolation('copy_paste_attempt', 'low', {
+        action: e.type,
+      });
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      recordViolation('context_menu', 'low', {
+        action: 'Right-click context menu prevented',
+      });
+    };
+
+    // E. Prevent DevTools & Source View shortcuts
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === 'F12' ||
+        (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+        (e.ctrlKey && e.key === 'u')
+      ) {
+        e.preventDefault();
+        recordViolation('dev_tools_attempt', 'high', {
+          key_combination: e.key,
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('copy', handleCopyPaste);
+    document.addEventListener('cut', handleCopyPaste);
+    document.addEventListener('paste', handleCopyPaste);
+    document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('copy', handleCopyPaste);
+      document.removeEventListener('cut', handleCopyPaste);
+      document.removeEventListener('paste', handleCopyPaste);
+      document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [delivery]);
+
+
   if (errorMessage) {
     return (
       <div className="max-w-xl mx-auto my-12 bg-white rounded-2xl border border-slate-200 p-8 text-center shadow-xs">
@@ -229,16 +387,41 @@ export function ExamDelivery() {
           </div>
         </div>
 
-        {/* Center Timer */}
-        <div
-          className={`flex items-center gap-2 rounded-xl px-4 py-1.5 font-mono text-sm font-bold border transition-colors ${
-            isLowTime
-              ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse'
-              : 'bg-slate-100 border-slate-200 text-slate-800'
-          }`}
-        >
-          <Clock className={`h-4 w-4 ${isLowTime ? 'text-rose-600' : 'text-slate-500'}`} />
-          <span>{formatTimer(remainingSeconds)}</span>
+        {/* Center: Proctoring Status & Timer */}
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={handleToggleFullscreen}
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            title="Toggle Fullscreen Lockdown Canvas"
+          >
+            <Maximize2 className="h-3.5 w-3.5 text-slate-500" />
+            <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+          </button>
+
+          {violationsCount === 0 ? (
+            <div className="flex items-center gap-1.5 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <span>Integrity Active</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 rounded-xl bg-rose-50 border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-700 animate-pulse">
+              <ShieldAlert className="h-4 w-4 text-rose-600" />
+              <span>
+                Violations: {violationsCount}/{maxViolations}
+              </span>
+            </div>
+          )}
+
+          <div
+            className={`flex items-center gap-2 rounded-xl px-4 py-1.5 font-mono text-sm font-bold border transition-colors ${
+              isLowTime
+                ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse'
+                : 'bg-slate-100 border-slate-200 text-slate-800'
+            }`}
+          >
+            <Clock className={`h-4 w-4 ${isLowTime ? 'text-rose-600' : 'text-slate-500'}`} />
+            <span>{formatTimer(remainingSeconds)}</span>
+          </div>
         </div>
 
         {/* Submit Action */}
@@ -251,6 +434,20 @@ export function ExamDelivery() {
           </button>
         </div>
       </header>
+
+      {/* Violation Banner Alert */}
+      {violationWarning && (
+        <div className="bg-amber-500 text-white px-6 py-2.5 flex items-center justify-between text-xs font-semibold shadow-md z-30">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-100" />
+            <span>{violationWarning}</span>
+          </div>
+          <button onClick={() => setViolationWarning(null)} className="text-amber-100 hover:text-white">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
 
       {/* Main Examination Workspace */}
       <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto p-4 md:p-6 gap-6">
@@ -553,6 +750,28 @@ export function ExamDelivery() {
                 {submitExamMutation.isPending ? 'Submitting...' : 'Yes, Submit Now'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Maximum Violations Exceeded Modal */}
+      {isAutoSubmittedBreach && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-rose-200 max-w-md w-full p-6 text-center animate-in fade-in duration-200">
+            <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <ShieldAlert className="h-6 w-6 text-rose-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900">Exam Session Terminated</h2>
+            <p className="text-xs text-rose-700 font-semibold mt-1">Maximum Proctoring Violations Exceeded</p>
+            <p className="text-xs text-slate-500 mt-3 mb-6">
+              Repeated integrity breaches (tab switching, window defocusing, or unauthorized actions) have exceeded the institutional limit ({violationsCount}/{maxViolations}). Your attempt has been locked and automatically submitted for review.
+            </p>
+            <button
+              onClick={() => navigate(`/exams/${examId}/results`)}
+              className="w-full rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-rose-700 shadow-xs"
+            >
+              View Exam Submission Summary
+            </button>
           </div>
         </div>
       )}

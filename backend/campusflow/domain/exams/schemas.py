@@ -182,3 +182,29 @@ class StudentExamResultResponse(BaseModel):
     total_marks: float
     percentage: float | None = None
     responses: list[ExamAttemptResponseDetail] = []
+
+
+# ── Proctoring & Security Schemas ───────────────────────────────────────────
+class ProctoringEventCreate(BaseModel):
+    event_type: str  # tab_switch, window_blur, fullscreen_exit, copy_paste_attempt, context_menu
+    timestamp: datetime | None = None
+    severity: str = "medium"  # low, medium, high
+    details: dict[str, Any] | None = None
+
+
+class ProctoringEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    attempt_id: uuid.UUID
+    event_type: str
+    timestamp: datetime
+    severity: str
+    details: dict[str, Any] | None = None
+
+
+class ProctoringStatusResponse(BaseModel):
+    violations_count: int
+    max_violations: int
+    auto_submitted: bool
+    warning: str | None = None

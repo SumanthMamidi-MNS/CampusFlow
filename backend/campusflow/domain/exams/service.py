@@ -17,6 +17,7 @@ from campusflow.domain.exams.models import (
     ExamAttempt,
     ExamQuestion,
     ExamResponse,
+    ProctoringEvent,
 )
 from campusflow.domain.exams.schemas import (
     BatchSaveAnswersRequest,
@@ -27,6 +28,9 @@ from campusflow.domain.exams.schemas import (
     ExamQuestionStudentDelivery,
     ExamUpdate,
     GradeSingleResponseRequest,
+    ProctoringEventCreate,
+    ProctoringEventResponse,
+    ProctoringStatusResponse,
     StudentExamResultResponse,
 )
 from campusflow.domain.exams.schemas import (
@@ -892,3 +896,83 @@ async def get_student_exam_result(
         percentage=attempt.percentage,
         responses=response_details,
     )
+
+
+# ── Proctoring & Violation Monitoring ───────────────────────────────────────
+
+async def record_proctoring_event(
+    db: AsyncSession,
+    attempt_id: uuid.UUID,
+    payload: ProctoringEventCreate,
+    student_user: User,
+) -> ProctoringStatusResponse:
+    query = (
+        select(ExamAttempt)
+        .where(ExamAttempt.id == attempt_id)
+        .options(selectinload(ExamAttempt.exam))
+    )
+    res = await db.execute(query)
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise NotFoundError("Exam attempt not found")
+
+    if attempt.student_id != student_user.id:
+        raise AuthorizationError("Unauthorized attempt access.")
+
+    if attempt.status != "in_progress":
+        return ProctoringStatusResponse(
+            violations_count=attempt.proctor_violations_count,
+            max_violations=(attempt.exam.config or {}).get("max_violations", 5),
+            auto_submitted=True,
+            warning="Exam attempt already concluded.",
+        )
+
+    # Record event
+    event = ProctoringEvent(
+        attempt_id=attempt.id,
+        event_type=payload.event_type,
+        timestamp=payload.timestamp or get_utc_now(),
+        severity=payload.severity,
+        details=payload.details,
+    )
+    db.add(event)
+
+    attempt.proctor_violations_count += 1
+    max_violations = (attempt.exam.config or {}).get("max_violations", 5)
+
+    auto_submitted = False
+    warning = None
+
+    if attempt.proctor_violations_count >= max_violations:
+        flags = list(attempt.proctor_flags)
+        if "max_violations_exceeded" not in flags:
+            flags.append("max_violations_exceeded")
+        attempt.proctor_flags = flags
+        await submit_attempt(db, attempt_id, student_user, is_auto_submit=True)
+        auto_submitted = True
+        warning = f"Maximum proctoring violation limit ({max_violations}) reached. Exam has been automatically submitted."
+    else:
+        warning = f"Security Alert: {payload.event_type.replace('_', ' ')} detected (Violation {attempt.proctor_violations_count} of {max_violations})."
+
+    await db.commit()
+
+    return ProctoringStatusResponse(
+        violations_count=attempt.proctor_violations_count,
+        max_violations=max_violations,
+        auto_submitted=auto_submitted,
+        warning=warning,
+    )
+
+
+async def get_proctoring_timeline(
+    db: AsyncSession,
+    attempt_id: uuid.UUID,
+) -> list[ProctoringEventResponse]:
+    query = (
+        select(ProctoringEvent)
+        .where(ProctoringEvent.attempt_id == attempt_id)
+        .order_by(ProctoringEvent.timestamp.asc())
+    )
+    res = await db.execute(query)
+    events = list(res.scalars().all())
+    return [ProctoringEventResponse.model_validate(e) for e in events]

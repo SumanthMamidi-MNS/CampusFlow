@@ -6,6 +6,9 @@ import type {
   ExamCreateInput,
   ExamDelivery,
   ExamUpdateInput,
+  ProctoringEvent,
+  ProctoringEventCreate,
+  ProctoringStatus,
   SaveAnswerPayload,
   StudentExamResult,
 } from './types';
@@ -204,3 +207,32 @@ export function useStudentExamResult(examId: string) {
     retry: false,
   });
 }
+
+// ── Proctoring Hooks ────────────────────────────────────────────────────────
+
+export function useRecordProctoringEvent(attemptId: string) {
+  return useMutation({
+    mutationFn: async (payload: ProctoringEventCreate) => {
+      const res = await apiClient.post<ProctoringStatus>(
+        `/exam-attempts/${attemptId}/proctoring-events`,
+        payload
+      );
+      return res.data;
+    },
+  });
+}
+
+export function useProctoringTimeline(attemptId: string | null) {
+  return useQuery({
+    queryKey: ['proctoring-timeline', attemptId],
+    queryFn: async () => {
+      if (!attemptId) return [];
+      const res = await apiClient.get<ProctoringEvent[]>(
+        `/exam-attempts/${attemptId}/proctoring-events`
+      );
+      return res.data;
+    },
+    enabled: Boolean(attemptId),
+  });
+}
+

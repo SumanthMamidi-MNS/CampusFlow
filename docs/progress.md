@@ -10,8 +10,8 @@
 | **Phase 3** | Assignments & Grading (Submission flows, Gradebook, Rubrics) | **Completed** | Assignment publishing, student file uploads, deadline/late penalty calculations, grading workflows, in-app notifications, and CSV gradebook exports verified with 11/11 tests. |
 | **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | **Completed** | Full suite of question types editable, validated, and bulk-importable; 12/12 backend tests passing; clean UI build. |
 | **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | **Completed** | Complete exam lifecycle works end-to-end: schedule -> delivery -> auto-save -> auto-grading -> manual grading -> results; 13/13 tests passing; clean UI build. |
-| **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | **In Progress (Next)** | Violation telemetry logged and faculty proctor review interface operating. |
-| **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | Pending | Notifications dispatched; administrative dashboards and report exports working. |
+| **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | **Completed** | Violation telemetry logged, threshold auto-submit enforced, faculty proctor review modal active, 14/14 tests passing. |
+| **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | **In Progress (Next)** | Multi-channel notification preferences, SMTP integration templates, institutional analytics dashboards. |
 | **Phase 8** | Polish, Hardening & Production Verification (E2E tests, Security audit, Seeding) | Pending | Clean security scan, end-to-end test pass, complete documentation package. |
 
 ---
@@ -112,9 +112,31 @@
 
 ---
 
-## Next Actions (Phase 6: Proctoring & Exam Security)
-1. Build Proctoring event ingestion endpoint (`POST /api/v1/exam-attempts/{attempt_id}/proctoring-events`) supporting event types: `tab_switch`, `window_blur`, `fullscreen_exit`, `copy_paste_attempt`, `context_menu`.
-2. Implement violation thresholds engine: automatic warning dispatch and auto-submit when maximum violation limit is reached.
-3. Build client-side lockdown listeners in `ExamDelivery` (fullscreen lock, visibilitychange, blur, disable context menu and copy/paste shortcuts).
-4. Implement faculty proctor timeline review UI per student attempt showing event chronological trail and severity.
-5. Write automated tests for proctoring event ingestion and violation auto-submit, verify frontend build, and commit Phase 6.
+### Phase 6: Proctoring & Exam Security
+- **Status:** Completed
+- **Achievements:**
+  - **Proctoring Telemetry Endpoints:** Implemented `POST /api/v1/exam-attempts/{attempt_id}/proctoring-events` and `GET /api/v1/exam-attempts/{attempt_id}/proctoring-events` supporting event types (`tab_switch`, `window_blur`, `fullscreen_exit`, `copy_paste_attempt`, `context_menu`, `dev_tools_attempt`) with severity classifications (`low`, `medium`, `high`).
+  - **Automated Threshold Enforcement:** Built threshold checking in `record_proctoring_event`; increments violation counts, dispatches real-time student warnings, and triggers automatic attempt submission (`auto_submitted: true`, marked `max_violations_exceeded`) when limits are breached.
+  - **Client-Side Testing Lockdown:** Implemented browser event listeners in `ExamDelivery.tsx`:
+    - Tab switch tracking using `visibilitychange`.
+    - Window focus/defocus tracking with elapsed blurred duration calculation.
+    - Fullscreen change tracking with dedicated toggle control.
+    - Clipboard action (`copy`, `cut`, `paste`) interception and prevention.
+    - Right-click context menu prevention.
+    - Developer tools keyboard shortcuts interception (`F12`, `Ctrl+Shift+I/J/C`, `Ctrl+U`).
+  - **Proctoring UI & Faculty Audit Trail:**
+    - Live proctoring badge in student header showing active integrity mode and violation counters.
+    - Animated warning banner for policy infringements.
+    - Lockout modal when max violations threshold is reached.
+    - Faculty "Proctoring Log" column in `ExamDetail.tsx` attempt table with breach badges.
+    - Interactive `ProctoringAuditModal` displaying chronological event timelines, severity badges, and detailed context.
+  - **Verification:** 14/14 automated backend tests passing (`test_proctoring_security.py` verifying violation logging, threshold auto-submit, and timeline retrieval); clean frontend Vite production build (`0 errors`).
+
+---
+
+## Next Actions (Phase 7: Notifications & Analytics)
+1. Multi-channel notification preferences and system alerts (in-app + SMTP templates).
+2. Institutional analytics endpoints and aggregate queries (enrollment stats, course pass rates, exam score distributions, student performance trends).
+3. Analytics dashboard views for administrators and instructors (`/admin/analytics`, `/courses/:id/analytics`).
+4. Automated report generation and CSV export.
+5. End-to-end verification, tests, and documentation sync.
