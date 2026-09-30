@@ -8,8 +8,8 @@
 | **Phase 1** | Foundation & Auth (Bedrock models, JWT auth, RBAC, Audit, User CRUD, Auth UI) | **Completed** | Auth, RBAC, User lifecycle, Audit tests passing (9/9 unit tests); Frontend build clean; Alembic migrations applied to PostgreSQL. |
 | **Phase 2** | Academic Structure & Course Management (Depts, Batches, Terms, Courses, Materials) | **Completed** | Academic hierarchy, Course offerings, Materials storage, Announcements, and Enrollment flows verified with 10/10 tests and clean UI build. |
 | **Phase 3** | Assignments & Grading (Submission flows, Gradebook, Rubrics) | **Completed** | Assignment publishing, student file uploads, deadline/late penalty calculations, grading workflows, in-app notifications, and CSV gradebook exports verified with 11/11 tests. |
-| **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | **In Progress (Next)** | Full suite of question types editable, validated, and bulk-importable. |
-| **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | Pending | End-to-end exam lifecycle, network resilience, and scoring validated. |
+| **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | **Completed** | Full suite of question types editable, validated, and bulk-importable; 12/12 backend tests passing; clean UI build. |
+| **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | **In Progress (Next)** | End-to-end exam lifecycle, network resilience, and scoring validated. |
 | **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | Pending | Violation telemetry logged and faculty proctor review interface operating. |
 | **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | Pending | Notifications dispatched; administrative dashboards and report exports working. |
 | **Phase 8** | Polish, Hardening & Production Verification (E2E tests, Security audit, Seeding) | Pending | Clean security scan, end-to-end test pass, complete documentation package. |
@@ -77,21 +77,27 @@
   - **Verification:** 11/11 automated tests passing; frontend TypeScript and Vite production build verified (`0 errors`).
 
 ### Phase 4: Question Banks
-- **Status:** In Progress (Next)
-- **Scope & Objectives:**
-  - **Question Bank Architecture:** Question banks scoped to departments and optional courses.
-  - **Question Authoring & Types:** Support for MCQ (single correct), MSQ (multiple correct), True/False, Numerical (tolerance), Short Answer, Long Answer/Essay, and Fill in the Blank.
-  - **Question Options & Rubric Hints:** Option lists for objective questions, answer explanations, difficulty tagging (easy, medium, hard), and categorization tags.
-  - **Bulk Question Import:** CSV/Excel importer for batch uploading questions into banks.
-  - **Verification:** Automated tests verifying question schemas, validation per type, and bulk import.
+- **Status:** Completed
+- **Achievements:**
+  - **Question Bank Domain Models:** Created `QuestionBank`, `Question`, and `QuestionOption` models supporting department scoping, course mapping, question categorization, and audit logging.
+  - **Question Authoring & Types Validation:** Implemented strict schema validation for MCQ (single correct), MSQ (multiple correct), True/False (binary), Numerical (answer + tolerance interval), Short Answer, Long Answer/Essay, and Fill in the Blank questions.
+  - **Approval Workflow:** Implemented draft-to-approved lifecycle allowing instructors to draft and review questions before making them active for examination engines.
+  - **Bulk Import & CSV Export:** Built high-performance CSV bulk importer handling question parsing, pipe-delimited option definitions, metadata ingestion, error reporting, and full CSV export endpoint.
+  - **API Endpoints:** Registered `/api/v1/question-banks` and `/api/v1/questions` endpoints secured with `questions:manage` RBAC permission.
+  - **Database Migrations:** Generated and applied migration `654ce661ad16_create_question_banks_tables.py` bringing total active PostgreSQL tables to 27.
+  - **Frontend Question Banks UI:**
+    - `QuestionBanksIndexPage` (`/question-banks`): Catalog grid of banks with department filter, question count indicators, and creation modal.
+    - `QuestionBankDetailPage` (`/question-banks/:id`): Filterable question explorer with search, type, difficulty, and status dropdowns; live metric counters; question approval button; option review badges with correct answer indicators.
+    - `CreateQuestionModal`: Dynamic authoring interface supporting all question types, dynamic option adding/toggling, numerical tolerance inputs, tags, and solution explanations.
+    - `BulkImportModal`: CSV drag-and-drop file uploader with schema guide and error reporting.
+  - **Verification:** 12/12 backend tests passing (`test_question_banks.py` verifying full lifecycle, validation, approval, and CSV export/import); clean frontend Vite production build.
 
 ---
 
-## Next Actions
-1. Implement Domain Models for Question Banks, Questions, and Options (`QuestionBank`, `Question`, `QuestionOption`).
-2. Implement question validation services per question type and CSV bulk question importer.
-3. Build schemas, services, and routers for Question Banks under `/api/v1/question-banks` and `/api/v1/questions`.
-4. Generate and apply Alembic migration for Phase 4 entities.
-5. Build frontend Question Banks views: Question Bank list, Question Bank detail with filters by type and difficulty, Question authoring form with preview, and CSV bulk import dialog.
-6. Write automated tests covering question validation, bank scoping, and bulk import.
-7. Verify frontend build and commit Phase 4.
+## Next Actions (Phase 5: Examination Core)
+1. Design and implement Examination models: `Exam`, `ExamSection`, `ExamQuestion`, `ExamAttempt`, `ExamAnswer`.
+2. Implement Exam scheduling (start/end windows, strict duration, attempts allowed, shuffle questions/options, access code).
+3. Build Exam delivery engine: attempt initiation, question pagination, real-time client auto-save endpoint (`PUT /api/v1/exams/{id}/attempts/{attempt_id}/answers`), and submission finalizing.
+4. Build auto-grading engine for objective questions (MCQ, MSQ, True/False, Numerical) and manual grading queue for descriptive questions.
+5. Create frontend exam management interface for faculty/controllers, and high-focus student exam-taking interface.
+6. Verify with automated test suite and advance to Phase 6 (Observable Proctoring).

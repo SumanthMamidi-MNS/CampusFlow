@@ -6,6 +6,8 @@ import { UsersAdminPage } from './routes/admin/users';
 import { CoursesListPage } from './routes/courses/index';
 import { CourseDetailPage } from './routes/courses/detail';
 import { AcademicAdminPage } from './routes/admin/academic';
+import { QuestionBanksIndexPage } from './routes/question-banks/index';
+import { QuestionBankDetailPage } from './routes/question-banks/detail';
 
 function DashboardPage() {
   return (
@@ -74,6 +76,22 @@ export const router = createBrowserRouter([
             element: (
               <RoleGuard allowedRoles={['admin', 'super_admin', 'department_head']}>
                 <AcademicAdminPage />
+              </RoleGuard>
+            ),
+          },
+          {
+            path: '/question-banks',
+            element: (
+              <RoleGuard allowedRoles={['admin', 'super_admin', 'faculty', 'exam_controller', 'department_head']}>
+                <QuestionBanksIndexPage />
+              </RoleGuard>
+            ),
+          },
+          {
+            path: '/question-banks/:id',
+            element: (
+              <RoleGuard allowedRoles={['admin', 'super_admin', 'faculty', 'exam_controller', 'department_head']}>
+                <QuestionBankDetailPage />
               </RoleGuard>
             ),
           },
