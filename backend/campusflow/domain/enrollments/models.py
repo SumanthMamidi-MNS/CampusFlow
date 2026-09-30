@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from campusflow.bedrock.db.base import BaseModel
 
@@ -24,3 +24,5 @@ class Enrollment(BaseModel):
     __table_args__ = (
         UniqueConstraint("course_offering_id", "student_id", name="uq_enrollment_offering_student"),
     )
+
+    student: Mapped["User"] = relationship("User", foreign_keys=[student_id], lazy="joined")  # noqa: F821

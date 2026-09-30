@@ -7,8 +7,8 @@
 | **Phase 0** | Project Bootstrap (FastAPI skeleton, React SPA, Docker, Bedrock layout) | **Completed** | Full build passed; Docker Compose configured; Git repository initialized. |
 | **Phase 1** | Foundation & Auth (Bedrock models, JWT auth, RBAC, Audit, User CRUD, Auth UI) | **Completed** | Auth, RBAC, User lifecycle, Audit tests passing (9/9 unit tests); Frontend build clean; Alembic migrations applied to PostgreSQL. |
 | **Phase 2** | Academic Structure & Course Management (Depts, Batches, Terms, Courses, Materials) | **Completed** | Academic hierarchy, Course offerings, Materials storage, Announcements, and Enrollment flows verified with 10/10 tests and clean UI build. |
-| **Phase 3** | Assignments & Grading (Submission flows, Gradebook, Rubrics) | **In Progress (Next)** | Assignment submission, rubric/manual grading, and gradebook exports working. |
-| **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | Pending | Full suite of question types editable, validated, and bulk-importable. |
+| **Phase 3** | Assignments & Grading (Submission flows, Gradebook, Rubrics) | **Completed** | Assignment publishing, student file uploads, deadline/late penalty calculations, grading workflows, in-app notifications, and CSV gradebook exports verified with 11/11 tests. |
+| **Phase 4** | Question Banks (Authoring, Question types, Tagging, CSV/Excel import) | **In Progress (Next)** | Full suite of question types editable, validated, and bulk-importable. |
 | **Phase 5** | Examination Core (Scheduling, Secure delivery, Auto-save, Grading engine) | Pending | End-to-end exam lifecycle, network resilience, and scoring validated. |
 | **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | Pending | Violation telemetry logged and faculty proctor review interface operating. |
 | **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | Pending | Notifications dispatched; administrative dashboards and report exports working. |
@@ -58,20 +58,40 @@
   - **Verification:** 10/10 automated tests passing; frontend TypeScript & Tailwind build verified (`0 errors`).
 
 ### Phase 3: Assignments & Grading
+- **Status:** Completed
+- **Achievements:**
+  - **Assignments Subsystem:** Built `Assignment`, `AssignmentSubmission`, and `SubmissionGrade` models supporting total points, weightage, due dates, late-submission acceptance toggles, daily penalty rates, and rubrics under `/api/v1/assignments`.
+  - **Submissions Subsystem:** Student submission workflow supporting file uploads (streamed via `StorageBackend`) and text responses with automatic deadline validation and late day calculations.
+  - **Grading & Feedback Workflow:** Instructor grading workflow supporting rubric evaluations, score adjustments, automatic late penalty deduction, and constructive feedback under `/api/v1/submissions/{id}/grade`.
+  - **Gradebook Engine & Export:** Course-level aggregate gradebook calculating student scores, total weighted points, and percentage. CSV export endpoint (`/api/v1/course-offerings/{id}/gradebook/export`) generates complete spreadsheet records.
+  - **In-App Notifications Subsystem:** Built `Notification` model, services, and endpoints (`/api/v1/notifications`). Automatically dispatches in-app notifications to students on assignment creation and submission grading.
+  - **Database Migrations:** Generated and applied migration `cd698a6b7c0f_create_assignments_and_notifications_tables.py` bringing total active PostgreSQL tables to 24.
+  - **Frontend Integration:**
+    - `Topbar`: Interactive notifications popover with unread counter badge, mark single/all as read, and link navigation.
+    - `CourseDetailPage`:
+      - "Assignments" Tab: Assignment cards with due dates, late policy badges, student submission statuses, and instructor submission counts.
+      - Create Assignment Modal: Configures due date, marks, weightage, and late penalty parameters.
+      - Student Submit Modal: File upload and text submission with confirmation.
+      - Instructor Grading Drawer: Submissions list with student details, late badges, file download links, and grading form with penalty preview.
+      - "Gradebook" Tab: Performance matrix with student rows, assignment columns, weighted scores, percentages, and one-click CSV export.
+  - **Verification:** 11/11 automated tests passing; frontend TypeScript and Vite production build verified (`0 errors`).
+
+### Phase 4: Question Banks
 - **Status:** In Progress (Next)
 - **Scope & Objectives:**
-  - **Assignment Lifecycle:** Creation, instructions, due dates, late-submission policies, max points, and rubric JSON.
-  - **Submissions Subsystem:** Student submissions supporting file uploads (PDF/ZIP/documents via StorageBackend) and rich text responses.
-  - **Grading Workflow:** Instructor grading interface, score assignment, feedback, rubric evaluation, and grade publishing.
-  - **Gradebook:** Course-level aggregate gradebook calculating student totals and status.
-  - **Verification:** Automated tests covering submission deadlines, late penalty calculations, grading workflows, and gradebook rollups.
+  - **Question Bank Architecture:** Question banks scoped to departments and optional courses.
+  - **Question Authoring & Types:** Support for MCQ (single correct), MSQ (multiple correct), True/False, Numerical (tolerance), Short Answer, Long Answer/Essay, and Fill in the Blank.
+  - **Question Options & Rubric Hints:** Option lists for objective questions, answer explanations, difficulty tagging (easy, medium, hard), and categorization tags.
+  - **Bulk Question Import:** CSV/Excel importer for batch uploading questions into banks.
+  - **Verification:** Automated tests verifying question schemas, validation per type, and bulk import.
 
 ---
 
 ## Next Actions
-1. Implement Domain Models for Assignments, Submissions, and Grades (`Assignment`, `AssignmentSubmission`, `SubmissionGrade`).
-2. Build schemas, validation, services, and routers for assignment publishing, student uploads, and instructor grading.
-3. Generate and apply Alembic migration for Phase 3 tables.
-4. Build frontend assignment views: Assignment List, Student Submission Dialog with file attachment, Instructor Grading drawer/modal, and Course Gradebook tab.
-5. Write and execute backend automated test suite for Phase 3.
-6. Verify frontend build and commit Phase 3.
+1. Implement Domain Models for Question Banks, Questions, and Options (`QuestionBank`, `Question`, `QuestionOption`).
+2. Implement question validation services per question type and CSV bulk question importer.
+3. Build schemas, services, and routers for Question Banks under `/api/v1/question-banks` and `/api/v1/questions`.
+4. Generate and apply Alembic migration for Phase 4 entities.
+5. Build frontend Question Banks views: Question Bank list, Question Bank detail with filters by type and difficulty, Question authoring form with preview, and CSV bulk import dialog.
+6. Write automated tests covering question validation, bank scoping, and bulk import.
+7. Verify frontend build and commit Phase 4.

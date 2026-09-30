@@ -36,6 +36,8 @@ export interface Enrollment {
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
+  student_name?: string | null;
+  student_email?: string | null;
   status: string;
   enrolled_at: string;
 }
