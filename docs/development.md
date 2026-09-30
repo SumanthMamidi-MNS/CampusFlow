@@ -108,10 +108,28 @@ npm run lint
 
 ## 5. Seed Data & Database Initialization
 
-Initial superadmin and institutional seed scripts are located in `backend/scripts/`:
+A comprehensive, realistic demo seeder is provided in `scripts/seed.py`:
 ```bash
-python -m campusflow.scripts.seed
+# From repository root
+uv run python scripts/seed.py
+
+# Or from backend directory
+cd backend
+uv run python ../scripts/seed.py
 ```
+
+### Pre-Configured Demo Accounts
+| Role | Email | Password | Scope & Responsibilities |
+|---|---|---|---|
+| **Super Admin** | `admin@campusflow.edu` | `Admin@CampusFlow2026` | Full platform access, user provisioning, institution branding, audit logs |
+| **Exam Controller** | `controller@campusflow.edu` | `Password@123` | Institutional examination scheduling, question pool approvals, exam publishing |
+| **Department Head (CSE)** | `hod.cse@campusflow.edu` | `Password@123` | Department management, program definitions, course offerings, analytics |
+| **Faculty (CSE)** | `faculty.cse@campusflow.edu` | `Password@123` | Course instructor (CS201, CS301), question bank authoring, exam grading |
+| **Faculty (MECH)** | `faculty.mech@campusflow.edu` | `Password@123` | Mechanical Engineering instructor (ME101) |
+| **Student 1** | `student1@campusflow.edu` | `Password@123` | Alex Rivera (CS201, CS301), active submissions, exam attempts |
+| **Student 2** | `student2@campusflow.edu` | `Password@123` | Brianna Patel (CS201, CS301), completed exam attempt |
+| **Student 3** | `student3@campusflow.edu` | `Password@123` | Carlos Gomez (CS201), in-progress attempt |
+| **Student 4** | `student4@campusflow.edu` | `Password@123` | Diana Prince (ME101) |
 
 ---
 

@@ -48,7 +48,7 @@ The Bedrock layer contains project-agnostic engineering infrastructure that can 
 1. `bedrock.config`: Environment-driven configuration via Pydantic `BaseSettings`.
 2. `bedrock.db`: Base declarative models, timestamp/soft-delete mixins, session lifecycle dependencies (`get_db`).
 3. `bedrock.api`: Standard API response envelopes (`success_response`, `paginated_response`), RFC-7807 structured error handlers (`register_exception_handlers`), and pagination helpers.
-4. `bedrock.middleware`: Request tracking (`X-Request-ID`), rate limiting, security headers.
+4. `bedrock.middleware`: Request tracking (`X-Request-ID`), rate limiting, and HTTP security response headers (`SecurityHeadersMiddleware` enforcing nosniff, DENY frame options, XSS blocking, and strict referrer policies).
 5. `bedrock.auth`: JWT issuance, verification, refresh token rotation, and password hashing (bcrypt).
 6. `bedrock.rbac`: Role and permission models, permission dependency injection (`require_permission`).
 7. `bedrock.audit`: Append-only audit trail logging for all mutations.

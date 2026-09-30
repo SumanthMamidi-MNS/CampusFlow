@@ -10,6 +10,7 @@ from campusflow.bedrock.audit.router import router as audit_router
 from campusflow.bedrock.config.settings import get_settings
 from campusflow.bedrock.db.session import async_session_factory
 from campusflow.bedrock.middleware.request_id import RequestIDMiddleware
+from campusflow.bedrock.middleware.security_headers import SecurityHeadersMiddleware
 from campusflow.bedrock.rbac.service import seed_roles_and_permissions
 from campusflow.domain.analytics.router import router as analytics_router
 from campusflow.domain.announcements.router import router as announcements_router
@@ -18,6 +19,8 @@ from campusflow.domain.courses.router import router as courses_router
 from campusflow.domain.departments.router import router as departments_router
 from campusflow.domain.enrollments.router import router as enrollments_router
 from campusflow.domain.exams.router import router as exams_router
+from campusflow.domain.institution.router import router as institution_router
+from campusflow.domain.institution.service import get_or_create_default_institution
 from campusflow.domain.materials.router import router as materials_router
 from campusflow.domain.notifications.router import router as notifications_router
 from campusflow.domain.question_banks.router import router as question_banks_router
@@ -34,6 +37,7 @@ async def lifespan(app: FastAPI):
     try:
         async with async_session_factory() as session:
             await seed_roles_and_permissions(session)
+            await get_or_create_default_institution(session)
 
             # Check if default super admin exists
             from campusflow.domain.users.models import User
@@ -78,6 +82,7 @@ def create_app() -> FastAPI:
 
     # Middleware
     app.add_middleware(RequestIDMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -98,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")
     app.include_router(audit_router, prefix="/api/v1")
+    app.include_router(institution_router, prefix="/api/v1")
     app.include_router(departments_router, prefix="/api/v1")
     app.include_router(courses_router, prefix="/api/v1")
     app.include_router(enrollments_router, prefix="/api/v1")

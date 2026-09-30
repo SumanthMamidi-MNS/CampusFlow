@@ -66,3 +66,20 @@ This document records the foundational architectural and technical decisions mad
 * **Decision:** Implement observable browser telemetry combining visibility change, window blur timing, fullscreen tracking, clipboard interception, context-menu prevention, and devtools blocking. Log events with severity tags into append-only tables and enforce an automated violation threshold that triggers an auto-submit of the attempt once breached. Faculty are provided a chronological audit trail.
 * **Consequences:** Highly portable across modern desktop browsers without proprietary native installer dependencies; provides clear, auditable evidence for academic dispute resolution.
 
+---
+
+### ADR-009: Institutional White-Labeling & Configurable Policy Architecture
+* **Status:** Accepted
+* **Context:** Different colleges and university faculties operate under diverse visual brand guidelines, timezones, and academic submission policies. Hardcoding institution attributes prevents portable deployments.
+* **Decision:** Store institution identity (name, code, logo URL, brand accent color, timezone, contact info) and system policies (`allow_late_submissions`, `exam_strict_proctoring`, `max_login_attempts`) in a dedicated `institutions` table with administration API (`/api/v1/institution`) and frontend management workspace (`/admin/settings`).
+* **Consequences:** Any institution can instantly customize branding and policies without code modification or redeployment.
+
+---
+
+### ADR-010: Bedrock Security Headers & Multi-Layer E2E Verification
+* **Status:** Accepted
+* **Context:** Production college LMS platforms handle sensitive examination material, student records, and grading audits, requiring defense-in-depth protections against clickjacking, MIME-confusion, and unauthorized framing.
+* **Decision:** Implement `SecurityHeadersMiddleware` in the Bedrock foundation to automatically attach `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` to all outgoing HTTP responses. Back this with an end-to-end integration test suite (`test_e2e_production_flows.py`) verifying security headers, RBAC isolation, exam auto-grading, proctoring telemetry, and gradebook export.
+* **Consequences:** Hardens the system against common web vulnerabilities at zero latency cost and guarantees regression-free deployment verification.
+
+
