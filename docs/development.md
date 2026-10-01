@@ -102,6 +102,10 @@ pytest
 
 # Run tests with coverage
 pytest --cov=campusflow tests/
+
+# Run proctoring security & zero-tolerance tests specifically
+pytest tests/test_proctoring_security.py
+
 ```
 
 ### Linting & Formatting

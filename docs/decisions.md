@@ -82,4 +82,34 @@ This document records the foundational architectural and technical decisions mad
 * **Decision:** Implement `SecurityHeadersMiddleware` in the Bedrock foundation to automatically attach `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` to all outgoing HTTP responses. Back this with an end-to-end integration test suite (`test_e2e_production_flows.py`) verifying security headers, RBAC isolation, exam auto-grading, proctoring telemetry, and gradebook export.
 * **Consequences:** Hardens the system against common web vulnerabilities at zero latency cost and guarantees regression-free deployment verification.
 
+---
+
+### ADR-011: Strict 6-Warning Escalation, Vision Gaze Detection & Faculty Re-Entry Architecture
+* **Status:** Accepted
+* **Context:** Remote exam takers may attempt subtle cheating methods including looking away towards secondary displays or peers, looking downward to read or write unauthorized cheat notes, switching applications, or sharing clips. Strict limits and clear re-entry protocols are essential for fair administration.
+* **Decision:** 
+  1. Enforce a strict 6-warning limit across all proctoring event vectors (both camera gaze analysis and browser lockdown events).
+  2. Implement real-time camera-based heuristic computer-vision analysis on an offscreen HTML5 canvas to detect sideways gaze deviations (`side_viewing`) and downward tilt towards paper or desk (`looking_down`), with a biometric fallback HUD and interactive simulation suite.
+  3. Warnings 1 to 5 trigger modal alert dialogues with remaining counts and an escalation meter.
+  4. On the 6th warning, the exam canvas terminates immediately into a locked state (`locked_violation`).
+  5. Resuming requires explicit faculty or proctor authorization via `POST /api/v1/exams/{exam_id}/attempts/{attempt_id}/unlock`.
+  6. Answers are preserved continuously in local storage and debounced server sync, allowing full recovery without data loss once unlocked.
+* **Consequences:** Provides a rigorous, human-aligned defense against subtle exam tampering while guaranteeing fairness through an explicit faculty appeal and unlock mechanism.
+
+---
+
+### ADR-012: Zero-Tolerance Mobile Phone Termination, High-Urgency Blinking Strobe Warnings & Faculty Live Invigilator Hub
+* **Status:** Accepted
+* **Context:** Mobile phones, unauthorized handheld devices, and browser back-navigation represent severe threats to exam integrity. Furthermore, candidates require continuous visual feedback of their own camera stream to maintain confidence, while faculty invigilators need simultaneous visibility over all active candidates without chaotic peer-to-peer student communications.
+* **Decision:**
+  1. **Zero-Tolerance Prohibited Device Policy:** Mobile phone detection (`mobile_phone_detected`, `phone_detected`, `unauthorized_device_detected`) immediately terminates the exam attempt, sets `violations_count = max_violations`, marks status as `locked_violation`, and requires faculty intervention to unlock.
+  2. **High-Urgency Blinking Strobe Warning:** Viewport renders a persistent pulsing red strobe border (`animate-pulse border-8 border-rose-600 bg-rose-500/15`) and warning header upon security breaches to make violations unmissable.
+  3. **Candidate Visual Clarity:** Provide a prominent "Self-View" header action and expandable 1080p modal detailing gaze telemetry, lighting quality, and device scan confirmation.
+  4. **Fixed Position Lockdown:** Intercept `popstate` / `history.pushState` and `beforeunload` to lock the exam canvas in place and convert navigation attempts into auditable infractions.
+  5. **Faculty Live Invigilator Hub:** Provide an 8-candidate real-time video wall with live telemetry, status badges, HD stream inspection, one-click re-entry authorization, and mass announcement broadcast.
+  6. **Private 1-to-1 Invigilator Channel:** Replace peer messaging with a dedicated Proctor Help Desk strictly connecting candidate to invigilator.
+* **Consequences:** Completely eliminates illicit device usage and browser escape routes, provides comprehensive real-time situational awareness for faculty, and removes student-to-student collusion risks.
+
+
+
 

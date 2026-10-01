@@ -123,7 +123,8 @@ export function AcademicAdminPage() {
                 <tr>
                   <th className="px-6 py-3.5">Code</th>
                   <th className="px-6 py-3.5">Name</th>
-                  <th className="px-6 py-3.5">Description</th>
+                  <th className="px-6 py-3.5">Head of Department</th>
+                  <th className="px-6 py-3.5">Active Terms</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -131,7 +132,8 @@ export function AcademicAdminPage() {
                   <tr key={d.id} className="hover:bg-slate-50 transition">
                     <td className="px-6 py-4 font-bold text-blue-600">{d.code}</td>
                     <td className="px-6 py-4 font-semibold text-slate-900">{d.name}</td>
-                    <td className="px-6 py-4 text-xs text-slate-500">{d.description || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-700">{(d as any).head_of_department || '—'}</td>
+                    <td className="px-6 py-4 text-xs text-slate-500">{(d as any).active_terms_count || '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -119,7 +119,7 @@ export function ExamsList() {
             <div>
               <h1 className="text-xl font-bold text-slate-900">Examinations & Assessments</h1>
               <p className="text-xs text-slate-500">
-                Institutional secure examination portal with server-side timing and auto-grading
+                Institutional examination management, automated grading, and proctoring review
               </p>
             </div>
           </div>

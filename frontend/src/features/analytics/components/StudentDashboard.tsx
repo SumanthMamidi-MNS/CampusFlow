@@ -75,13 +75,15 @@ export function StudentDashboard() {
           return (
             <div
               key={kpi.title}
-              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs hover:border-slate-300 transition-colors"
+              className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs"
             >
-              <div className={`p-2 rounded-xl w-fit ${kpi.bg}`}>
-                <Icon className={`h-4 w-4 ${kpi.color}`} />
+              <div className="flex items-center justify-between">
+                <div className={`p-1.5 rounded-lg ${kpi.bg}`}>
+                  <Icon className={`h-4 w-4 ${kpi.color}`} />
+                </div>
               </div>
-              <p className="text-2xl font-bold text-slate-900 mt-3">{kpi.value}</p>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-0.5">
+              <p className="text-2xl font-bold text-slate-900 tracking-tight mt-3">{kpi.value}</p>
+              <p className="text-xs font-medium text-slate-500 mt-1">
                 {kpi.title}
               </p>
             </div>
@@ -90,10 +92,10 @@ export function StudentDashboard() {
       </div>
 
       {/* Recent Evaluations & Scores */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Recent Graded Work</h3>
+            <h3 className="text-sm font-semibold text-slate-900">Recent Graded Work</h3>
             <p className="text-xs text-slate-500">Your latest graded assignments and examination scorecards</p>
           </div>
           <GraduationCap className="h-5 w-5 text-slate-400" />
@@ -108,24 +110,24 @@ export function StudentDashboard() {
             {analytics.recent_scores.map((sc, idx) => (
               <div
                 key={idx}
-                className="py-3 flex items-center justify-between hover:bg-slate-50/80 px-2 rounded-xl transition-colors"
+                className="py-3 flex items-center justify-between"
               >
                 <div className="flex items-center gap-3">
                   <div
-                    className={`p-2 rounded-xl ${
-                      sc.type === 'exam' ? 'bg-indigo-50 text-indigo-600' : 'bg-blue-50 text-blue-600'
+                    className={`p-2 rounded-lg ${
+                      sc.type === 'exam' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'
                     }`}
                   >
                     {sc.type === 'exam' ? <Award className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="text-xs font-bold text-slate-800">{sc.title}</p>
-                      <span className="capitalize text-[10px] font-semibold text-slate-400 px-1.5 py-0.5 rounded-md bg-slate-100">
+                      <p className="text-sm font-medium text-slate-900">{sc.title}</p>
+                      <span className="capitalize text-[10px] font-medium text-slate-500 px-1.5 py-0.5 rounded-md border border-slate-200 bg-slate-50">
                         {sc.type}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-xs text-slate-500 mt-0.5">
                       Graded on {new Date(sc.date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
                     </p>
                   </div>
@@ -133,14 +135,14 @@ export function StudentDashboard() {
 
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <p className="text-xs font-bold text-slate-900">{sc.score} pts</p>
+                    <p className="text-sm font-bold text-slate-900">{sc.score} pts</p>
                     <p
-                      className={`text-[11px] font-bold ${
+                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-md inline-block mt-1 ${
                         sc.percentage >= 80
-                          ? 'text-emerald-600'
+                          ? 'bg-emerald-50 text-emerald-700'
                           : sc.percentage >= 60
-                          ? 'text-amber-600'
-                          : 'text-rose-600'
+                          ? 'bg-amber-50 text-amber-700'
+                          : 'bg-rose-50 text-rose-700'
                       }`}
                     >
                       {sc.percentage}%

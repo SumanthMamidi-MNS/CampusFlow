@@ -434,6 +434,12 @@ async def start_or_resume_attempt(
     existing_attempts = list(att_res.scalars().all())
 
     active_attempt = next((a for a in existing_attempts if a.status == "in_progress"), None)
+    locked_attempt = next((a for a in existing_attempts if a.status == "locked_violation"), None)
+    if locked_attempt:
+        raise HTTPException(
+            status_code=423,
+            detail="Exam session is locked due to integrity violations (6/6 warnings reached). Awaiting faculty authorization to resume.",
+        )
 
     if active_attempt:
         # Check elapsed time
@@ -935,9 +941,11 @@ async def record_proctoring_event(
     if attempt.status != "in_progress":
         return ProctoringStatusResponse(
             violations_count=attempt.proctor_violations_count,
-            max_violations=(attempt.exam.config or {}).get("max_violations", 5),
+            max_violations=(attempt.exam.config or {}).get("max_violations", 6),
             auto_submitted=True,
-            warning="Exam attempt already concluded.",
+            is_locked=attempt.status == "locked_violation",
+            status=attempt.status,
+            warning="Exam attempt already concluded or locked.",
         )
 
     # Record event
@@ -951,19 +959,41 @@ async def record_proctoring_event(
     db.add(event)
 
     attempt.proctor_violations_count += 1
-    max_violations = (attempt.exam.config or {}).get("max_violations", 5)
+    max_violations = (attempt.exam.config or {}).get("max_violations", 6)
 
     auto_submitted = False
+    is_locked = False
     warning = None
 
-    if attempt.proctor_violations_count >= max_violations:
+    is_phone_violation = payload.event_type in ("mobile_phone_detected", "phone_detected", "unauthorized_device_detected")
+
+    if is_phone_violation or attempt.proctor_violations_count >= max_violations:
         flags = list(attempt.proctor_flags)
-        if "max_violations_exceeded" not in flags:
+        if is_phone_violation and "phone_detected" not in flags:
+            flags.append("phone_detected")
+        if "max_violations_exceeded" not in flags and not is_phone_violation:
             flags.append("max_violations_exceeded")
         attempt.proctor_flags = flags
-        await submit_attempt(db, attempt_id, student_user, is_auto_submit=True)
+        attempt.status = "locked_violation"
         auto_submitted = True
-        warning = f"Maximum proctoring violation limit ({max_violations}) reached. Exam has been automatically submitted."
+        is_locked = True
+        if is_phone_violation:
+            attempt.proctor_violations_count = max_violations
+            warning = "CRITICAL SECURITY BREACH: Mobile phone detected during exam session. Exam has been instantly terminated and locked. Direct faculty authorization required."
+            action_name = "exam.attempt_locked_phone_detected"
+        else:
+            warning = f"Maximum proctoring violation limit ({max_violations}) reached. Exam session has been locked and suspended. Faculty permission required to continue."
+            action_name = "exam.attempt_locked_violation"
+
+        await record_audit_event(
+            db=db,
+            user_id=student_user.id,
+            user_email=student_user.email,
+            action=action_name,
+            resource_type="exam_attempt",
+            resource_id=str(attempt.id),
+            extra_data={"violations_count": attempt.proctor_violations_count, "max_violations": max_violations, "event_type": payload.event_type},
+        )
     else:
         warning = f"Security Alert: {payload.event_type.replace('_', ' ')} detected (Violation {attempt.proctor_violations_count} of {max_violations})."
 
@@ -973,8 +1003,53 @@ async def record_proctoring_event(
         violations_count=attempt.proctor_violations_count,
         max_violations=max_violations,
         auto_submitted=auto_submitted,
+        is_locked=is_locked,
+        status=attempt.status,
         warning=warning,
     )
+
+
+async def unlock_exam_attempt(
+    db: AsyncSession,
+    exam_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    faculty_user: User,
+    reason: str = "Faculty authorized re-entry after integrity review",
+    reset_violations: bool = True,
+) -> ExamAttempt:
+    query = (
+        select(ExamAttempt)
+        .where(ExamAttempt.id == attempt_id, ExamAttempt.exam_id == exam_id)
+        .options(selectinload(ExamAttempt.exam), selectinload(ExamAttempt.student))
+    )
+    res = await db.execute(query)
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise NotFoundError("Exam attempt not found")
+
+    attempt.status = "in_progress"
+    if reset_violations:
+        attempt.proctor_violations_count = 0
+    else:
+        attempt.proctor_violations_count = max(0, attempt.proctor_violations_count - 1)
+
+    flags = [f for f in attempt.proctor_flags if f != "max_violations_exceeded"]
+    flags.append(f"unlocked_by_{faculty_user.email}")
+    attempt.proctor_flags = flags
+
+    await record_audit_event(
+        db=db,
+        user_id=faculty_user.id,
+        user_email=faculty_user.email,
+        action="exam.attempt_unlocked",
+        resource_type="exam_attempt",
+        resource_id=str(attempt.id),
+        extra_data={"reason": reason, "violations_reset_to": attempt.proctor_violations_count},
+    )
+
+    await db.commit()
+    await db.refresh(attempt)
+    return attempt
 
 
 async def get_proctoring_timeline(

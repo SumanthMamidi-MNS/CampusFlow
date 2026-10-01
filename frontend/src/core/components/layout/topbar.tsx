@@ -15,7 +15,6 @@ export function Topbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isPrefModalOpen, setIsPrefModalOpen] = useState(false);
 
-
   const { data: notifData } = useNotifications();
   const markReadMutation = useMarkNotificationRead();
   const markAllReadMutation = useMarkAllNotificationsRead();
@@ -24,11 +23,16 @@ export function Topbar() {
   const notifications = notifData?.items || [];
 
   return (
-    <header className="relative flex h-16 items-center justify-between border-b bg-card px-6">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold text-slate-700 tracking-tight">
-          CampusFlow Academic Portal
+    <header className="relative flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
+      {/* Context / Breadcrumb */}
+      <div className="flex flex-col">
+        <span className="text-sm font-semibold text-slate-800 tracking-tight">
+          Apex Institute of Technology
         </span>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span className="text-[11px] font-medium text-slate-500">System Online</span>
+        </div>
       </div>
 
       <div className="flex items-center gap-4">
@@ -36,24 +40,22 @@ export function Topbar() {
         <div className="relative">
           <button
             onClick={() => setIsOpen(!isOpen)}
-            className="relative rounded-full p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+            className="relative flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
             aria-label="Notifications"
           >
-            <Bell className="h-5 w-5" />
+            <Bell className="h-4 w-4" />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white shadow-sm">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
+              <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
             )}
           </button>
 
           {isOpen && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-slate-200 bg-white p-4 shadow-xl z-50 animate-in fade-in zoom-in-95">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-slate-200 bg-white shadow-lg z-50 animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between border-b border-slate-100 p-4 pb-3">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold text-slate-900">Notifications</h3>
+                  <h3 className="text-sm font-semibold text-slate-900">Notifications</h3>
                   {unreadCount > 0 && (
-                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                       {unreadCount} new
                     </span>
                   )}
@@ -62,7 +64,7 @@ export function Topbar() {
                   {unreadCount > 0 && (
                     <button
                       onClick={() => markAllReadMutation.mutate()}
-                      className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800"
+                      className="flex items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-800 transition-colors"
                     >
                       <CheckCheck className="h-3.5 w-3.5" />
                       Mark all read
@@ -73,7 +75,7 @@ export function Topbar() {
                       setIsOpen(false);
                       setIsPrefModalOpen(true);
                     }}
-                    className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                    className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors"
                     title="Notification Preferences"
                   >
                     <Settings className="h-3.5 w-3.5" />
@@ -81,88 +83,98 @@ export function Topbar() {
                 </div>
               </div>
 
-              <div className="mt-2 max-h-80 overflow-y-auto divide-y divide-slate-100">
+              <div className="max-h-[320px] overflow-y-auto py-1">
                 {notifications.length === 0 ? (
-                  <p className="py-6 text-center text-xs text-slate-400">
-                    No notifications yet.
-                  </p>
+                  <div className="px-4 py-8 text-center text-xs text-slate-500">
+                    No new notifications
+                  </div>
                 ) : (
-                  notifications.slice(0, 10).map((n: NotificationItem) => (
-                    <div
-                      key={n.id}
-                      className={`flex items-start justify-between gap-3 py-3 transition-colors ${
-                        !n.is_read ? 'bg-blue-50/40 rounded-lg px-2' : 'px-2'
-                      }`}
-                    >
-                      <div className="flex-1">
-                        {n.link ? (
-                          <Link
-                            to={n.link}
-                            onClick={() => {
-                              if (!n.is_read) markReadMutation.mutate(n.id);
-                              setIsOpen(false);
-                            }}
-                            className="block"
+                  <div className="flex flex-col">
+                    {notifications.slice(0, 10).map((n: NotificationItem) => (
+                      <div
+                        key={n.id}
+                        className={`group flex items-start justify-between gap-3 px-4 py-3 transition-colors hover:bg-slate-50 ${
+                          !n.is_read ? 'bg-slate-50/50' : ''
+                        }`}
+                      >
+                        <div className="flex-1 min-w-0">
+                          {n.link ? (
+                            <Link
+                              to={n.link}
+                              onClick={() => {
+                                if (!n.is_read) markReadMutation.mutate(n.id);
+                                setIsOpen(false);
+                              }}
+                              className="block"
+                            >
+                              <div className="flex items-center gap-2">
+                                {!n.is_read && <div className="h-1.5 w-1.5 rounded-full bg-blue-600 shrink-0" />}
+                                <h4 className="text-xs font-semibold text-slate-800 truncate">
+                                  {n.title}
+                                </h4>
+                              </div>
+                              <p className="mt-1 text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                                {n.message}
+                              </p>
+                            </Link>
+                          ) : (
+                            <div>
+                              <div className="flex items-center gap-2">
+                                {!n.is_read && <div className="h-1.5 w-1.5 rounded-full bg-blue-600 shrink-0" />}
+                                <h4 className="text-xs font-semibold text-slate-800 truncate">{n.title}</h4>
+                              </div>
+                              <p className="mt-1 text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                                {n.message}
+                              </p>
+                            </div>
+                          )}
+                          <span className="mt-1.5 block text-[10px] text-slate-400 font-medium">
+                            {new Date(n.created_at).toLocaleDateString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        {!n.is_read && (
+                          <button
+                            onClick={() => markReadMutation.mutate(n.id)}
+                            title="Mark as read"
+                            className="mt-0.5 shrink-0 rounded p-1 text-slate-300 opacity-0 group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-600 transition-all"
                           >
-                            <h4 className="text-xs font-semibold text-slate-800 hover:text-blue-600">
-                              {n.title}
-                            </h4>
-                            <p className="mt-0.5 text-[11px] text-slate-500 line-clamp-2">
-                              {n.message}
-                            </p>
-                          </Link>
-                        ) : (
-                          <div>
-                            <h4 className="text-xs font-semibold text-slate-800">{n.title}</h4>
-                            <p className="mt-0.5 text-[11px] text-slate-500 line-clamp-2">
-                              {n.message}
-                            </p>
-                          </div>
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
                         )}
-                        <span className="mt-1 block text-[10px] text-slate-400">
-                          {new Date(n.created_at).toLocaleDateString(undefined, {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
                       </div>
-                      {!n.is_read && (
-                        <button
-                          onClick={() => markReadMutation.mutate(n.id)}
-                          title="Mark read"
-                          className="mt-1 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
           )}
         </div>
 
+        <div className="h-8 w-px bg-slate-200" />
+
         {/* User menu */}
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-700 text-white font-medium text-xs">
-            {user ? `${user.first_name[0]}${user.last_name[0]}` : <UserIcon className="h-4 w-4" />}
-          </div>
+        <div className="flex items-center gap-3">
           {user && (
-            <div className="hidden sm:block">
-              <span className="block text-xs font-semibold text-slate-900 leading-tight">
+            <div className="hidden md:flex flex-col items-end">
+              <span className="text-xs font-semibold text-slate-800 leading-tight">
                 {user.first_name} {user.last_name}
               </span>
-              <span className="block text-[10px] text-slate-500 uppercase tracking-wider">
-                {user.roles[0] || 'User'}
+              <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mt-0.5">
+                {user.roles[0]?.replace('_', ' ') || 'USER'}
               </span>
             </div>
           )}
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200 shadow-sm">
+            {user ? `${user.first_name[0]}${user.last_name[0]}` : <UserIcon className="h-4 w-4" />}
+          </div>
           <button
             onClick={logout}
-            className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors ml-1"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
             title="Sign out"
           >
             <LogOut className="h-4 w-4" />

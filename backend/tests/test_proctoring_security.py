@@ -181,3 +181,33 @@ async def test_proctoring_telemetry_and_auto_submit_threshold(client, db_session
         headers=student_headers,
     )
     assert unauth_resp.status_code == 403
+
+    # 9. Faculty Unlocks Exam Attempt after Review
+    unlock_resp = await client.post(
+        f"/api/v1/exams/{exam.id}/attempts/{attempt_id}/unlock",
+        headers=faculty_headers,
+        json={"reason": "Student explained peripheral monitor issue, granted re-entry."},
+    )
+    assert unlock_resp.status_code == 200, unlock_resp.text
+    unlock_data = unlock_resp.json()["data"]
+    assert unlock_data["status"] == "in_progress"
+    assert unlock_data["proctor_violations_count"] == 0
+
+    # 10. Instant Mobile Phone Detection Lockout Test (Zero Tolerance)
+    phone_resp = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=student_headers,
+        json={
+            "event_type": "mobile_phone_detected",
+            "severity": "critical",
+            "details": {"confidence": 0.96, "bounding_box": [120, 80, 240, 320]},
+        },
+    )
+    assert phone_resp.status_code == 200, phone_resp.text
+    phone_data = phone_resp.json()["data"]
+    assert phone_data["is_locked"] is True
+    assert phone_data["auto_submitted"] is True
+    assert phone_data["violations_count"] == 3  # Instantly maxed out
+    assert "Mobile phone detected" in phone_data["warning"]
+
+

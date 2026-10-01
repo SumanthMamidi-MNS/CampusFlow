@@ -104,6 +104,7 @@ export function UsersTable({ onEditUser }: UsersTableProps) {
                   <th className="px-6 py-3.5">Roles</th>
                   <th className="px-6 py-3.5">Phone</th>
                   <th className="px-6 py-3.5">Status</th>
+                  <th className="px-6 py-3.5">Joined</th>
                   <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
@@ -154,6 +155,10 @@ export function UsersTable({ onEditUser }: UsersTableProps) {
                       >
                         {user.status}
                       </span>
+                    </td>
+
+                    <td className="px-6 py-4 text-xs text-slate-500">
+                      {(user as any).created_at ? new Date((user as any).created_at).toLocaleDateString() : '—'}
                     </td>
 
                     <td className="px-6 py-4 text-right">

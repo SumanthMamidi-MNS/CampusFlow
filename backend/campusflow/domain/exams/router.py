@@ -16,6 +16,7 @@ from campusflow.domain.exams.schemas import (
     GradeSingleResponseRequest,
     ProctoringEventCreate,
     StartAttemptRequest,
+    UnlockAttemptRequest,
 )
 from campusflow.domain.exams.service import (
     add_questions_to_exam,
@@ -34,6 +35,7 @@ from campusflow.domain.exams.service import (
     save_answers_batch,
     start_or_resume_attempt,
     submit_attempt,
+    unlock_exam_attempt,
     update_exam,
 )
 from campusflow.domain.users.models import User
@@ -299,4 +301,31 @@ async def export_exam_results_endpoint(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/exams/{exam_id}/attempts/{attempt_id}/unlock")
+async def unlock_exam_attempt_endpoint(
+    exam_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    payload: UnlockAttemptRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:grade")),
+):
+    reason = payload.reason if payload else "Faculty authorized re-entry after integrity review"
+    reset_violations = payload.reset_violations if payload else True
+    attempt = await unlock_exam_attempt(
+        db=db,
+        exam_id=exam_id,
+        attempt_id=attempt_id,
+        faculty_user=current_user,
+        reason=reason,
+        reset_violations=reset_violations,
+    )
+    return success_response({
+        "attempt_id": str(attempt.id),
+        "status": attempt.status,
+        "proctor_violations_count": attempt.proctor_violations_count,
+        "message": "Attempt successfully unlocked. Student may resume examination.",
+    })
+
 

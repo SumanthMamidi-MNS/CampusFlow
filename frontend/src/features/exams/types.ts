@@ -1,6 +1,6 @@
 export type ExamType = 'quiz' | 'midterm' | 'final' | 'practice';
 export type ExamStatus = 'draft' | 'scheduled' | 'live' | 'completed' | 'graded' | 'published';
-export type AttemptStatus = 'in_progress' | 'submitted' | 'auto_submitted' | 'graded';
+export type AttemptStatus = 'in_progress' | 'submitted' | 'auto_submitted' | 'graded' | 'locked_violation';
 
 export interface ExamQuestionOption {
   id?: string;
@@ -179,5 +179,12 @@ export interface ProctoringStatus {
   max_violations: number;
   auto_submitted: boolean;
   warning?: string | null;
+  is_locked?: boolean;
+  status?: string;
+}
+
+export interface UnlockAttemptPayload {
+  reason?: string;
+  reset_violations?: boolean;
 }
 

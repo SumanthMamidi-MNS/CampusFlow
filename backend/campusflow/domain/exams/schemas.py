@@ -207,4 +207,12 @@ class ProctoringStatusResponse(BaseModel):
     violations_count: int
     max_violations: int
     auto_submitted: bool
+    is_locked: bool = False
+    status: str = "in_progress"
     warning: str | None = None
+
+
+class UnlockAttemptRequest(BaseModel):
+    reason: str = "Faculty authorized re-entry after integrity review"
+    reset_violations: bool = True
+

@@ -1,4 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from '@/core/auth/hooks';
 import { useStudentExamResult } from '../api';
 import {
   ArrowLeft,
@@ -13,6 +14,7 @@ import {
 export function ExamResult() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const examId = id || '';
 
   const { data: result, isLoading, error } = useStudentExamResult(examId);
@@ -61,6 +63,9 @@ export function ExamResult() {
             Official Exam Scorecard
           </span>
           <h1 className="text-2xl font-bold text-slate-900 mt-1">{result.exam_title}</h1>
+          <p className="text-sm font-medium text-slate-700 mt-1">
+            {user ? `${user.first_name} ${user.last_name}` : 'Student'}
+          </p>
           <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
             <Clock className="h-3.5 w-3.5" />
             <span>

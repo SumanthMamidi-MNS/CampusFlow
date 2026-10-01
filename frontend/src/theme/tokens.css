@@ -1,5 +1,10 @@
-/* Institution branding tokens — loaded from API in production */
 :root {
   --institution-primary: #2563eb;
+  --institution-primary-hover: #1d4ed8;
   --institution-name: 'CampusFlow';
+  --institution-bg: #f8fafc;
+  --institution-surface: #ffffff;
+  --institution-border: #e2e8f0;
+  --institution-text: #0f172a;
+  --institution-text-muted: #64748b;
 }

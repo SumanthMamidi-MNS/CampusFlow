@@ -144,7 +144,17 @@ All successful responses return a JSON object containing `data` and request `met
 - `src/app/`: Application shell, providers (`TanStack Query`, `AuthProvider`), and React Router route trees.
 
 ### Design System & Institutional UI
-- Default visual theme is a clean, crisp, **light institutional UI** built with Tailwind CSS v4 and Radix-based components.
+- Default visual theme is a clean, crisp, **light institutional UI** built with Tailwind CSS v4 and reusable foundation primitives.
+- **Design Tokens:** Centralized via Tailwind CSS v4 `@theme` in `src/index.css` and `src/theme/tokens.css`, including Inter font family, institutional slate/blue palette, restrained border radius (`rounded-lg` for interactive elements, `rounded-xl` for containers), and subtle elevation shadows (`shadow-xs`, `shadow-card`).
+- **Foundation UI Library (`src/core/components/ui/`):** Reusable, type-safe primitives implemented with `class-variance-authority`:
+  - `Button`: Primary, secondary, ghost, destructive with size variants and loading indicators.
+  - `Input` & `Select`: Uniform borders, focus rings, left icons, error validation messages.
+  - `Badge`: Status badges (default, primary, success, warning, destructive, outline).
+  - `Card`: Institutional cards (`CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`).
+  - `Dialog`: Accessible modal suite with backdrop blur, keyboard Escape listener, and React portal mounting.
+  - `Table`: Standardized data tables (`TableHeader`, `TableRow`, `TableHead`, `TableCell`).
+  - `Tabs`: Clean underline-style tab navigation.
+  - `EmptyState` & `Loading`/`Skeleton`: Standardized feedback states.
 - Brand colors, logos, and institution titles are populated dynamically from the institution configuration API via CSS custom properties.
 - Dark-mode, high-contrast, or terminal hacker themes are strictly avoided for regular user workflows.
 
@@ -157,11 +167,35 @@ All successful responses return a JSON object containing `data` and request `met
 2. **Refresh Tokens:** Long-lived (7 days), stored in secure `httpOnly`, `SameSite=Strict` cookies, with automatic rotation and token-family reuse detection.
 3. **Password Security:** Salted `bcrypt` hashing with configurable complexity and lockout policies.
 
-### Observable Proctoring Model
-To ensure student privacy, legal compliance, and operational reliability without invasive AI:
-- Browser visibility and focus tracking (`visibilitychange`, `blur`).
-- Fullscreen enforcement and exit detection.
-- Prevention and logging of copy/paste and context-menu actions.
-- Client-side auto-save every 30 seconds with local storage backup.
-- Server-side duration validation independent of client clock manipulation.
-- Proctoring events logged to an append-only timeline for faculty review.
+### Observable & Live Proctoring Model
+To ensure academic integrity, student privacy, and operational reliability:
+- **Zero-Tolerance Prohibited Device Detection:**
+  - Dedicated detection vector for mobile phones and smart devices (`mobile_phone_detected`, `phone_detected`, `unauthorized_device_detected`).
+  - **Instant Termination:** Immediately bypasses standard warning counters, forces `violations_count = max_violations`, marks `status = "locked_violation"`, and triggers `exam.attempt_locked_phone_detected` audit trail.
+- **High-Urgency Blinking Strobe Warnings:**
+  - Client viewport renders an unmissable red pulsing strobe border (`animate-pulse border-8 border-rose-600 bg-rose-500/15`) and high-priority banner upon any security breach.
+- **Candidate Visual Prominence & Expanded View:**
+  - Top header "Self-View" action and expandable camera HUD offering full HD Candidate Camera & Visual Self-Verification with live gaze angle, lighting balance, and device scanner feedback.
+- **Fixed Position Browser Lockdown:**
+  - Intercepts and overrides browser `popstate` / `history.pushState` to trap back/forward navigation within the exam canvas. Any navigation attempt logs a violation without losing position.
+  - Implements `beforeunload` warning handler preventing accidental tab close or page reload.
+- **Real-Time Vision & Gaze Monitoring:** HTML5 Canvas offscreen analysis of camera stream detecting gaze deviation (head turn / looking sideways away from monitor) and downward tilt (reading/writing unauthorized notes or phone in lap). Includes biometric fallback and simulation controls for reproducible evaluation.
+- **Client-Side Cheat Interception:**
+  - Browser visibility and focus tracking (`visibilitychange`, `blur`).
+  - Fullscreen enforcement and exit tracking.
+  - Prevention and logging of copy/paste, cut, and right-click context-menu actions.
+  - Blocked unauthorized shortcuts (Developer Tools `F12`, `Ctrl+Shift+I/J/C`, `Ctrl+U`, `Alt-Tab`, `Meta`/Windows key, `PrintScreen`).
+- **Strict 6-Warning Escalation & Lockout:**
+  - Candidates receive inescapable modal warnings for non-fatal infractions 1 through 5, complete with remaining warning countdowns and a visual 6-step progress meter.
+  - On the 6th infraction (`violations_count >= 6`), the exam session terminates immediately; attempt status transitions to `locked_violation` and is locked out.
+- **Faculty Live Invigilator Hub & Multi-Candidate Video Wall:**
+  - Dedicated "Live Invigilator Hub & Webcams" dashboard tab in `ExamDetail.tsx`.
+  - Multi-candidate simultaneous video wall showing 1080p feeds, station IDs, real-time gaze telemetry, audio decibel meters, and status badges (`CENTERED`, `WARNING X/6`, `PHONE LOCKED`, `LOCKED`).
+  - Stream inspection modal with detailed gaze vectors, audio waveforms, and question completion metrics.
+  - Mass broadcast system to dispatch high-priority invigilator announcements to all candidate screens simultaneously.
+  - Direct one-click re-entry authorization resetting candidate violations.
+- **Strict 1-to-1 Proctor Help Desk (No Peer Communication):**
+  - Candidate emergency communication is strictly 1-to-1 between candidate and invigilator; student-to-student peer chat is disabled.
+- **Durability & Resumption:** Client answers are continuously preserved in local storage and debounced server sync; upon faculty unlock, the student resumes with all previous answers intact.
+
+

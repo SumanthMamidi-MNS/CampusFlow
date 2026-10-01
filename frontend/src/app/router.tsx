@@ -5,6 +5,7 @@ import { LoginPage } from './routes/auth/login';
 import { UsersAdminPage } from './routes/admin/users';
 import { CoursesListPage } from './routes/courses/index';
 import { CourseDetailPage } from './routes/courses/detail';
+import { AssignmentsIndexPage } from './routes/assignments/index';
 import { AcademicAdminPage } from './routes/admin/academic';
 import { SettingsAdminPage } from './routes/admin/settings';
 import { QuestionBanksIndexPage } from './routes/question-banks/index';
@@ -26,21 +27,37 @@ function DashboardPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">
-            Welcome back, {user ? `${user.first_name} ${user.last_name}` : 'Scholar'}
-          </h1>
-          <p className="mt-1 text-xs text-slate-500">
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Welcome back, {user ? `${user.first_name} ${user.last_name}` : 'Scholar'}
+            </h1>
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 capitalize border border-slate-200">
+              {user?.roles[0] || 'User'}
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span className="flex h-2 w-2 rounded-full bg-emerald-500"></span>
+            <span className="font-medium">Academic Year 2026-2027 • Fall Term • Official Session</span>
+          </div>
+          
+          <p className="text-sm text-slate-500 max-w-2xl">
             {isStudent
               ? 'Your active learning hub, deadlines, grades, and upcoming examinations.'
               : 'Institutional performance overview, academic operations, and analytics.'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-xl bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 capitalize border border-blue-200">
-            Role: {user?.roles[0] || 'User'}
-          </span>
+        <div className="flex items-center gap-3 sm:shrink-0">
+          <button className="inline-flex items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 shadow-xs hover:bg-slate-50 hover:text-slate-900 transition-colors">
+            View Schedule
+          </button>
+          {!isStudent && (
+            <button className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-xs hover:bg-slate-800 transition-colors">
+              New Report
+            </button>
+          )}
         </div>
       </div>
 
@@ -53,6 +70,10 @@ function DashboardPage() {
 export const router = createBrowserRouter([
   {
     path: '/auth/login',
+    element: <LoginPage />,
+  },
+  {
+    path: '/login',
     element: <LoginPage />,
   },
   {
@@ -72,6 +93,10 @@ export const router = createBrowserRouter([
           {
             path: '/courses/:id',
             element: <CourseDetailPage />,
+          },
+          {
+            path: '/assignments',
+            element: <AssignmentsIndexPage />,
           },
           {
             path: '/admin/users',

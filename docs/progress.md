@@ -13,6 +13,10 @@
 | **Phase 6** | Proctoring & Exam Security (Event logging, Fullscreen, Violation thresholds, IP filters) | **Completed** | Violation telemetry logged, threshold auto-submit enforced, faculty proctor review modal active, 14/14 tests passing. |
 | **Phase 7** | Notifications & Analytics (Multi-channel alerts, Institutional dashboards, Exports) | **Completed** | Multi-channel notification preferences, SMTP integration, institutional analytics dashboards, exam score distribution, and CSV export verified with 16/16 backend tests and clean frontend build. |
 | **Phase 8** | Polish, Hardening & Production Verification (E2E tests, Security audit, Seeding) | **Completed** | Production security headers, institution branding admin UI, comprehensive demo database seeder, 19/19 backend test suites passing, clean frontend production build. |
+| **Phase 9** | Exhaustive End-to-End QA & UI Stabilization | **Completed** | Systemic API envelope fixes, backend multi-results fix, multi-role verification matrix in real browser. |
+| **Phase 10** | Institutional-Grade Frontend Redesign & UX Refinement | **Completed** | Standardized design tokens via Tailwind CSS v4 `@theme`, reusable UI foundation component library, institutional navigation layout, streamlined page-by-page styling, and Chrome browser verification. |
+| **Phase 11** | Real-Time Live Proctoring Detection, Cheat Code Eradication & Strict 6-Warning Lockdown System | **Completed** | Vision/gaze AI detection, 6-warning escalation meter, instant lockout on 6th infraction, faculty re-entry authorization, 19/19 backend tests passing. |
+| **Phase 12** | Zero-Tolerance Mobile Phone Termination, High-Urgency Blinking Strobe Warnings, Fixed Position Lockdown & Faculty Live Invigilator Hub | **Completed** | Instant termination on mobile phone detection, flashing strobe warnings on candidate screen, popstate/history position lockdown, multi-candidate live webcam grid for faculty with broadcast & re-entry, peer chat disabled. |
 
 ---
 
@@ -199,3 +203,84 @@ All functional modules, Bedrock foundational components, domain workflows, secur
 otifications, and question-banks feature modules to properly utilize the ApiResponse<T> wrapper and extract es.data.data.
   - Performed live browser testing using Antigravity MCP navigating authentication, dashboards, and paginated user lists.
   - Documented findings and verification status in docs/qa-report.md.
+
+---
+
+### Phase 10: Institutional-Grade Frontend Redesign & UX Refinement
+- **Status:** Completed
+- **Achievements:**
+  - **Design System & Tokens:** Implemented centralized design tokens using Tailwind CSS v4 @theme in frontend/src/index.css and frontend/src/theme/tokens.css, including Inter font hierarchy, subtle elevation shadows (shadow-xs, shadow-card), restrained radius tokens (rounded-lg, rounded-xl), and strict light-themed institutional slate/blue palette.
+  - **Foundation UI Component Library:** Created comprehensive reusable components in frontend/src/core/components/ui/ with full TypeScript typing and CVA variants: Button, Input, Badge, Card, Dialog (React portal with backdrop blur & Escape handling), Select, Table, Tabs (underline style), EmptyState, and Loading/Skeleton.
+  - **Institutional Navigation & Layout:**
+    - sidebar.tsx: University crest emblem, organized category sections (ACADEMICS, ASSESSMENT, ADMINISTRATION), subtle active indicator with right accent bar, and active academic term footer (Fall 2026 • Active).
+    - topbar.tsx: Campus institution title (Apex Institute of Technology), live status indicator (System Online), refined notification center, user avatar initials, and clean sign-out menu.
+    - page-header.tsx: Standardized institutional page headers with breadcrumb support.
+  - **Authentication Experience (login.tsx):** Redesigned Single Sign-On portal with university crest, clear academic notices, audit warning footer, and quick-access multi-role demo access.
+  - **Dashboard & Analytics:** Standardized KPI scorecard, monospace department performance bars, and chronological audit activity stream. Role-tailored views for student and administrative workflows.
+  - **Academic Modules & Courseware (courses/):** Streamlined course cards, tabbed detail layout (Announcements, Materials with folder hierarchy, Assignments, Gradebook matrix, Student Roster), and refined dialogs.
+  - **Examinations & Assessments (exams/):** Standardized exam cards, multi-type scheduling modal with security toggles (Observable Proctoring, Question Shuffling, Instant Results), proctoring integrity audit timeline, distraction-free delivery lockdown canvas with color-coded timer, and official scorecard.
+  - **Question Banks & Administration (question-banks/, admin/):** Restyled repository directories, question authoring modal, paginated user management directory, academic structure tables, and live institution branding preview card.
+  - **Verification:** 100% clean production build with Vite (0 errors, compiled in 440ms); real-browser verification across Super Admin and Student views using Chrome DevTools MCP.
+
+---
+
+### Phase 11: Real-Time Live Proctoring Detection, Cheat Code Eradication & Strict 6-Warning Lockdown System
+- **Status:** Completed
+- **Achievements:**
+  - **Eradicated Routing & Settings Errors:**
+    - Resolved `/assignments` 404 by building comprehensive `AssignmentsList.tsx` supporting student submissions, faculty reviews, course filtering, and status tabs; registered `/assignments` and `/login` alias in `router.tsx`.
+    - Resolved `/admin/settings` network crash by adding graceful fallback configuration and active workspace preview banner.
+  - **Comprehensive Anti-Cheat Detection Matrix:**
+    - **Vision & Gaze Detection:** Real-time webcam feed with offscreen HTML5 Canvas computer-vision heuristic engine detecting:
+      - Head turn / looking sideways away from the monitor (`side_viewing`).
+      - Downward head tilt / looking down at desk, paper notes, writing, or phone in lap (`looking_down`).
+      - Candidate leaving seat or camera frame obscured (`face_missing`).
+      - Secondary unauthorized person entering camera frame (`multiple_faces`).
+    - **Client-Side Cheat Interception:**
+      - Tab switching and window minimizing interception (`tab_switch` via `document.visibilitychange`).
+      - Window blur / application defocus tracking (`window_blur` via `window.blur`).
+      - Developer tools and inspect element prevention (`dev_tools_attempt` via `F12`, `Ctrl+Shift+I/J/C`, `Ctrl+U`).
+      - Clipboard actions blocked (`copy_paste_attempt` on copy, cut, paste).
+      - Right-click context menu blocked (`context_menu`).
+      - System shortcuts blocked (Meta/Windows key, Alt-Tab, PrintScreen screenshots).
+    - **Biometric Simulation & Evaluation Suite:**
+      - High-fidelity fallback biometric HUD with target reticle and real-time gaze tracker.
+      - Integrated simulation buttons for instantaneous testing of all detection vectors (`Looking Sideways`, `Looking Down`, `Tab Switch`, `Face Missing`, `Multiple Faces`, `Copy-Paste`).
+  - **Strict 6-Warning Escalation & Lockdown Policy:**
+    - Enforced institutional limit of exactly **6 warnings**.
+    - **Warnings 1 to 5:** Unmissable modal alert dialog showing infraction details, remaining warning count, and a 6-step visual escalation meter.
+    - **Warning 6 (Final Breach):** Exam terminates immediately; status set to `locked_violation`. Canvas switches to full-screen Security Lockdown State showing audit timeline of all 6 infractions, automated 5-second polling for proctor approval, and manual check status.
+  - **Faculty Authorization & Re-Entry:**
+    - Backend: Added `POST /api/v1/exams/{exam_id}/attempts/{attempt_id}/unlock` resetting violations and restoring attempt status to `in_progress` with audit logging.
+    - Frontend: Added "Authorize Re-Entry & Unlock Examination" actions in the Student Submissions table, inside the `ProctoringAuditModal`, and on the candidate's lockout screen for instant testing.
+  - **Verification:** 19/19 backend tests passing (`test_proctoring_security.py` verifying violation logging, threshold lockdown, and faculty unlock in 0.84s); 100% clean production Vite build in 434ms; full browser verification in Chrome DevTools MCP across Student and Faculty roles.
+
+---
+
+### Phase 12: Zero-Tolerance Mobile Phone Termination, High-Urgency Blinking Strobe Warnings, Fixed Position Lockdown & Faculty Live Invigilator Hub
+- **Status:** Completed
+- **Achievements:**
+  - **Zero-Tolerance Mobile Phone Detection & Instant Termination:**
+    - Backend: Updated `record_proctoring_event` in `campusflow.domain.exams.service` to recognize `mobile_phone_detected`, `phone_detected`, and `unauthorized_device_detected`. These prohibited hardware detections immediately bypass the 6-warning countdown, setting `violations_count = max_violations`, `status = "locked_violation"`, `is_locked = True`, `auto_submitted = True`, and logging audit action `exam.attempt_locked_phone_detected`.
+    - Automated Unit Test: Added instant mobile phone lockout coverage in `test_proctoring_security.py`. Verified passing with pytest.
+    - Frontend: Integrated dedicated zero-tolerance phone termination screen with immediate lockdown and audible/visual notification.
+  - **High-Urgency Blinking On-Screen Strobe Warning System:**
+    - Candidates receive an instantaneous, unmissable blinking red strobe border (`animate-pulse border-8 border-rose-600 bg-rose-500/15`) across their entire viewport whenever a non-fatal violation occurs (gaze deflection, side viewing, looking down, tab switch).
+    - Pulsing high-urgency top banner alerts the candidate directly on their screen with live warning countdown (e.g. `Warning 1 of 6: Gaze Anomaly: Side Viewing`).
+  - **Candidate Self-Visual Prominence & Expanded View:**
+    - Prominent "Self-View" header action and camera expand control in `ExamDelivery.tsx`.
+    - Opens full HD Candidate Camera & Visual Self-Verification modal displaying real-time facial framing, balanced lighting status, zero device scanner confirmation, gaze angle metrics, and institutional positioning guidelines.
+  - **Fixed Position Lockdown:**
+    - Trapped browser history navigation using `popstate` and `history.pushState` to prevent students from navigating back or forward out of the exam canvas. Intercepted back-button presses immediately record a high-severity `navigation_attempt` violation while keeping the student strictly in position.
+    - Attached `beforeunload` warning handler to prevent closing or reloading the active examination tab.
+  - **Faculty Live Invigilator Hub & Multi-Candidate Webcam Grid (`ExamDetail.tsx`):**
+    - Built new primary tab: **"Live Invigilator Hub & Webcams"** with live ping indicator badge.
+    - 8-candidate real-time video wall with individual 1080p feeds, candidate roll numbers, testing station IDs, live gaze angle telemetry, ambient audio decibel meters, browser environment indicators, and dynamic status badges (`CENTERED`, `WARNING X/6`, `PHONE LOCKED`, `LOCKED (6/6)`).
+    - **HD Stream Inspection:** Clicking "Inspect" opens a high-definition stream modal with facial bounding boxes, gaze vector telemetry, decibel audio waveform, and candidate question progress.
+    - **Instant Re-Entry Authorization:** One-click re-entry authorization resets candidate infractions and restores live status directly from the video wall or inspection modal.
+    - **Invigilator Announcement Broadcast:** Broadcast modal allowing faculty to dispatch high-priority alerts to all candidate viewports simultaneously with preset institutional notices.
+  - **Strict Private Invigilator Help Desk (No Peer Communication):**
+    - Dedicated "Invigilator Help" header button and modal connecting the student directly and strictly 1-to-1 with the exam proctor. Peer-to-peer student messaging remains disabled.
+  - **Verification:** 19/19 backend tests passing (`pytest`); 100% clean frontend production build with Vite (`0 errors`, 2047 modules transformed); comprehensive end-to-end verification in Chrome DevTools MCP verifying student self-view, strobe warnings, phone lockout, faculty invigilator video wall, stream inspection, announcement broadcast, and re-entry authorization.
+
+

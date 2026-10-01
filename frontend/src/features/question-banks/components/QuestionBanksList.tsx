@@ -177,11 +177,13 @@ export function QuestionBanksList() {
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-                <div className="flex items-center gap-1">
-                  <Calendar className="h-3.5 w-3.5" />
-                  <span>{new Date(bank.created_at).toLocaleDateString()}</span>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5" />
+                    <span>Created {new Date(bank.created_at).toLocaleDateString()}</span>
+                  </div>
                 </div>
-                <div className="rounded-full bg-blue-50 px-2.5 py-0.5 font-semibold text-blue-700 text-xs">
+                <div className="rounded-full bg-blue-50 px-2.5 py-0.5 font-semibold text-blue-700 text-xs shrink-0">
                   {bank.questions_count} {bank.questions_count === 1 ? 'question' : 'questions'}
                 </div>
               </div>

@@ -406,7 +406,7 @@ export function CourseDetailPage() {
                 <div
                   key={ann.id}
                   className={`bg-white rounded-xl border p-5 shadow-xs transition ${
-                    ann.is_pinned ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'
+                    ann.is_pinned ? 'border-amber-200 bg-amber-50/30' : 'border-slate-200'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2 mb-2">
@@ -858,7 +858,7 @@ export function CourseDetailPage() {
 
       {/* Post Announcement Modal */}
       {isAnnounceOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-xl border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-bold text-slate-900">Post Announcement</h3>
@@ -923,7 +923,7 @@ export function CourseDetailPage() {
 
       {/* Create Assignment Modal */}
       {isCreateAssignOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 overflow-y-auto">
           <div className="w-full max-w-lg rounded-xl bg-white shadow-xl border border-slate-200 p-6 space-y-4 my-8">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-bold text-slate-900">Create New Assignment</h3>
@@ -1054,7 +1054,7 @@ export function CourseDetailPage() {
 
       {/* Student Submit Assignment Modal */}
       {selectedAssignForSubmit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-xl border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-bold text-slate-900">Submit: {selectedAssignForSubmit.title}</h3>
@@ -1110,7 +1110,7 @@ export function CourseDetailPage() {
 
       {/* Instructor Submissions & Grading Drawer/Modal */}
       {selectedAssignForGrading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 overflow-y-auto">
           <div className="w-full max-w-3xl rounded-xl bg-white shadow-xl border border-slate-200 p-6 space-y-4 my-8">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
@@ -1256,7 +1256,7 @@ export function CourseDetailPage() {
 
       {/* Upload Material Modal */}
       {isUploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-xl border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-bold text-slate-900">Upload Learning Material</h3>
@@ -1308,7 +1308,7 @@ export function CourseDetailPage() {
 
       {/* New Folder Modal */}
       {isFolderOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="w-full max-w-sm rounded-xl bg-white shadow-xl border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-bold text-slate-900">Create Folder</h3>
@@ -1350,7 +1350,7 @@ export function CourseDetailPage() {
 
       {/* Enroll Student Modal */}
       {isEnrollOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="w-full max-w-sm rounded-xl bg-white shadow-xl border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-bold text-slate-900">Enroll Student</h3>

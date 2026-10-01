@@ -57,4 +57,13 @@ This document preserves durable technical context, implementation constraints, a
 
 - **Clock Integrity:** Never trust client-reported timestamps for exam duration. Duration and expiration are strictly computed from `started_at` recorded on the server.
 - **Auto-Grading Safety:** Auto-grading routines must run idempotently on exam submission. Objective questions (MCQ, MSQ, True/False, Numerical) grade immediately; subjective questions (Short/Long answer) enter the manual grading queue.
-- **Proctoring Privacy:** The proctoring system is observable and behavioral only. Do not introduce webcam, audio, or biometric collection.
+- **Zero-Tolerance Prohibited Hardware Detection:** Detection of mobile phones, smartwatches, or secondary devices (`mobile_phone_detected`) skips the warning countdown entirely, instantly locking the session to `locked_violation` and requiring faculty re-entry authorization.
+- **Strict 6-Warning Escalation:** For non-fatal infractions (gaze deflections, window blur, tab switches), exactly 6 warnings are permitted. On warning 6, the attempt is immediately terminated and placed into `locked_violation` state with `auto_submitted: true`.
+- **Fixed Position Browser Lockdown:** In Chromium browsers, calling `window.history.pushState(null, '', window.location.href)` on mount establishes a history state that enables the `popstate` event to intercept and trap back-button navigation. Intercepted events record a `navigation_attempt` violation while keeping the student securely on the exam canvas.
+- **High-Urgency Visual Strobe Border:** Applying a full-viewport blinking red strobe border (`animate-pulse border-8 border-rose-600 bg-rose-500/15`) provides immediate, unmissable feedback to candidates that an infraction occurred.
+- **Faculty Re-Entry Authorization:** Locked attempts cannot be resumed without an instructor or proctor invoking `POST /exams/{exam_id}/attempts/{attempt_id}/unlock`. Unlocking resets violation locks and restores status to `in_progress`.
+- **Answer Durability:** Client answers are synchronized to localStorage and debounced server PUT requests; upon unlock, student returns to the delivery screen with all previously entered responses intact.
+- **Live Vision Proctoring Heuristics:** Client-side camera analysis runs offscreen without raw video streaming to avoid privacy violations or bandwidth costs, reporting discrete gaze events (`side_viewing`, `looking_down`, `face_missing`, `multiple_faces`) with biometric simulation fallback.
+- **Proctor Communication Boundaries:** All candidate inquiries during proctored exams must be strictly 1-to-1 between the candidate and the invigilator via the Proctor Help Desk. Student-to-student peer chat is disabled.
+
+

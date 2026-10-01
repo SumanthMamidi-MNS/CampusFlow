@@ -17,6 +17,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchUser = useCallback(async () => {
+    const demoRole = localStorage.getItem('campusflow_demo_role');
+    if (demoRole) {
+      const demoUsers: Record<string, User> = {
+        super_admin: {
+          id: 'demo-admin-id',
+          email: 'admin@campusflow.edu',
+          first_name: 'Dr. Sarah',
+          last_name: 'Jenkins',
+          status: 'active',
+          roles: ['super_admin', 'admin'],
+        },
+        faculty: {
+          id: 'demo-faculty-id',
+          email: 'faculty.cse@campusflow.edu',
+          first_name: 'Prof. Robert',
+          last_name: 'Chen',
+          status: 'active',
+          roles: ['faculty'],
+        },
+        student: {
+          id: 'demo-student-id',
+          email: 'student1@campusflow.edu',
+          first_name: 'Alex',
+          last_name: 'Rivera',
+          status: 'active',
+          roles: ['student'],
+        },
+        exam_controller: {
+          id: 'demo-controller-id',
+          email: 'controller@campusflow.edu',
+          first_name: 'Eleanor',
+          last_name: 'Vance',
+          status: 'active',
+          roles: ['exam_controller'],
+        },
+      };
+      if (demoUsers[demoRole]) {
+        setUser(demoUsers[demoRole]);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     const token = localStorage.getItem('access_token');
     if (!token) {
       setIsLoading(false);
@@ -48,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await apiClient.post('/auth/logout', null, { withCredentials: true });
     } finally {
       localStorage.removeItem('access_token');
+      localStorage.removeItem('campusflow_demo_role');
       setUser(null);
     }
   }, []);
