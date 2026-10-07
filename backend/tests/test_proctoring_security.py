@@ -15,7 +15,7 @@ from campusflow.domain.users.models import User
 
 
 @pytest.mark.asyncio
-async def test_proctoring_telemetry_and_auto_submit_threshold(client, db_session):
+async def test_observable_proctoring_threshold_and_faculty_review(client, db_session):
     # 1. Setup Users
     faculty = User(
         email="faculty.phase6@campusflow.edu",
@@ -38,15 +38,16 @@ async def test_proctoring_telemetry_and_auto_submit_threshold(client, db_session
     await assign_role_to_user(db_session, student.id, "student")
     await db_session.commit()
 
-    faculty_token = create_access_token({"sub": str(faculty.id)})
-    faculty_headers = {"Authorization": f"Bearer {faculty_token}"}
-
-    student_token = create_access_token({"sub": str(student.id)})
-    student_headers = {"Authorization": f"Bearer {student_token}"}
+    faculty_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(faculty.id)})}"}
+    student_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(student.id)})}"}
 
     # 2. Setup Academic Structure, Course Offering, and Question Bank
     dept = Department(name="Computer Security & Networks", code="CSN-P6")
-    term = AcademicTerm(name="Fall 2026 Phase 6", start_date=datetime.now(UTC).date(), end_date=(datetime.now(UTC) + timedelta(days=90)).date())
+    term = AcademicTerm(
+        name="Fall 2026 Phase 6",
+        start_date=datetime.now(UTC).date(),
+        end_date=(datetime.now(UTC) + timedelta(days=90)).date(),
+    )
     db_session.add_all([dept, term])
     await db_session.flush()
 
@@ -58,10 +59,11 @@ async def test_proctoring_telemetry_and_auto_submit_threshold(client, db_session
     db_session.add(offering)
     await db_session.flush()
 
-    enrollment = Enrollment(course_offering_id=offering.id, student_id=student.id, status="enrolled")
-    db_session.add(enrollment)
+    db_session.add(Enrollment(course_offering_id=offering.id, student_id=student.id, status="enrolled"))
 
-    bank = QuestionBank(department_id=dept.id, course_id=course.id, title="Security Exam Bank", created_by_id=faculty.id)
+    bank = QuestionBank(
+        department_id=dept.id, course_id=course.id, title="Security Exam Bank", created_by_id=faculty.id
+    )
     db_session.add(bank)
     await db_session.flush()
 
@@ -91,19 +93,13 @@ async def test_proctoring_telemetry_and_auto_submit_threshold(client, db_session
         duration_minutes=30,
         start_window=now - timedelta(minutes=5),
         end_window=now + timedelta(hours=2),
-        config={
-            "proctoring_enabled": True,
-            "max_violations": 3,
-            "auto_grade": True,
-        },
+        config={"proctoring_enabled": True, "max_violations": 3, "auto_grade": True},
         status="scheduled",
         created_by_id=faculty.id,
     )
     db_session.add(exam)
     await db_session.flush()
-
-    eq = ExamQuestion(exam_id=exam.id, question_id=q1.id, sort_order=1)
-    db_session.add(eq)
+    db_session.add(ExamQuestion(exam_id=exam.id, question_id=q1.id, sort_order=1))
     await db_session.commit()
 
     # 4. Student Starts Exam Attempt
@@ -115,99 +111,89 @@ async def test_proctoring_telemetry_and_auto_submit_threshold(client, db_session
     assert start_resp.status_code == 200, start_resp.text
     attempt_id = start_resp.json()["data"]["attempt_id"]
 
-    # 5. Ingest Proctoring Event 1: Tab Switch
-    ev1_resp = await client.post(
+    # 5. Event 1: tab switch — recorded, not auto-submitted, neutral wording
+    ev1 = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=student_headers,
-        json={
-            "event_type": "tab_switch",
-            "severity": "medium",
-            "details": {"action": "switch_to_external_tab"},
-        },
+        json={"event_type": "tab_switch", "severity": "medium", "details": {"action": "switch"}},
     )
-    assert ev1_resp.status_code == 200, ev1_resp.text
-    status1 = ev1_resp.json()["data"]
+    assert ev1.status_code == 200, ev1.text
+    status1 = ev1.json()["data"]
     assert status1["violations_count"] == 1
     assert status1["max_violations"] == 3
-    assert not status1["auto_submitted"]
-    assert "tab switch detected" in status1["warning"].lower()
+    assert status1["auto_submitted"] is False
+    assert status1["is_locked"] is False
+    assert "assessment-integrity notice" in status1["warning"].lower()
 
-    # 6. Ingest Proctoring Event 2: Window Blur
-    ev2_resp = await client.post(
+    # 6. Event 2: window blur
+    ev2 = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=student_headers,
-        json={
-            "event_type": "window_blur",
-            "severity": "low",
-            "details": {"reason": "focus_lost"},
-        },
+        json={"event_type": "window_blur", "severity": "low", "details": {"reason": "focus_lost"}},
     )
-    assert ev2_resp.status_code == 200
-    status2 = ev2_resp.json()["data"]
+    assert ev2.status_code == 200
+    status2 = ev2.json()["data"]
     assert status2["violations_count"] == 2
-    assert not status2["auto_submitted"]
+    assert status2["auto_submitted"] is False
 
-    # 7. Ingest Proctoring Event 3: Fullscreen Exit (Reaches threshold of 3 violations!)
-    ev3_resp = await client.post(
+    # 7. Event 3: fullscreen exit reaches the configured tolerance -> auto-submit
+    ev3 = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=student_headers,
-        json={
-            "event_type": "fullscreen_exit",
-            "severity": "high",
-            "details": {"reason": "escape_key_pressed"},
-        },
+        json={"event_type": "fullscreen_exit", "severity": "high", "details": {"reason": "escape"}},
     )
-    assert ev3_resp.status_code == 200
-    status3 = ev3_resp.json()["data"]
+    assert ev3.status_code == 200
+    status3 = ev3.json()["data"]
     assert status3["violations_count"] == 3
     assert status3["auto_submitted"] is True
-    assert "limit (3) reached" in status3["warning"]
+    assert status3["is_locked"] is False
+    # The attempt is concluded. Because this exam contains only objectively
+    # gradable questions, auto-grading completes it immediately.
+    assert status3["status"] in {"auto_submitted", "graded"}
+    assert "tolerance" in status3["warning"].lower()
 
-    # 8. Faculty Proctor Review Timeline
+    # 8. Faculty integrity timeline
     timeline_resp = await client.get(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=faculty_headers,
     )
     assert timeline_resp.status_code == 200, timeline_resp.text
     timeline = timeline_resp.json()["data"]
-    assert len(timeline) == 3
-    assert timeline[0]["event_type"] == "tab_switch"
-    assert timeline[1]["event_type"] == "window_blur"
-    assert timeline[2]["event_type"] == "fullscreen_exit"
+    assert [e["event_type"] for e in timeline] == ["tab_switch", "window_blur", "fullscreen_exit"]
 
-    # Students cannot view other's proctoring timelines
-    unauth_resp = await client.get(
+    # Students cannot read the proctoring timeline (faculty-only permission)
+    forbidden = await client.get(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=student_headers,
     )
-    assert unauth_resp.status_code == 403
+    assert forbidden.status_code == 403
 
-    # 9. Faculty Unlocks Exam Attempt after Review
+    # Students cannot authorise their own resumed attempt
+    student_unlock = await client.post(
+        f"/api/v1/exams/{exam.id}/attempts/{attempt_id}/unlock",
+        headers=student_headers,
+        json={"reason": "self-service"},
+    )
+    assert student_unlock.status_code == 403
+
+    # 9. Faculty authorises a resumed attempt after review
     unlock_resp = await client.post(
         f"/api/v1/exams/{exam.id}/attempts/{attempt_id}/unlock",
         headers=faculty_headers,
-        json={"reason": "Student explained peripheral monitor issue, granted re-entry."},
+        json={"reason": "Peripheral monitor issue verified; resumed."},
     )
     assert unlock_resp.status_code == 200, unlock_resp.text
     unlock_data = unlock_resp.json()["data"]
     assert unlock_data["status"] == "in_progress"
     assert unlock_data["proctor_violations_count"] == 0
 
-    # 10. Instant Mobile Phone Detection Lockout Test (Zero Tolerance)
-    phone_resp = await client.post(
+    # 10. After resumption the counter restarts and events are counted normally
+    ev4 = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=student_headers,
-        json={
-            "event_type": "mobile_phone_detected",
-            "severity": "critical",
-            "details": {"confidence": 0.96, "bounding_box": [120, 80, 240, 320]},
-        },
+        json={"event_type": "copy_paste_attempt", "severity": "medium", "details": None},
     )
-    assert phone_resp.status_code == 200, phone_resp.text
-    phone_data = phone_resp.json()["data"]
-    assert phone_data["is_locked"] is True
-    assert phone_data["auto_submitted"] is True
-    assert phone_data["violations_count"] == 3  # Instantly maxed out
-    assert "Mobile phone detected" in phone_data["warning"]
-
-
+    assert ev4.status_code == 200
+    status4 = ev4.json()["data"]
+    assert status4["violations_count"] == 1
+    assert status4["auto_submitted"] is False

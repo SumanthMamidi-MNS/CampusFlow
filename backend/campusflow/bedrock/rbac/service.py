@@ -49,6 +49,17 @@ DEFAULT_PERMISSIONS = [
         "description": "Grade student submissions",
         "module": "assignments",
     },
+    # Programming environment
+    {
+        "code": "programming:manage",
+        "description": "Author programming problems, test cases, and review submissions",
+        "module": "programming",
+    },
+    {
+        "code": "programming:submit",
+        "description": "Run and submit code for programming problems",
+        "module": "programming",
+    },
     # Question Banks & Exams
     {
         "code": "questions:manage",
@@ -94,6 +105,8 @@ ROLE_PERMISSION_MAPPINGS = {
         "materials:read",
         "assignments:create",
         "assignments:grade",
+        "programming:manage",
+        "programming:submit",
         "questions:manage",
         "exams:create",
         "exams:grade",
@@ -111,6 +124,8 @@ ROLE_PERMISSION_MAPPINGS = {
         "enrollments:manage",
         "materials:manage",
         "materials:read",
+        "programming:manage",
+        "programming:submit",
         "questions:manage",
         "exams:create",
         "exams:grade",
@@ -134,13 +149,21 @@ ROLE_PERMISSION_MAPPINGS = {
         "materials:read",
         "assignments:create",
         "assignments:grade",
+        "programming:manage",
+        "programming:submit",
         "questions:manage",
         "exams:create",
         "exams:grade",
         "exams:proctor_view",
         "analytics:view",
     ],
-    "student": ["courses:read", "materials:read", "assignments:submit", "exams:take"],
+    "student": [
+        "courses:read",
+        "materials:read",
+        "assignments:submit",
+        "exams:take",
+        "programming:submit",
+    ],
 }
 
 

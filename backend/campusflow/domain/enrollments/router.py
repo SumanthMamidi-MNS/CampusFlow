@@ -7,14 +7,12 @@ from campusflow.bedrock.api.responses import success_response
 from campusflow.bedrock.auth.dependencies import get_current_active_user
 from campusflow.bedrock.db.session import get_db
 from campusflow.bedrock.rbac.dependencies import require_permission
-from campusflow.domain.enrollments.schemas import (
-    EnrollmentResponse,
-    EnrollStudentRequest,
-)
+from campusflow.domain.enrollments.schemas import EnrollStudentRequest
 from campusflow.domain.enrollments.service import (
     bulk_enroll_students,
     drop_student,
     enroll_student,
+    get_enrollment_response,
     list_enrolled_students,
 )
 from campusflow.domain.users.models import User
@@ -39,8 +37,9 @@ async def enroll_student_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("enrollments:manage")),
 ):
-    enr = await enroll_student(db, offering_id, payload.student_id)
-    return success_response(EnrollmentResponse.model_validate(enr).model_dump(mode="json"))
+    await enroll_student(db, offering_id, payload.student_id)
+    response = await get_enrollment_response(db, offering_id, payload.student_id)
+    return success_response(response.model_dump(mode="json"))
 
 
 @router.delete("/{student_id}")

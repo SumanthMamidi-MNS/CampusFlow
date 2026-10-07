@@ -27,6 +27,7 @@ from campusflow.domain.exams.service import (
     get_proctoring_timeline,
     get_student_exam_result,
     grade_attempt_response,
+    list_attempt_responses,
     list_attempts_for_exam,
     list_exams,
     publish_exam_results,
@@ -261,7 +262,18 @@ async def get_my_exam_result_endpoint(
     return success_response(result.model_dump(mode="json"))
 
 
-# ── Proctoring Events & Timeline Review ─────────────────────────────────────
+# ── Manual Grading & Proctoring Review ─────────────────────────────────────
+
+@router.get("/exam-attempts/{attempt_id}/responses")
+async def list_attempt_responses_endpoint(
+    attempt_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:grade")),
+):
+    """Every response for an attempt, including subjective items awaiting manual grading."""
+    responses = await list_attempt_responses(db, attempt_id=attempt_id)
+    return success_response([r.model_dump(mode="json") for r in responses])
+
 
 @router.post("/exam-attempts/{attempt_id}/proctoring-events")
 async def record_proctoring_event_endpoint(

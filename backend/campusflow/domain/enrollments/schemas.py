@@ -15,6 +15,11 @@ class EnrollmentResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     email: EmailStr | None = None
+    # Denormalised display fields, matching the assignments, exams and
+    # programming contracts so the UI can render a student consistently
+    # regardless of which module the row came from.
+    student_name: str | None = None
+    student_email: str | None = None
     status: str
     enrolled_at: datetime
     model_config = ConfigDict(from_attributes=True)

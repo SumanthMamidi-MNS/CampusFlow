@@ -63,9 +63,92 @@ from campusflow.domain.exams.models import (  # noqa: E402
     Exam,
     ExamQuestion,
     ExamAttempt,
+    ExamResponse,
     ProctoringEvent,
 )
 from campusflow.domain.notifications.models import NotificationPreference  # noqa: E402
+from campusflow.domain.programming.models import CodingProblem, CodingTestCase  # noqa: E402
+
+
+def _answer_for(question, correct: bool) -> dict:
+    """Build a plausible ``answer_data`` payload for a question type."""
+    options = list(question.options)
+    qtype = question.question_type
+
+    if qtype == "mcq":
+        label = next((o.label for o in options if o.is_correct), "A")
+        if not correct:
+            label = next((o.label for o in options if not o.is_correct), label)
+        return {"selected": label}
+
+    if qtype == "msq":
+        labels = [o.label for o in options if o.is_correct]
+        if not correct:
+            wrong = [o.label for o in options if not o.is_correct]
+            labels = wrong[:1] or labels
+        return {"selected": labels}
+
+    if qtype == "true_false":
+        body = next((o.body for o in options if o.is_correct), "True")
+        if not correct:
+            body = next((o.body for o in options if not o.is_correct), "False")
+        return {"selected": body}
+
+    if qtype == "numerical":
+        meta = question.metadata_info or {}
+        target = float(meta.get("answer") or 0)
+        return {"value": target if correct else target + 1000}
+
+    if qtype == "fill_blank":
+        accepted = (question.metadata_info or {}).get("accepted_answers") or [""]
+        return {"blanks": [accepted[0]] if correct else ["incorrect-answer"]}
+
+    return {"text": "Reviewed by faculty during the marking session."}
+
+
+async def _seed_answer_sheet(
+    session,
+    exam_questions,
+    questions,
+    *,
+    attempt_id,
+    wrong_types: set[str],
+    faculty_id,
+    now,
+) -> float:
+    """Insert one response per exam question and return the total awarded.
+
+    Deterministic question types are marked all-or-nothing, mirroring the
+    auto-grader, so the stored score always agrees with the stored answers.
+    """
+    total = 0.0
+    for eq, question in zip(exam_questions, questions, strict=True):
+        is_correct = question.question_type not in wrong_types
+        marks = eq.marks_override if eq.marks_override is not None else question.marks
+        manual = question.question_type in {"short_answer", "essay"}
+        awarded = float(marks) if is_correct else 0.0
+
+        if manual:
+            # Short answers are marked by a person, so record who graded them.
+            awarded = float(marks) if is_correct else 0.0
+
+        session.add(
+            ExamResponse(
+                attempt_id=attempt_id,
+                exam_question_id=eq.id,
+                answer_data=_answer_for(question, is_correct),
+                time_spent_seconds=45,
+                marks_awarded=awarded,
+                is_auto_graded=not manual,
+                graded_by_id=faculty_id if manual else None,
+                graded_at=now if manual else None,
+                feedback="Well structured answer." if manual and is_correct else None,
+            )
+        )
+        total += awarded
+
+    await session.flush()
+    return total
 
 
 async def seed():
@@ -552,15 +635,16 @@ async def seed():
                 select(Question).where(Question.question_bank_id == qb.id).order_by(Question.created_at.asc())
             )
             exam_qs = questions_res.scalars().all()
+            exam_questions: list[ExamQuestion] = []
             for idx, q in enumerate(exam_qs):
-                session.add(
-                    ExamQuestion(
-                        exam_id=exam.id,
-                        question_id=q.id,
-                        sort_order=idx + 1,
-                        marks_override=q.marks,
-                    )
+                eq = ExamQuestion(
+                    exam_id=exam.id,
+                    question_id=q.id,
+                    sort_order=idx + 1,
+                    marks_override=q.marks,
                 )
+                session.add(eq)
+                exam_questions.append(eq)
             await session.flush()
 
             # Student 1 Attempt (Completed & Scored)
@@ -570,13 +654,23 @@ async def seed():
                 status="submitted",
                 started_at=now - timedelta(days=1, hours=3),
                 submitted_at=now - timedelta(days=1, hours=2),
-                total_score=14.0,
-                percentage=93.3,
                 proctor_violations_count=1,
                 proctor_flags=["tab_switch"],
             )
             session.add(att1)
             await session.flush()
+
+            score1 = await _seed_answer_sheet(
+                session,
+                exam_questions,
+                exam_qs,
+                attempt_id=att1.id,
+                wrong_types={"true_false"},
+                faculty_id=users["faculty.cse@campusflow.edu"].id,
+                now=now,
+            )
+            att1.total_score = score1
+            att1.percentage = round((score1 / exam.total_marks) * 100, 2) if exam.total_marks else 0.0
 
             # Proctoring event for Student 1
             session.add(
@@ -596,13 +690,23 @@ async def seed():
                 status="submitted",
                 started_at=now - timedelta(days=1, hours=2),
                 submitted_at=now - timedelta(days=1, hours=1),
-                total_score=11.0,
-                percentage=73.3,
                 proctor_violations_count=0,
                 proctor_flags=[],
             )
             session.add(att2)
             await session.flush()
+
+            score2 = await _seed_answer_sheet(
+                session,
+                exam_questions,
+                exam_qs,
+                attempt_id=att2.id,
+                wrong_types={"msq", "true_false"},
+                faculty_id=users["faculty.cse@campusflow.edu"].id,
+                now=now,
+            )
+            att2.total_score = score2
+            att2.percentage = round((score2 / exam.total_marks) * 100, 2) if exam.total_marks else 0.0
 
             # Student 3 Attempt (In Progress)
             att3 = ExamAttempt(
@@ -632,6 +736,64 @@ async def seed():
                 status="scheduled",
             )
             session.add(final_exam)
+
+        # ── Programming Environment ──────────────────────────────────────────
+        program_title = "Warm-up: Echo Input in Upper Case"
+        prog_res = await session.execute(
+            select(CodingProblem).where(
+                CodingProblem.course_offering_id == offering_dsa.id,
+                CodingProblem.title == program_title,
+            )
+        )
+        if not prog_res.scalar_one_or_none():
+            problem = CodingProblem(
+                course_offering_id=offering_dsa.id,
+                created_by_id=users["faculty.cse@campusflow.edu"].id,
+                title=program_title,
+                description=(
+                    "Read one line of input from standard input and print it back in upper case.\n\n"
+                    "Example:\n  input:  hello world\n  output: HELLO WORLD"
+                ),
+                language="python",
+                starter_code="line = input()\n# print the line in upper case",
+                total_marks=10.0,
+                time_limit_ms=5000,
+                memory_limit_kb=131072,
+                is_published=True,
+            )
+            session.add(problem)
+            await session.flush()
+            session.add_all(
+                [
+                    CodingTestCase(
+                        problem_id=problem.id,
+                        name="Sample: lower-case word",
+                        stdin="campusflow\n",
+                        expected_output="CAMPUSFLOW\n",
+                        is_hidden=False,
+                        comparison="trimmed",
+                        sort_order=0,
+                    ),
+                    CodingTestCase(
+                        problem_id=problem.id,
+                        name="Sentence with spaces",
+                        stdin="hello world\n",
+                        expected_output="HELLO WORLD\n",
+                        is_hidden=True,
+                        comparison="trimmed",
+                        sort_order=1,
+                    ),
+                    CodingTestCase(
+                        problem_id=problem.id,
+                        name="Mixed characters",
+                        stdin="CampusFlow 2026\n",
+                        expected_output="CAMPUSFLOW 2026\n",
+                        is_hidden=True,
+                        comparison="trimmed",
+                        sort_order=2,
+                    ),
+                ]
+            )
 
         await session.commit()
 

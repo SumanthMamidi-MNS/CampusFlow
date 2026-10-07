@@ -26,6 +26,7 @@ from campusflow.domain.assignments.service import (
     get_my_submission,
     grade_submission,
     list_assignments,
+    list_my_assignments,
     list_submissions,
     submit_assignment,
     update_assignment,
@@ -43,6 +44,16 @@ async def list_assignments_endpoint(
     current_user: User = Depends(get_current_active_user),
 ):
     assignments = await list_assignments(db, course_offering_id=offering_id, current_user=current_user)
+    return success_response([a.model_dump(mode="json") for a in assignments])
+
+
+@router.get("/assignments/me")
+async def list_my_assignments_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Assignments across every offering the current user participates in."""
+    assignments = await list_my_assignments(db, current_user=current_user)
     return success_response([a.model_dump(mode="json") for a in assignments])
 
 

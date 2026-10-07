@@ -23,6 +23,7 @@ from campusflow.domain.exams.models import (
 )
 from campusflow.domain.exams.schemas import (
     BatchSaveAnswersRequest,
+    ExamAttemptResponseDetail,
     ExamCreate,
     ExamDeliveryResponse,
     ExamQuestionBatchAdd,
@@ -917,7 +918,67 @@ async def get_student_exam_result(
     )
 
 
+async def list_attempt_responses(
+    db: AsyncSession,
+    attempt_id: uuid.UUID,
+) -> list[ExamAttemptResponseDetail]:
+    """Faculty view of every response in an attempt (includes the manual-grading queue)."""
+    query = (
+        select(ExamAttempt)
+        .where(ExamAttempt.id == attempt_id)
+        .options(
+            selectinload(ExamAttempt.responses)
+            .selectinload(ExamResponse.exam_question)
+            .selectinload(ExamQuestion.question)
+            .selectinload(Question.options),
+        )
+    )
+    res = await db.execute(query)
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise NotFoundError("Exam attempt not found")
+
+    details: list[ExamAttemptResponseDetail] = []
+    for r in attempt.responses:
+        eq = r.exam_question
+        q = eq.question
+        correct_summary = (
+            ", ".join(o.label for o in q.options if o.is_correct) if q.options else None
+        )
+        details.append(
+            ExamAttemptResponseDetail(
+                id=r.id,
+                exam_question_id=r.exam_question_id,
+                question_type=q.question_type,
+                question_body=q.body,
+                max_marks=eq.marks_override if eq.marks_override is not None else q.marks,
+                answer_data=r.answer_data,
+                marks_awarded=r.marks_awarded,
+                is_auto_graded=r.is_auto_graded,
+                feedback=r.feedback,
+                correct_answer_summary=correct_summary,
+            )
+        )
+    return details
+
+
 # ── Proctoring & Violation Monitoring ───────────────────────────────────────
+#
+# CampusFlow uses observable, rule-based proctoring (see ADR-003). Events are
+# recorded as an append-only audit trail; the institution-configured tolerance
+# auto-submits the attempt rather than locking the candidate out. Faculty can
+# review the timeline and authorise a resumed attempt when a record is disputed.
+
+DEFAULT_MAX_VIOLATIONS = 5
+
+
+def _resolve_max_violations(exam: Exam) -> int:
+    raw = (exam.config or {}).get("max_violations", DEFAULT_MAX_VIOLATIONS)
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_VIOLATIONS
+
 
 async def record_proctoring_event(
     db: AsyncSession,
@@ -938,17 +999,19 @@ async def record_proctoring_event(
     if attempt.student_id != student_user.id:
         raise AuthorizationError("Unauthorized attempt access.")
 
+    max_violations = _resolve_max_violations(attempt.exam)
+
     if attempt.status != "in_progress":
         return ProctoringStatusResponse(
             violations_count=attempt.proctor_violations_count,
-            max_violations=(attempt.exam.config or {}).get("max_violations", 6),
+            max_violations=max_violations,
             auto_submitted=True,
-            is_locked=attempt.status == "locked_violation",
+            is_locked=False,
             status=attempt.status,
-            warning="Exam attempt already concluded or locked.",
+            warning="This assessment attempt has already concluded.",
         )
 
-    # Record event
+    # Record the event in the append-only proctoring trail.
     event = ProctoringEvent(
         attempt_id=attempt.id,
         event_type=payload.event_type,
@@ -959,51 +1022,53 @@ async def record_proctoring_event(
     db.add(event)
 
     attempt.proctor_violations_count += 1
-    max_violations = (attempt.exam.config or {}).get("max_violations", 6)
-
     auto_submitted = False
-    is_locked = False
-    warning = None
+    warning: str | None = None
 
-    is_phone_violation = payload.event_type in ("mobile_phone_detected", "phone_detected", "unauthorized_device_detected")
-
-    if is_phone_violation or attempt.proctor_violations_count >= max_violations:
+    if attempt.proctor_violations_count >= max_violations:
+        # Threshold reached: submit the attempt automatically (ADR-008).
         flags = list(attempt.proctor_flags)
-        if is_phone_violation and "phone_detected" not in flags:
-            flags.append("phone_detected")
-        if "max_violations_exceeded" not in flags and not is_phone_violation:
+        if "max_violations_exceeded" not in flags:
             flags.append("max_violations_exceeded")
         attempt.proctor_flags = flags
-        attempt.status = "locked_violation"
-        auto_submitted = True
-        is_locked = True
-        if is_phone_violation:
-            attempt.proctor_violations_count = max_violations
-            warning = "CRITICAL SECURITY BREACH: Mobile phone detected during exam session. Exam has been instantly terminated and locked. Direct faculty authorization required."
-            action_name = "exam.attempt_locked_phone_detected"
-        else:
-            warning = f"Maximum proctoring violation limit ({max_violations}) reached. Exam session has been locked and suspended. Faculty permission required to continue."
-            action_name = "exam.attempt_locked_violation"
+        await db.commit()
 
+        await submit_attempt(db, attempt.id, student_user, is_auto_submit=True)
+        await db.refresh(attempt)
+        auto_submitted = True
+        warning = (
+            "This session reached the institution's assessment-integrity tolerance "
+            "and was submitted automatically. If you believe an event was recorded "
+            "in error, contact your course instructor for a review."
+        )
         await record_audit_event(
             db=db,
             user_id=student_user.id,
             user_email=student_user.email,
-            action=action_name,
+            action="exam.attempt_auto_submitted_violations",
             resource_type="exam_attempt",
             resource_id=str(attempt.id),
-            extra_data={"violations_count": attempt.proctor_violations_count, "max_violations": max_violations, "event_type": payload.event_type},
+            extra_data={
+                "violations_count": attempt.proctor_violations_count,
+                "max_violations": max_violations,
+                "event_type": payload.event_type,
+            },
         )
+        await db.commit()
     else:
-        warning = f"Security Alert: {payload.event_type.replace('_', ' ')} detected (Violation {attempt.proctor_violations_count} of {max_violations})."
-
-    await db.commit()
+        remaining = max_violations - attempt.proctor_violations_count
+        warning = (
+            f"Assessment-integrity notice: an off-screen activity was recorded. "
+            f"{remaining} of {max_violations} allowance remaining before this session "
+            f"is submitted automatically."
+        )
+        await db.commit()
 
     return ProctoringStatusResponse(
         violations_count=attempt.proctor_violations_count,
         max_violations=max_violations,
         auto_submitted=auto_submitted,
-        is_locked=is_locked,
+        is_locked=False,
         status=attempt.status,
         warning=warning,
     )
@@ -1034,14 +1099,14 @@ async def unlock_exam_attempt(
         attempt.proctor_violations_count = max(0, attempt.proctor_violations_count - 1)
 
     flags = [f for f in attempt.proctor_flags if f != "max_violations_exceeded"]
-    flags.append(f"unlocked_by_{faculty_user.email}")
+    flags.append(f"resumed_by_{faculty_user.email}")
     attempt.proctor_flags = flags
 
     await record_audit_event(
         db=db,
         user_id=faculty_user.id,
         user_email=faculty_user.email,
-        action="exam.attempt_unlocked",
+        action="exam.attempt_resumed",
         resource_type="exam_attempt",
         resource_id=str(attempt.id),
         extra_data={"reason": reason, "violations_reset_to": attempt.proctor_violations_count},

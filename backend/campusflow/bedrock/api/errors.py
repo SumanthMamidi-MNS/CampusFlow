@@ -40,6 +40,11 @@ class ConflictError(AppException):
         super().__init__(409, "CONFLICT", message, details)
 
 
+class ServiceUnavailableError(AppException):
+    def __init__(self, message: str = "Service unavailable", details: list[Any] | None = None):
+        super().__init__(503, "SERVICE_UNAVAILABLE", message, details)
+
+
 def _format_error_response(
     request: Request, error_code: str, message: str, details: list[Any]
 ) -> dict[str, Any]:

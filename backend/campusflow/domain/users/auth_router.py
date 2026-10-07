@@ -48,7 +48,7 @@ async def login(
         value=refresh_token,
         httponly=True,
         secure=not settings.debug,
-        samesite="lax",
+        samesite="strict",
         max_age=settings.refresh_token_expire_days * 86400,
     )
 
@@ -103,7 +103,7 @@ async def refresh_tokens(
         value=new_refresh_token,
         httponly=True,
         secure=not settings.debug,
-        samesite="lax",
+        samesite="strict",
         max_age=settings.refresh_token_expire_days * 86400,
     )
 

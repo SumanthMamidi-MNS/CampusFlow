@@ -97,6 +97,8 @@ class AssignmentResponse(BaseModel):
     published_at: datetime | None = None
     created_by_id: uuid.UUID | None = None
     created_at: datetime
+    course_code: str | None = None
+    course_title: str | None = None
     my_submission: AssignmentSubmissionResponse | None = None
     submissions_count: int | None = None
 

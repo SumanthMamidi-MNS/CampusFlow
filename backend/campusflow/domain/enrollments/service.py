@@ -52,6 +52,43 @@ async def enroll_student(
     return new_enr
 
 
+async def get_enrollment_response(
+    db: AsyncSession, offering_id: uuid.UUID, student_id: uuid.UUID
+) -> EnrollmentResponse:
+    """Build the response for a single enrollment with the student's display name.
+
+    Reads the row back with the student joined rather than touching the ORM
+    relationship directly, which would trigger a lazy load outside the async
+    greenlet context.
+    """
+    stmt = (
+        select(Enrollment, User)
+        .join(User, User.id == Enrollment.student_id)
+        .where(
+            Enrollment.course_offering_id == offering_id,
+            Enrollment.student_id == student_id,
+        )
+    )
+    res = await db.execute(stmt)
+    row = res.one_or_none()
+    if row is None:
+        raise NotFoundError("Enrollment not found.")
+
+    enr, user = row
+    return EnrollmentResponse(
+        id=enr.id,
+        course_offering_id=enr.course_offering_id,
+        student_id=enr.student_id,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        email=user.email,
+        student_name=f"{user.first_name} {user.last_name}".strip(),
+        student_email=user.email,
+        status=enr.status,
+        enrolled_at=enr.enrolled_at,
+    )
+
+
 async def drop_student(db: AsyncSession, offering_id: uuid.UUID, student_id: uuid.UUID) -> None:
     res = await db.execute(
         select(Enrollment).where(
@@ -86,6 +123,8 @@ async def list_enrolled_students(
             first_name=u.first_name,
             last_name=u.last_name,
             email=u.email,
+            student_name=f"{u.first_name} {u.last_name}".strip(),
+            student_email=u.email,
             status=enr.status,
             enrolled_at=enr.enrolled_at,
         )

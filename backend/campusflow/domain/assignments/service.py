@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from campusflow.bedrock.api.errors import NotFoundError
 from campusflow.bedrock.audit.service import record_audit_event
+from campusflow.bedrock.rbac.service import get_user_roles
 from campusflow.bedrock.storage.service import get_storage
 from campusflow.domain.assignments.models import (
     Assignment,
@@ -27,7 +28,7 @@ from campusflow.domain.assignments.schemas import (
     GradeSubmissionRequest,
     SubmissionGradeResponse,
 )
-from campusflow.domain.courses.models import CourseOffering
+from campusflow.domain.courses.models import CourseOffering, FacultyAssignment
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.notifications.service import (
     create_notification,
@@ -212,6 +213,114 @@ async def list_assignments(
             grade_resp = None
             if sub.grade:
                 grade_resp = SubmissionGradeResponse.model_validate(sub.grade)
+            resp.my_submission = AssignmentSubmissionResponse(
+                id=sub.id,
+                assignment_id=sub.assignment_id,
+                student_id=sub.student_id,
+                student_name=f"{current_user.first_name} {current_user.last_name}",
+                student_email=current_user.email,
+                status=sub.status,
+                submitted_at=sub.submitted_at,
+                content_text=sub.content_text,
+                file_path=sub.file_path,
+                file_name=sub.file_name,
+                file_size=sub.file_size,
+                mime_type=sub.mime_type,
+                is_late=sub.is_late,
+                late_days=sub.late_days,
+                grade=grade_resp,
+            )
+        resp.submissions_count = counts_map.get(a.id, 0)
+        results.append(resp)
+
+    return results
+
+
+# Roles that may view assignments across every offering in the institution.
+_ACADEMIC_OVERVIEW_ROLES = {"super_admin", "admin", "department_head", "exam_controller"}
+
+
+async def list_my_assignments(
+    db: AsyncSession,
+    current_user: User,
+) -> list[AssignmentResponse]:
+    """Return assignments the current user should see across all their offerings.
+
+    Students see assignments for offerings they are enrolled in; faculty see
+    offerings they teach; academic-overview roles see everything.
+    """
+    roles = set(await get_user_roles(db, current_user.id))
+    has_overview = bool(roles & _ACADEMIC_OVERVIEW_ROLES)
+
+    offering_ids: set[uuid.UUID] = set()
+
+    faculty_res = await db.execute(
+        select(FacultyAssignment.course_offering_id).where(
+            FacultyAssignment.faculty_id == current_user.id
+        )
+    )
+    offering_ids.update(faculty_res.scalars().all())
+
+    enroll_res = await db.execute(
+        select(Enrollment.course_offering_id).where(
+            Enrollment.student_id == current_user.id,
+            Enrollment.status == "enrolled",
+        )
+    )
+    offering_ids.update(enroll_res.scalars().all())
+
+    if not has_overview and not offering_ids:
+        return []
+
+    query = select(Assignment).order_by(Assignment.due_date.asc())
+    if not has_overview:
+        query = query.where(Assignment.course_offering_id.in_(offering_ids))
+
+    res = await db.execute(query)
+    assignments = list(res.scalars().all())
+    if not assignments:
+        return []
+
+    assign_ids = [a.id for a in assignments]
+
+    # Offering → course metadata for display.
+    offering_map: dict[uuid.UUID, CourseOffering] = {}
+    offering_ids_in_use = {a.course_offering_id for a in assignments}
+    offering_res = await db.execute(
+        select(CourseOffering).where(CourseOffering.id.in_(offering_ids_in_use))
+    )
+    for offering in offering_res.scalars().all():
+        offering_map[offering.id] = offering
+
+    sub_res = await db.execute(
+        select(AssignmentSubmission)
+        .where(
+            AssignmentSubmission.assignment_id.in_(assign_ids),
+            AssignmentSubmission.student_id == current_user.id,
+        )
+        .options(selectinload(AssignmentSubmission.grade))
+    )
+    subs_by_assign = {s.assignment_id: s for s in sub_res.scalars().all()}
+
+    count_res = await db.execute(
+        select(AssignmentSubmission.assignment_id, func.count(AssignmentSubmission.id))
+        .where(AssignmentSubmission.assignment_id.in_(assign_ids))
+        .group_by(AssignmentSubmission.assignment_id)
+    )
+    counts_map = dict(count_res.all())
+
+    results: list[AssignmentResponse] = []
+    for a in assignments:
+        resp = AssignmentResponse.model_validate(a)
+        offering = offering_map.get(a.course_offering_id)
+        if offering and offering.course:
+            resp.course_code = offering.course.code
+            resp.course_title = offering.course.title
+        sub = subs_by_assign.get(a.id)
+        if sub:
+            grade_resp = (
+                SubmissionGradeResponse.model_validate(sub.grade) if sub.grade else None
+            )
             resp.my_submission = AssignmentSubmissionResponse(
                 id=sub.id,
                 assignment_id=sub.assignment_id,
@@ -663,7 +772,9 @@ async def get_course_gradebook(
 
     return GradebookResponse(
         course_offering_id=course_offering_id,
-        course_title=f"Section {offering.section}" if offering.section else "Course Section",
+        # The course's real title. Previously this was built from `offering.section`,
+        # which already reads "Section A" and produced "Section Section A".
+        course_title=offering.course.title if offering.course else "Course",
         assignments=assign_summary,
         students=students_entries,
     )
