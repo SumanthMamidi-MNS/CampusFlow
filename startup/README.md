@@ -52,15 +52,11 @@ startup\stop-campusflow.bat
      - **Mailpit**: SMTP on `1025`, Web UI on `8025` (local test email server)
      - **Piston**: Port `2000` (sandboxed code execution; bound to host loopback only and never exposed publicly)
 
-5. **Dedicated Backend Process**
-   - Launches the FastAPI backend in its own titled terminal window (`CampusFlow Backend`) with live auto-reload enabled.
-   - Tracks the process ID in `startup/.backend.pid` for clean shutdown.
-   - Command: `uv run uvicorn campusflow.main:app --host 0.0.0.0 --port 8000 --reload` (or `python -m uvicorn`).
-
-6. **Dedicated Frontend Process**
-   - Launches the Vite dev server in its own titled terminal window (`CampusFlow Frontend`) with hot-module replacement (HMR).
-   - Tracks the process ID in `startup/.frontend.pid` for clean shutdown.
-   - Command: `npm run dev` in `frontend/`.
+5. **Backend and Frontend in the Same Window**
+   - Launches the FastAPI backend (`uvicorn`, auto-reload off for a clean log) and the Vite dev server **inside this same terminal** with `Start-Process -NoNewWindow`, so both logs stream interleaved in one place.
+   - Tracks the process IDs in `startup/.backend.pid` and `startup/.frontend.pid` for clean shutdown.
+   - Backend: `python -m uvicorn campusflow.main:app --host 127.0.0.1 --port 8000`.
+   - Frontend: `npm run dev` in `frontend/`.
 
 7. **Automated Health & Readiness Polling**
    - Polls the backend health check endpoint (`http://localhost:8000/api/health`) up to 30 seconds until HTTP 200 is confirmed.
@@ -69,6 +65,12 @@ startup\stop-campusflow.bat
 8. **Automatic Browser Launch**
    - Once both services are verified healthy, automatically opens Google Chrome to `http://localhost:5173`.
    - Never opens the browser if any service fails readiness checks.
+
+9. **Single-Window Lifecycle**
+   - The window stays open with the live logs. Pressing any key runs `stop-campusflow.bat`, which terminates the backend and frontend and stops the containers.
+   - When Docker is unavailable the launcher continues with a local SQLite database (via `scripts/bootstrap.py`) instead of failing; only sandboxed code execution is unavailable in that mode.
+
+> The root `start.bat` is a thin wrapper around this script, so you can double-click either one.
 
 ---
 
