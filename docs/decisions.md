@@ -109,6 +109,78 @@ This document records the foundational architectural and technical decisions mad
   5. **Faculty Live Invigilator Hub:** Provide an 8-candidate real-time video wall with live telemetry, status badges, HD stream inspection, one-click re-entry authorization, and mass announcement broadcast.
   6. **Private 1-to-1 Invigilator Channel:** Replace peer messaging with a dedicated Proctor Help Desk strictly connecting candidate to invigilator.
 * **Consequences:** Completely eliminates illicit device usage and browser escape routes, provides comprehensive real-time situational awareness for faculty, and removes student-to-student collusion risks.
+* **Status update (2026-10-06):** **Superseded by ADR-013.** The camera/gaze, strobe, and
+  lockout mechanisms introduced by this decision were removed; see ADR-013 for the audit
+  findings and rationale.
+
+---
+
+### ADR-013: Revert to Observable Rule-Based Proctoring (Supersedes ADR-011 & ADR-012)
+* **Status:** Accepted (2026-10-06)
+* **Context:** A full repository audit found that ADR-011 and ADR-012 had drifted away from
+  the product's own architectural principles. The shipped implementation included:
+  1. Webcam capture with client-side "gaze"/"phone" heuristics presented as AI detection,
+     contradicting ADR-003 (no webcam) and creating privacy and false-positive liability.
+  2. A synthetic, canvas-drawn "photorealistic candidate feed" shown when no camera existed,
+     which fabricated visual data instead of reporting an error.
+  3. Hardcoded fake candidates and fake 1080p streams in the faculty "Live Invigilator Hub",
+     meaning the video wall displayed invented people and telemetry.
+  4. Blinking full-viewport strobe warnings and "CRITICAL SECURITY BREACH" copy, which
+     conflicts with the responsible-educational-UX requirements (no aggressive visual
+     warnings, no surveillance messaging).
+  5. A student-facing "Faculty Authorization Simulator" button that let a candidate invoke
+     the faculty unlock endpoint, plus hidden `Ctrl+Alt+Shift` QA hotkeys embedded in the
+     student exam canvas.
+* **Decision:** Remove camera-based detection, synthetic feeds, strobe warnings, the video
+  wall, the student unlock simulator, and the hidden hotkeys. Retain and harden only:
+  server-enforced timing, observable browser telemetry, the append-only proctoring trail,
+  faculty timeline review, threshold auto-submission, and a permission-gated, audited
+  faculty-authorised resumption. Unify the tolerance on `config.max_violations` (default 5).
+* **Consequences:** The proctoring subsystem matches ADR-003 and ADR-008 again. Candidates
+  receive neutral, non-anxious messaging; instructors retain full auditability; fabricated
+  evidence can no longer appear anywhere in the product. `locked_violation` remains a valid
+  historical attempt status but is no longer produced.
+
+---
+
+### ADR-014: Piston Sidecar for Sandboxed Student Code Execution
+* **Status:** Accepted (2026-10-06)
+* **Context:** The lecturer requirement is that a student can write and run Python inside
+  CampusFlow with no local installation. Executing untrusted code is the highest-risk
+  capability in the system: naive `subprocess.run()` inside FastAPI would allow CPU
+  exhaustion, memory bombs, fork abuse, filesystem access, and network egress.
+* **Decision:** Keep the modular monolith and delegate execution to a self-hosted Piston
+  container reached over HTTP behind the project-agnostic `campusflow.bedrock.runner`
+  protocol. Enforce a global concurrency semaphore, hard overall timeout, per-problem CPU
+  and memory ceilings, output truncation, and fail-closed behaviour (HTTP 503) when the
+  sandbox is unavailable. Bind Piston to host loopback only.
+* **Alternatives considered:** (a) an in-repo Docker-SDK runner launching one ephemeral
+  container per execution — rejected for the volume of custom security code it requires and
+  its slow cold-start per run; (b) `subprocess` with rlimits/nsjail — rejected as
+  insufficient isolation for untrusted student code. Gravity Index has no managed sandbox
+  that satisfies self-hosting and portability requirements.
+* **Consequences:** One additional container in the deployment. The `CodeRunner` interface
+  keeps the choice swappable: replacing Piston with another engine is a single adapter.
+  Institutions that disable the feature set `CODE_RUNNER_ENABLED=false`.
+
+---
+
+### ADR-015: Authentication Rate Limiting, Secret Enforcement, and No Hardcoded Credentials
+* **Status:** Accepted (2026-10-06)
+* **Context:** The audit found that documented rate limiting did not exist, a default JWT
+  secret could be used in production, `.env.example` used a prefix the settings loader does
+  not honour (making the template silently inert), and a super-admin account with a
+  published password was auto-created by application startup logic.
+* **Decision:** (1) Add `AuthRateLimitMiddleware` protecting only credential endpoints
+  (login, refresh, password reset) with a sliding window; (2) refuse to start when `DEBUG` is
+  false and the shipped placeholder secret is still configured; (3) correct `.env.example`
+  to unprefixed variable names; (4) remove user creation from the application lifespan so
+  demo accounts exist only via the explicit seed script; (5) set the refresh cookie to
+  `SameSite=Strict`.
+* **Consequences:** Brute-force attempts are throttled per client address without penalising
+  many legitimate users behind a single campus NAT. Deployments must set a real secret,
+  which is a deliberate fail-fast. Multi-worker deployments should back the limiter with
+  Redis (`REDIS_URL` is already provisioned).
 
 
 

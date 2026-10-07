@@ -173,6 +173,58 @@ uv run python ../scripts/seed.py
 
 ---
 
+## 6.1 Programming Environment & Code Execution
+
+The programming feature (`/programming`) lets students write and run Python entirely in the
+browser, then submit for automated test-case grading. Execution is delegated to a **Piston**
+sidecar container; the API never runs untrusted code itself (ADR-014).
+
+### Local setup
+`docker compose up -d postgres redis mailpit piston piston-init` starts the sandbox. The
+`piston-init` one-shot container installs the Python runtime on first start (idempotent), so
+the first launch can take a minute or two. `startup/start-campusflow.bat` includes this
+automatically.
+
+Piston is bound to host loopback only (`127.0.0.1:2000`); the backend reaches it at
+`http://piston:2000` on the compose network.
+
+### Configuration
+| Variable | Default | Purpose |
+|---|---|---|
+| `CODE_RUNNER_ENABLED` | `true` | Master switch; set `false` to disable execution |
+| `CODE_RUNNER_BACKEND` | `piston` | Runner implementation to use |
+| `CODE_RUNNER_URL` | `http://localhost:2000` | Piston base URL (`http://piston:2000` in compose) |
+| `CODE_RUNNER_PYTHON_VERSION` | `*` | Piston runtime version (`3.10.0` in compose) |
+| `CODE_RUNNER_CLIENT_TIMEOUT_SECONDS` | `20` | Overall client timeout |
+| `CODE_RUN_MAX_CONCURRENCY` | `4` | Global concurrent executions |
+| `CODE_RUN_DEFAULT_TIMEOUT_MS` | `5000` | Default per-run CPU limit |
+| `CODE_RUN_MAX_TIMEOUT_MS` | `10000` | Ceiling a problem may request |
+| `CODE_RUN_DEFAULT_MEMORY_KB` | `131072` | Default 128 MB memory ceiling |
+| `AUTH_RATE_LIMIT_REQUESTS` | `20` | Auth attempts allowed per window per IP |
+| `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate-limit window |
+
+### API surface
+```
+GET    /api/v1/programming/problems
+POST   /api/v1/programming/problems                      (programming:manage)
+GET    /api/v1/programming/problems/{id}
+PATCH  /api/v1/programming/problems/{id}                 (programming:manage)
+DELETE /api/v1/programming/problems/{id}                 (programming:manage)
+GET    /api/v1/programming/problems/{id}/test-cases      (programming:manage)
+POST   /api/v1/programming/problems/{id}/test-cases      (programming:manage)
+DELETE /api/v1/programming/test-cases/{test_case_id}     (programming:manage)
+POST   /api/v1/programming/problems/{id}/run             (programming:submit)
+POST   /api/v1/programming/problems/{id}/submit          (programming:submit)
+GET    /api/v1/programming/problems/{id}/submissions     (programming:manage)
+GET    /api/v1/programming/problems/{id}/my-submissions  (programming:submit)
+GET    /api/v1/programming/health
+```
+
+New RBAC permissions: `programming:manage` (faculty, department head, admin) and
+`programming:submit` (student, and staff for authoring/testing).
+
+---
+
 ## 7. Production Deployment Strategy
 
 1. **Containers:** Backend and frontend images are built via multi-stage Dockerfiles.

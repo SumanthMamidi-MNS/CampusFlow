@@ -42,6 +42,47 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
 
+  # ── Piston (sandboxed code execution) ───────────────────────
+  # Student code is NEVER executed by the API process. Piston runs each job
+  # inside an isolate sandbox in this separate container. It is bound to the
+  # host loopback only; the backend reaches it over the compose network.
+  piston:
+    image: ghcr.io/engineer-man/piston:latest
+    restart: unless-stopped
+    privileged: true  # required by isolate for namespace/cgroup isolation
+    ports:
+      - "127.0.0.1:2000:2000"
+    volumes:
+      - piston-data:/piston
+    tmpfs:
+      - /piston/jobs:exec
+    environment:
+      # Piston reads its configuration from PISTON_<OPTION> environment
+      # variables. Its stock ceilings are 3000 ms, which is below the budget
+      # the backend requests (CODE_RUN_DEFAULT_TIMEOUT_MS / _MAX_TIMEOUT_MS),
+      # and it rejects anything larger with HTTP 400 — so these must stay at or
+      # above the backend's maximum. Keep them in sync with .env.
+      - PISTON_RUN_TIMEOUT=10000
+      - PISTON_COMPILE_TIMEOUT=10000
+
+  # Installs the Python runtime into Piston on first start (idempotent).
+  piston-init:
+    image: curlimages/curl:latest
+    restart: "no"
+    depends_on:
+      - piston
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo 'Waiting for Piston to become ready...'
+        until curl -sf http://piston:2000/api/v2/runtimes >/dev/null 2>&1; do sleep 2; done
+        echo 'Installing Python runtime (no-op if already present)...'
+        curl -s -X POST http://piston:2000/api/v2/packages \
+          -H 'Content-Type: application/json' \
+          -d '{"language":"python","version":"3.10.0"}' || true
+        echo 'Piston runtime ready.'
+
   # ── Backend (FastAPI) ───────────────────────────────────────
   backend:
     build:
@@ -54,16 +95,27 @@ services:
       - ./backend:/app
       - backend-storage:/app/storage
     env_file:
-      - ./backend/.env
+      # Optional: `scripts/bootstrap.py` (and the launcher) create it on first
+      # run. Marked optional so a missing file can never brick every compose
+      # command — the explicit `environment:` block below carries the settings
+      # that matter inside the compose network.
+      - path: ./backend/.env
+        required: false
     environment:
       - DATABASE_URL=postgresql+asyncpg://campusflow:campusflow@postgres:5432/campusflow
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=true
+      - CODE_RUNNER_ENABLED=true
+      - CODE_RUNNER_BACKEND=piston
+      - CODE_RUNNER_URL=http://piston:2000
+      - CODE_RUNNER_PYTHON_VERSION=3.10.0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      piston:
+        condition: service_started
     command: uvicorn campusflow.main:app --host 0.0.0.0 --port 8000 --reload
 
   # ── Frontend (Vite dev server) ──────────────────────────────
@@ -84,4 +136,5 @@ services:
 volumes:
   pgdata:
   redisdata:
+  piston-data:
   backend-storage:

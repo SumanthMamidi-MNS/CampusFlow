@@ -281,6 +281,92 @@ otifications, and question-banks feature modules to properly utilize the ApiResp
     - **Invigilator Announcement Broadcast:** Broadcast modal allowing faculty to dispatch high-priority alerts to all candidate viewports simultaneously with preset institutional notices.
   - **Strict Private Invigilator Help Desk (No Peer Communication):**
     - Dedicated "Invigilator Help" header button and modal connecting the student directly and strictly 1-to-1 with the exam proctor. Peer-to-peer student messaging remains disabled.
-  - **Verification:** 19/19 backend tests passing (`pytest`); 100% clean frontend production build with Vite (`0 errors`, 2047 modules transformed); comprehensive end-to-end verification in Chrome DevTools MCP verifying student self-view, strobe warnings, phone lockout, faculty invigilator video wall, stream inspection, announcement broadcast, and re-entry authorization.
+  - **Verification (superseded — see Phase 13):** the features listed here were removed after
+    audit because they contradicted ADR-003 and the responsible-UX requirements.
+
+---
+
+### Phase 13: Repository Audit, Product Integrity Repair & Programming Environment
+- **Status:** Completed (partial — see "Deferred" below)
+- **Motivation:** An independent audit found demo/fabricated data paths, a fake authentication
+  bypass, an exam-integrity simulator exposed to students, hidden QA hotkeys, a synthetic
+  camera feed, and a proctoring subsystem that contradicted its own ADRs. The lecturer's core
+  requirement — an integrated, securely sandboxed Python environment — did not exist.
+- **Achievements:**
+  - **Removed the demo-auth bypass:** `handleDemoAccess` and the `campusflow_demo_role`
+    short-circuit are gone; every session now requires a real credential exchange.
+    ([frontend/src/app/routes/auth/login.tsx](frontend/src/app/routes/auth/login.tsx),
+    [frontend/src/core/auth/context.tsx](frontend/src/core/auth/context.tsx))
+  - **Removed all fabricated data paths:** the DEMO exam/delivery fixtures, the hardcoded
+    assignment catalogue, the fake attempt list, the fake webcam canvas, the fake invigilator
+    video wall, the student "Faculty Authorization Simulator", and the hidden
+    `Ctrl+Alt+Shift` simulation hotkeys. API failures now surface as real errors.
+  - **Reverted proctoring to the documented observable model** (ADR-013): no camera, no gaze
+    analysis, no strobe, no lockdown screen. Unified tolerance on `config.max_violations`
+    (default 5) with threshold auto-submission and a permission-gated, audited
+    faculty-authorised resumption.
+  - **Fixed the manual-grading contract defect:** the grading UI previously submitted exam
+    question IDs where response IDs were required. Added
+    `GET /exam-attempts/{id}/responses` and rewired the grading modal.
+  - **Repaired the student refresh flow** (single retry, no loop, no silent sign-out loop).
+  - **Hardened security:** credential-endpoint rate limiting, production secret enforcement,
+    correctly unprefixed `.env.example`, removal of the startup-created super-admin with a
+    published password, `SameSite=Strict` refresh cookie, and a 503 error type for the sandbox.
+  - **Built the sandboxed Python environment** (ADR-014): `campusflow.bedrock.runner`
+    (`CodeRunner` protocol + `PistonRunner` + fail-closed service), `domain.programming`
+    (problems, test cases, submissions, per-test results), 13 new endpoints, an Alembic
+    migration (`b1f2a3c4d5e6`), RBAC permissions (`programming:manage`, `programming:submit`),
+    a Piston sidecar in `docker-compose.yml`, credentials-free startup, and a dependency-free
+    in-browser editor with Run/Submit/test-result views.
+  - **Added a real cross-course assignments endpoint** (`GET /assignments/me`) replacing the
+    mocked `/assignments` page.
+  - **New tests:** `tests/test_programming.py` (end-to-end programming flow, RBAC, hidden-case
+    leakage, fail-closed 503) and `tests/test_contract_hardening.py` (rate limiting, the
+    production secret guard, `/assignments/me`, and the response-listing contract).
+  - **Verification:** **24/24 backend tests passing** (`pytest`, in-memory SQLite);
+    `ruff check campusflow tests` clean; frontend `npm run build` clean (0 TypeScript
+    errors); `oxlint` reports 0 errors.
+  - **UI & accessibility pass (final):** Replaced every remaining native
+    `alert()`/`window.confirm()` with in-app feedback — a shared accessible
+    `ConfirmDialog` (`core/components/ui/confirm-dialog.tsx`, portal + `role="dialog"` +
+    `aria-modal` + labelled/described by visible text, Escape/backdrop dismissal,
+    busy-state while the action resolves) now backs destructive flows in exam detail,
+    question-bank list/detail; failed exports, preference saves, approvals, and deletes
+    surface as inline `role="alert"` banners with the server's error message; the
+    notification-preferences dialog gained `role="dialog"`/`aria-modal` and labelled
+    channel checkboxes; icon-only delete buttons gained `aria-label`s.
+- **Deferred (documented, not claimed complete):**
+  - The full student exam-taking flow was not driven in the browser (both seeded exam windows
+    had closed); delivery, auto-submit and grading are covered by the backend suite and the
+    scorecard was verified against seeded attempts.
+  - `TEST_DATABASE_URL` support was added so the same suite can run against PostgreSQL in CI
+    (`pytest` with that variable set); it has not yet been executed against Postgres in CI.
+  - Vitest component tests, Playwright E2E, and a CI workflow remain outstanding.
+
+### Phase 13.1 — Live stack verification, launcher, and launch-path repairs
+
+With the Docker daemon available, the previously deferred runtime verification was executed
+against a live stack. Evidence and the defect ledger are in `docs/live-qa-log.md`.
+
+- **Launch blockers fixed:** `backend/.env` did not exist, so `docker compose config` failed
+  outright and the backend refused to import; the database was one migration behind, so the
+  `coding_*` tables (and therefore the programming feature) did not exist. Added an idempotent
+  `scripts/bootstrap.py` (env, migrations, seed, SQLite fallback) and made the compose
+  `env_file` optional; `Settings` now resolves `.env` from the package location rather than the
+  current working directory.
+- **Sandbox repaired:** Piston's stock 3000 ms ceiling rejected the requested budgets and a
+  requested memory cap made isolate SIGKILL the process — every code run returned 503. Ceilings
+  are now configured in compose, the memory cap is opt-in, and the runner surfaces the real
+  error and retries inside the sandbox's reported limit. A code submission now grades end to
+  end in the browser (PASSED 10/10, hidden cases enforced).
+- **Nine further live defects found and fixed** (roster names, gradebook title, native
+  `confirm`, dead dashboard buttons, raw role labels, scorecard breakdown, fill-blank
+  rendering) — each re-verified in the browser; see the live QA log.
+- **Launcher:** root `start.bat` runs everything in a single terminal with interleaved logs,
+  bootstraps, starts both services, health-checks them and opens Chrome; pressing a key stops
+  everything. Warm and cold paths were both executed.
+- **Verification:** 24/24 pytest, ruff clean, `tsc` + `vite` build clean, oxlint 0 errors;
+  migrations applied to head against PostgreSQL; sandbox execution verified against real
+  Piston; browser walkthrough across the role matrix recorded in `docs/live-qa-log.md`.
 
 

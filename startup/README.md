@@ -47,9 +47,10 @@ startup\stop-campusflow.bat
 4. **Docker Infrastructure Startup**
    - Verifies the Docker daemon is responding (attempts to launch Docker Desktop if needed).
    - Starts the repository's existing container services defined in `docker-compose.yml`:
-     - **PostgreSQL 16**: Port `5432` (`campusflow_db`)
+     - **PostgreSQL 15**: Port `5432` (`campusflow_db`)
      - **Redis 7**: Port `6379` (caching & background broker)
      - **Mailpit**: SMTP on `1025`, Web UI on `8025` (local test email server)
+     - **Piston**: Port `2000` (sandboxed code execution; bound to host loopback only and never exposed publicly)
 
 5. **Dedicated Backend Process**
    - Launches the FastAPI backend in its own titled terminal window (`CampusFlow Backend`) with live auto-reload enabled.
@@ -80,6 +81,9 @@ startup\stop-campusflow.bat
 | **Health Check Endpoint** | [http://localhost:8000/api/health](http://localhost:8000/api/health) | System and database health status |
 | **API Documentation** | [http://localhost:8000/api/docs](http://localhost:8000/api/docs) | Interactive OpenAPI / Swagger UI |
 | **Mailpit Inbox** | [http://localhost:8025](http://localhost:8025) | Local inbox for viewing emails sent by CampusFlow |
+| **Code execution (Piston)** | [http://localhost:2000](http://localhost:2000) | Sandbox runtime API used by the programming environment (loopback only) |
+
+> The first start installs the Python runtime into Piston automatically; this can take a minute or two. If the programming page reports that execution is unavailable, wait for the install to finish and reload.
 
 ---
 

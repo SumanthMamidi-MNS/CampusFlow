@@ -1444,7 +1444,7 @@ Everything described above. A complete, production-deployable LMS with secure ex
 | **Advanced analytics** | Learning analytics (time-on-task, learning path analysis) are research-grade features beyond a core LMS. |
 | **Internationalization (i18n)** | Initially English-only. i18n can be added when needed (React i18n + backend message catalogs). |
 | **API for external integrations** | Webhooks, LTI compatibility, SIS sync — important for mature deployments, premature for initial build. |
-| **Code execution questions** | Requires sandboxed execution environment. Complex and security-sensitive. Deferred. |
+| **Code execution questions** | **Implemented in Phase 13** as a first-class programming environment (`frontend /programming`, `campusflow.domain.programming`) backed by a sandboxed Piston sidecar — see ADR-014 and `docs/architecture.md` §6. Not a question type inside the exam engine, but an auto-graded assessment module. |
 
 ---
 

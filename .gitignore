@@ -68,3 +68,19 @@ coverage.xml
 
 # Alembic
 alembic/versions/__pycache__/
+
+# Agent / tooling workspace
+.freebuff/
+
+# Launcher runtime state
+startup/.backend.pid
+startup/.frontend.pid
+
+# Local scratch logs and SQLite fallback database
+scratch/
+backend/*.db
+
+# Python caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

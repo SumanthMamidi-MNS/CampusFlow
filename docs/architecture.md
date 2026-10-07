@@ -167,35 +167,54 @@ All successful responses return a JSON object containing `data` and request `met
 2. **Refresh Tokens:** Long-lived (7 days), stored in secure `httpOnly`, `SameSite=Strict` cookies, with automatic rotation and token-family reuse detection.
 3. **Password Security:** Salted `bcrypt` hashing with configurable complexity and lockout policies.
 
-### Observable & Live Proctoring Model
-To ensure academic integrity, student privacy, and operational reliability:
-- **Zero-Tolerance Prohibited Device Detection:**
-  - Dedicated detection vector for mobile phones and smart devices (`mobile_phone_detected`, `phone_detected`, `unauthorized_device_detected`).
-  - **Instant Termination:** Immediately bypasses standard warning counters, forces `violations_count = max_violations`, marks `status = "locked_violation"`, and triggers `exam.attempt_locked_phone_detected` audit trail.
-- **High-Urgency Blinking Strobe Warnings:**
-  - Client viewport renders an unmissable red pulsing strobe border (`animate-pulse border-8 border-rose-600 bg-rose-500/15`) and high-priority banner upon any security breach.
-- **Candidate Visual Prominence & Expanded View:**
-  - Top header "Self-View" action and expandable camera HUD offering full HD Candidate Camera & Visual Self-Verification with live gaze angle, lighting balance, and device scanner feedback.
-- **Fixed Position Browser Lockdown:**
-  - Intercepts and overrides browser `popstate` / `history.pushState` to trap back/forward navigation within the exam canvas. Any navigation attempt logs a violation without losing position.
-  - Implements `beforeunload` warning handler preventing accidental tab close or page reload.
-- **Real-Time Vision & Gaze Monitoring:** HTML5 Canvas offscreen analysis of camera stream detecting gaze deviation (head turn / looking sideways away from monitor) and downward tilt (reading/writing unauthorized notes or phone in lap). Includes biometric fallback and simulation controls for reproducible evaluation.
-- **Client-Side Cheat Interception:**
-  - Browser visibility and focus tracking (`visibilitychange`, `blur`).
-  - Fullscreen enforcement and exit tracking.
-  - Prevention and logging of copy/paste, cut, and right-click context-menu actions.
-  - Blocked unauthorized shortcuts (Developer Tools `F12`, `Ctrl+Shift+I/J/C`, `Ctrl+U`, `Alt-Tab`, `Meta`/Windows key, `PrintScreen`).
-- **Strict 6-Warning Escalation & Lockout:**
-  - Candidates receive inescapable modal warnings for non-fatal infractions 1 through 5, complete with remaining warning countdowns and a visual 6-step progress meter.
-  - On the 6th infraction (`violations_count >= 6`), the exam session terminates immediately; attempt status transitions to `locked_violation` and is locked out.
-- **Faculty Live Invigilator Hub & Multi-Candidate Video Wall:**
-  - Dedicated "Live Invigilator Hub & Webcams" dashboard tab in `ExamDetail.tsx`.
-  - Multi-candidate simultaneous video wall showing 1080p feeds, station IDs, real-time gaze telemetry, audio decibel meters, and status badges (`CENTERED`, `WARNING X/6`, `PHONE LOCKED`, `LOCKED`).
-  - Stream inspection modal with detailed gaze vectors, audio waveforms, and question completion metrics.
-  - Mass broadcast system to dispatch high-priority invigilator announcements to all candidate screens simultaneously.
-  - Direct one-click re-entry authorization resetting candidate violations.
-- **Strict 1-to-1 Proctor Help Desk (No Peer Communication):**
-  - Candidate emergency communication is strictly 1-to-1 between candidate and invigilator; student-to-student peer chat is disabled.
-- **Durability & Resumption:** Client answers are continuously preserved in local storage and debounced server sync; upon faculty unlock, the student resumes with all previous answers intact.
+### Observable Proctoring Model
+CampusFlow implements **observable, rule-based proctoring only** (ADR-003). There is no
+webcam capture, no gaze/facial analysis, no screen recording, and no biometric processing.
+Events are recorded as an append-only audit trail; they are advisory evidence for a human
+reviewer and never an automated judgement about a candidate.
+
+- **Recorded telemetry (client-reported, server-stored):**
+  - Tab switching (`visibilitychange`) and window blur.
+  - Fullscreen exit.
+  - Clipboard activity (copy/paste) and right-click context menu.
+  - Developer-tools shortcut attempts.
+- **Tolerated-event threshold:** Each exam carries `config.max_violations` (default 5,
+authored per exam and validated by the API). Reaching the threshold **auto-submits** the
+attempt with a `max_violations_exceeded` flag (ADR-008) rather than locking the candidate out.
+- **Neutral candidate messaging:** Candidates see a calm, informational notice of the
+remaining allowance. There is no flashing/strobe warning, no shouting copy, and no
+lockdown screen.
+- **Faculty review:** The exam workspace exposes a per-attempt integrity timeline with
+severities and timestamps, so an instructor can interpret context before acting.
+- **Faculty-authorised resumption:** `POST /exams/{id}/attempts/{attempt_id}/unlock`
+(requires `exams:grade`, always audited) reopens an attempt when a recorded event is
+disputed. Students can never unlock their own attempt; the endpoint rejects them with 403.
+- **Durability & resumption:** Answers are continuously mirrored to `localStorage` and
+synced to the server on a 30-second cadence and on navigation, so a resumed attempt keeps
+all previously entered responses.
+
+> **Superseded:** the camera/gaze/strobe/lockdown model described in earlier revisions of
+> this document was removed in Phase 13. See ADR-013.
+
+### Sandboxed Code Execution (Programming Environment)
+Student source code is **never** executed inside the API process. Execution is delegated to
+a self-hosted [Piston](https://github.com/engineer-man/piston) sidecar, which runs each job
+inside an `isolate` sandbox in its own container.
+
+- **Abstraction:** `campusflow.bedrock.runner` defines the project-agnostic `CodeRunner`
+protocol plus `ExecutionRequest`/`ExecutionResult` value objects. `PistonRunner` is the
+HTTP implementation; `get_runner()` selects it from configuration.
+- **Safety envelope:** `run_code()` applies a global concurrency semaphore, a hard overall
+timeout, per-problem CPU/memory ceilings, and output truncation. It **fails closed** — when
+execution is disabled or the sandbox is unreachable it raises `ServiceUnavailableError`
+(HTTP 503) instead of fabricating a result.
+- **Isolation properties:** separate container, no host filesystem mounts used by the API,
+bound to host loopback only, no candidate network access, ephemeral job filesystem,
+process/CPU/memory limits enforced by `isolate`.
+- **Grading:** `campusflow.domain.programming` persists problems, test cases, submissions,
+and per-test results. A submission runs every test case; hidden expected outputs are never
+returned to students.
+
+See docs/decisions.md ADR-014 for the full isolation rationale and limits.
 
 

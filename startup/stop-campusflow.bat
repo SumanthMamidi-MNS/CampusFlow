@@ -87,7 +87,7 @@ where docker >nul 2>&1
 if not errorlevel 1 (
     docker info >nul 2>&1
     if not errorlevel 1 (
-        docker compose -f "%REPO_ROOT%\docker-compose.yml" stop postgres redis mailpit >nul 2>&1
+        docker compose -f "%REPO_ROOT%\docker-compose.yml" stop postgres redis mailpit piston >nul 2>&1
         if not errorlevel 1 (
             echo [OK] Docker containers stopped.
         ) else (

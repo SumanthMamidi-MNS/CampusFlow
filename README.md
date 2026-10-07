@@ -2,55 +2,74 @@
 
 **College LMS & Secure Online Examination Platform**
 
-CampusFlow is a self-contained, institution-deployable Learning Management System with integrated secure online examinations. It covers academic administration, course management, learning materials, assignments, question banks, and proctored examinations.
+CampusFlow is a self-contained, institution-deployable Learning Management System with integrated secure online examinations. It covers academic administration, course management, learning materials, assignments, question banks, proctored examinations, and a sandboxed in-browser programming environment with automated test-case grading.
 
 ---
 
-## Quick Start (Development)
+## Quick Start (one click)
+
+Double-click **`start.bat`** in the repository root. One terminal window opens and does everything:
+
+1. Checks the toolchain and dependencies.
+2. Starts the infrastructure containers (PostgreSQL, Redis, Mailpit, Piston) when Docker is available.
+3. Bootstraps the environment — creates `backend/.env` on first run, applies migrations, and seeds realistic demo data (all idempotent, safe to re-run).
+4. Starts the backend and frontend **inside that same window**, with both logs streaming interleaved.
+5. Opens **Google Chrome at <http://localhost:5173>** once both services report healthy.
+6. Pressing any key in the window stops every CampusFlow process cleanly.
+
+Equivalent manual commands:
+
+```bat
+start.bat                      :: everything above
+startup\stop-campusflow.bat    :: stop all services and containers
+```
+
+### If Docker is not running
+
+The launcher still works: `scripts/bootstrap.py` detects that PostgreSQL is unreachable and falls back to a local SQLite file (`backend/campusflow.db`), so the whole application — login, courses, assignments, exams, analytics — remains usable. Only sandboxed code execution is unavailable in that mode, and the UI says so explicitly instead of failing silently.
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
-- [Python 3.12+](https://www.python.org/) (for backend development without Docker)
-- [Node.js 20+](https://nodejs.org/) (for frontend development without Docker)
+- [Python 3.12+](https://www.python.org/) and [`uv`](https://docs.astral.sh/uv/) (backend dependencies: `cd backend && uv sync`)
+- [Node.js 20+](https://nodejs.org/) (frontend dependencies are installed automatically on first run)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — recommended for PostgreSQL and the Piston code sandbox, but not required to explore the app
 
-### Option 1: Docker Compose (recommended)
+### Demo accounts (created by the seeder)
 
-```bash
-# Clone and start all services
-docker compose up --build
+| Role | Email | Password |
+| :--- | :--- | :--- |
+| Super Admin | `admin@campusflow.edu` | `Admin@CampusFlow2026` |
+| Exam Controller | `controller@campusflow.edu` | `Password@123` |
+| Department Head | `hod.cse@campusflow.edu` | `Password@123` |
+| Faculty (CSE) | `faculty.cse@campusflow.edu` | `Password@123` |
+| Student | `student1@campusflow.edu` | `Password@123` |
 
-# Services:
-#   Frontend:  http://localhost:5173
-#   Backend:   http://localhost:8000
-#   API Docs:  http://localhost:8000/api/docs
-#   Mailpit:   http://localhost:8025
-```
+---
 
-### Option 2: Manual Setup
+## Running Without the Launcher
 
-**Backend:**
+**Backend**
+
 ```bash
 cd backend
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # Linux/Mac
-
-pip install -e ".[dev]"
-cp .env.example .env            # Edit as needed
-
-# Run database migrations
-alembic upgrade head
-
-# Start development server
-uvicorn campusflow.main:app --reload --port 8000
+uv sync                      # install dependencies
+python ../scripts/bootstrap.py   # .env + migrations + seed (idempotent)
+uv run uvicorn campusflow.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-**Frontend:**
+**Frontend**
+
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev                  # http://localhost:5173, proxies /api to :8000
+```
+
+**Verification suite**
+
+```bash
+cd backend  && python -m pytest -q && python -m ruff check campusflow tests
+cd frontend && npm run build && npm run lint
 ```
 
 ---
@@ -59,21 +78,23 @@ npm run dev
 
 ```
 CampusFlow/
-├── backend/                 # FastAPI backend (Python)
+├── start.bat                # one-click launcher
+├── backend/                 # FastAPI backend (Python 3.12)
 │   ├── campusflow/
-│   │   ├── bedrock/         # Reusable foundation (auth, RBAC, storage, etc.)
-│   │   └── domain/          # CampusFlow-specific business logic
-│   ├── alembic/             # Database migrations
-│   ├── tests/
-│   └── Dockerfile
-├── frontend/                # React SPA (TypeScript)
-│   ├── src/
-│   │   ├── core/            # Reusable frontend infrastructure
-│   │   ├── features/        # Domain feature modules
-│   │   └── app/             # App shell, routing, providers
-│   └── Dockerfile
-├── docker-compose.yml       # Development environment
-└── README.md
+│   │   ├── bedrock/         # foundation: auth, RBAC, audit, storage, mail, code runner
+│   │   └── domain/          # CampusFlow business logic (one module per domain)
+│   ├── alembic/             # migrations
+│   ├── tests/               # pytest suite (24 tests)
+│   └── scripts/bootstrap.py # idempotent env + schema + seed
+├── frontend/                # React 19 SPA (TypeScript, Vite 8, Tailwind 4)
+│   └── src/
+│       ├── core/            # reusable UI primitives, API client, auth
+│       ├── features/        # domain feature modules
+│       └── app/             # routes, layout, providers
+├── startup/                 # start/stop orchestration + README
+├── scripts/seed.py          # demo dataset
+├── docker-compose.yml       # postgres, redis, mailpit, piston, backend, frontend
+└── docs/                    # architecture, decisions, progress, QA reports
 ```
 
 ---
@@ -82,28 +103,36 @@ CampusFlow/
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2.x (async), Alembic |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| Database | PostgreSQL 15 |
-| Cache | Redis 7 |
-| Auth | JWT (access + refresh tokens) |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic, PostgreSQL 15 |
+| Frontend | React 19, TypeScript, Vite 8, Tailwind CSS 4, TanStack Query |
+| Auth | JWT access + refresh tokens, RBAC permissions, audit logging |
+| Code execution | Piston sidecar (isolate sandbox), fail-closed API |
 
 ---
 
 ## Architecture
 
-CampusFlow uses a **modular monolith** architecture:
+CampusFlow uses a **modular monolith**:
 
-- **Bedrock** — project-agnostic reusable foundation (auth, RBAC, audit, storage, API conventions, DB base models)
-- **Domain** — CampusFlow-specific business logic (courses, exams, enrollments, etc.)
+- **Bedrock** — project-agnostic foundation (auth, RBAC, audit, storage, mail, API conventions, the code-runner abstraction). Never imports from Domain.
+- **Domain** — CampusFlow business logic (courses, enrollments, assignments, question banks, exams, programming, analytics, notifications). Imports from Bedrock only.
 
-Bedrock never imports from Domain. Domain imports from Bedrock. This boundary enables future extraction of Bedrock as a standalone package for other projects.
+Student code is never executed inside the API process: every submission is handed to the Piston sidecar, which runs it in an `isolate` sandbox. If the sandbox is unreachable the API fails closed with a clear "unavailable" response rather than fabricating a result.
+
+Details: [`docs/architecture.md`](docs/architecture.md) · Decision log: [`docs/decisions.md`](docs/decisions.md) · QA evidence: [`docs/qa-report.md`](docs/qa-report.md) and [`docs/live-qa-log.md`](docs/live-qa-log.md)
 
 ---
 
 ## Environment Variables
 
-See [`backend/.env.example`](backend/.env.example) for all configuration options.
+See [`backend/.env.example`](backend/.env.example). The launcher creates `backend/.env` automatically with a generated JWT secret. Notable settings:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEBUG` | `false` | Enables `/api/docs` and permits the placeholder secret |
+| `DATABASE_URL` | PostgreSQL | Falls back to SQLite via the bootstrap script when Postgres is unreachable |
+| `CODE_RUNNER_*` | Piston on `:2000` | Sandboxed code execution; `CODE_RUNNER_ENABLED=false` disables it |
+| `AUTH_RATE_LIMIT_*` | 20 / 60s | Per-IP rate limit on credential endpoints |
 
 ---
 

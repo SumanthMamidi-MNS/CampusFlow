@@ -57,13 +57,45 @@ This document preserves durable technical context, implementation constraints, a
 
 - **Clock Integrity:** Never trust client-reported timestamps for exam duration. Duration and expiration are strictly computed from `started_at` recorded on the server.
 - **Auto-Grading Safety:** Auto-grading routines must run idempotently on exam submission. Objective questions (MCQ, MSQ, True/False, Numerical) grade immediately; subjective questions (Short/Long answer) enter the manual grading queue.
-- **Zero-Tolerance Prohibited Hardware Detection:** Detection of mobile phones, smartwatches, or secondary devices (`mobile_phone_detected`) skips the warning countdown entirely, instantly locking the session to `locked_violation` and requiring faculty re-entry authorization.
-- **Strict 6-Warning Escalation:** For non-fatal infractions (gaze deflections, window blur, tab switches), exactly 6 warnings are permitted. On warning 6, the attempt is immediately terminated and placed into `locked_violation` state with `auto_submitted: true`.
-- **Fixed Position Browser Lockdown:** In Chromium browsers, calling `window.history.pushState(null, '', window.location.href)` on mount establishes a history state that enables the `popstate` event to intercept and trap back-button navigation. Intercepted events record a `navigation_attempt` violation while keeping the student securely on the exam canvas.
-- **High-Urgency Visual Strobe Border:** Applying a full-viewport blinking red strobe border (`animate-pulse border-8 border-rose-600 bg-rose-500/15`) provides immediate, unmissable feedback to candidates that an infraction occurred.
-- **Faculty Re-Entry Authorization:** Locked attempts cannot be resumed without an instructor or proctor invoking `POST /exams/{exam_id}/attempts/{attempt_id}/unlock`. Unlocking resets violation locks and restores status to `in_progress`.
-- **Answer Durability:** Client answers are synchronized to localStorage and debounced server PUT requests; upon unlock, student returns to the delivery screen with all previously entered responses intact.
-- **Live Vision Proctoring Heuristics:** Client-side camera analysis runs offscreen without raw video streaming to avoid privacy violations or bandwidth costs, reporting discrete gaze events (`side_viewing`, `looking_down`, `face_missing`, `multiple_faces`) with biometric simulation fallback.
-- **Proctor Communication Boundaries:** All candidate inquiries during proctored exams must be strictly 1-to-1 between the candidate and the invigilator via the Proctor Help Desk. Student-to-student peer chat is disabled.
+- **Observable Proctoring Only:** There is no webcam capture, gaze analysis, or biometric
+  processing anywhere in the product. Camera/gaze/strobe/lockdown code was removed in
+  Phase 13 (see ADR-013). Only browser telemetry (`tab_switch`, `window_blur`,
+  `fullscreen_exit`, `copy_paste_attempt`, `context_menu`) is recorded.
+- **Single Tolerance Source:** `_resolve_max_violations(exam)` in
+  `campusflow.domain.exams.service` is the only place the tolerance is read, from
+  `exam.config["max_violations"]` with a default of `DEFAULT_MAX_VIOLATIONS = 5`. Reaching it
+  auto-submits the attempt with a `max_violations_exceeded` flag (ADR-008) — it does **not**
+  lock the candidate out.
+- **Neutral Candidate Copy:** Warning strings must stay calm and informational. No strobe,
+  no shouting, no "breach" language. Follow the responsible-UX rules in AGENTS.md §13.
+- **Faculty-Authorised Resumption:** `POST /exams/{exam_id}/attempts/{attempt_id}/unlock`
+  requires `exams:grade`, is always audited, and resets the recorded count. Students receive
+  403. A student-facing unlock affordance must never be reintroduced.
+- **No Hidden Shortcuts:** Do not embed QA/simulation keyboard shortcuts inside candidate
+  surfaces. Test via the API or unit tests instead.
+- **Answer Durability:** Answers are mirrored to `localStorage` and synced to the server on a
+  30-second cadence and on navigation, so a resumed attempt keeps all prior responses.
+
+## 4. Sandboxed Code Execution (Programming Environment)
+
+- **Never execute student code in the API process.** All execution goes through
+  `campusflow.bedrock.runner.run_code`, which talks to the Piston sidecar over HTTP.
+- **Fail closed:** If `CODE_RUNNER_ENABLED=false`, no backend is configured, or Piston is
+  unreachable, `run_code` raises `ServiceUnavailableError` (HTTP 503). Never substitute a
+  fabricated result.
+- **Limits:** `ExecutionLimits` carries `run_timeout_ms`, `compile_timeout_ms`, `memory_kb`,
+  and `max_output_bytes`. Per-problem overrides are sanitised by
+  `code_run_max_timeout_ms` in settings, and all executions share one semaphore sized by
+  `code_run_max_concurrency`.
+- **Piston specifics:** image `ghcr.io/engineer-man/piston`; requires `privileged: true` for
+  `isolate`; bound to host loopback only (`127.0.0.1:2000`). The Python runtime version must
+  match `CODE_RUNNER_PYTHON_VERSION` (compose installs `3.10.0` via the `piston-init`
+  one-shot container, which is idempotent).
+- **Hidden test leakage:** `CodingTestResult.expected_output` is blanked for hidden cases in
+  every student-facing response (`_submission_response(include_hidden_expected=False)`).
+- **Comparison modes:** `trimmed` collapses all whitespace; `exact` compares line-by-line
+  with trailing whitespace removed. Default is `trimmed`.
+- **Submission status vocabulary:** `passed` (all tests), `partial` (some), `failed` (ran but
+  none matched), `error` (did not compile or never ran successfully).
 
 
