@@ -50,6 +50,16 @@ Roles used: **super_admin**, **student** (plus role-guard probing as student).
 | D8 | Scorecard showed "Performance Breakdown (0 Items)" despite a 14/15 attempt | The seeder set an attempt's `total_score` without creating any `exam_responses` rows | Seeder now writes a full answer sheet (correct/wrong by type, faculty-graded short answers) and derives the score from it | Breakdown shows 6 items; stored score still matches (14/15, 11/15) |
 | D9 | Fill-blank answers displayed "No answer submitted" despite 2/2 marks | The scorecard renderer handled `selected`/`value`/`text` but not `blanks` | Added the `blanks` case | Q2 shows "Your Answer: queue" |
 
+## Exam delivery driven end-to-end (added after the main walkthrough)
+
+The seeded exam windows had already closed, so a short live quiz (`CS201 Live Quiz: Trees & Traversals`, open window, 2 auto-graded questions) was created and the full candidate flow was driven in the browser as the student:
+
+- **Brief/consent screen** renders with the neutral integrity notice.
+- Attempting it while signed in as an **unenrolled admin** was refused with a clean "You are not actively enrolled in this course offering" page — the enrolment guard works.
+- **Delivery UI** — timer counting down from 30:00, candidate name, "Integrity monitoring on", flag-for-review, navigator with answered/not-answered legend, autosave indicator showing "Saved" after each answer.
+- **Submit** raised the accessible confirm dialog ("You have answered 2 of 2 questions… responses are final"); confirming redirected to the results page, which correctly reported that results are not yet published.
+- **Server side** — the attempt is stored as `graded` with 3/4 (75%) and two responses: MCQ `"C"` → 2/2 and True/False `"false"` → 1/1, both `is_auto_graded = true`. Auto-grading matched the correct options exactly.
+
 ## Launcher verification
 
 - **Warm path** — with services already healthy, the launcher detects it, opens Chrome and skips duplicate starts.
@@ -67,5 +77,4 @@ Roles used: **super_admin**, **student** (plus role-guard probing as student).
 
 ## Known limitations
 
-- The full student **exam-taking** flow was not driven in the browser: both seeded exam windows closed before the test, so no attempt could be started. The delivery UI, answer saving, auto-submit and grading logic are covered by the backend suite, and the scorecard was verified against seeded attempts.
 - Playwright/Vitest suites and CI remain outstanding (documented in `docs/qa-report.md`).
