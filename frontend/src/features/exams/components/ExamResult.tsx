@@ -140,6 +140,8 @@ export function ExamResult() {
                       : String(resp.answer_data.selected)
                     : resp.answer_data?.value !== undefined
                     ? String(resp.answer_data.value)
+                    : Array.isArray(resp.answer_data?.blanks) && resp.answer_data.blanks.length > 0
+                    ? resp.answer_data.blanks.join(', ')
                     : resp.answer_data?.text || <span className="text-slate-400 italic">No answer submitted</span>}
                 </p>
               </div>

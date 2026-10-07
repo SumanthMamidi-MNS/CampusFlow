@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/core/api/client';
+import { apiClient, ACCESS_TOKEN_KEY } from '@/core/api/client';
 import type { ApiResponse } from '@/core/api/types';
 import type {
   CourseAnalytics,
@@ -53,7 +53,7 @@ export function useStudentDashboardAnalytics() {
 }
 
 export async function downloadExamResultsCsv(examId: string, examTitle: string) {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem(ACCESS_TOKEN_KEY);
   const res = await fetch(`/api/v1/exams/${examId}/export-results`, {
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

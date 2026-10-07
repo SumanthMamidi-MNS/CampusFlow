@@ -22,6 +22,7 @@ export function ExamAnalyticsView({
 }) {
   const { data: analytics, isLoading } = useExamAnalytics(examId);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   if (isLoading) {
     return <div className="p-12 text-center text-xs text-slate-400">Loading exam performance analytics...</div>;
@@ -32,11 +33,14 @@ export function ExamAnalyticsView({
   }
 
   const handleExport = async () => {
+    setExportError(null);
     try {
       setIsExporting(true);
       await downloadExamResultsCsv(examId, examTitle);
-    } catch {
-      alert('Failed to export exam results spreadsheet.');
+    } catch (err: any) {
+      setExportError(
+        err?.response?.data?.error?.message || err?.message || 'Failed to export exam results spreadsheet.'
+      );
     } finally {
       setIsExporting(false);
     }
@@ -56,6 +60,12 @@ export function ExamAnalyticsView({
 
   return (
     <div className="space-y-6">
+      {exportError && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-700">
+          {exportError}
+        </div>
+      )}
+
       {/* Top Banner with CSV Export */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>

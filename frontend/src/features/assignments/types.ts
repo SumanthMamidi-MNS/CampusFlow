@@ -53,6 +53,8 @@ export interface Assignment {
   published_at?: string;
   created_by_id?: string;
   created_at: string;
+  course_code?: string | null;
+  course_title?: string | null;
   my_submission?: AssignmentSubmission;
   submissions_count?: number;
 }

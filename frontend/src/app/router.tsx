@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Link } from 'react-router-dom';
 import { RootLayout } from './routes/_layout';
 import { ProtectedRoute, RoleGuard } from '@/core/auth/guard';
 import { LoginPage } from './routes/auth/login';
@@ -10,6 +10,8 @@ import { AcademicAdminPage } from './routes/admin/academic';
 import { SettingsAdminPage } from './routes/admin/settings';
 import { QuestionBanksIndexPage } from './routes/question-banks/index';
 import { QuestionBankDetailPage } from './routes/question-banks/detail';
+import { ProgrammingIndexPage } from './routes/programming/index';
+import { ProgrammingDetailPage } from './routes/programming/detail';
 import { ExamsIndexPage } from './routes/exams/index';
 import { ExamDetailPage } from './routes/exams/detail';
 import { ExamTakePage } from './routes/exams/take';
@@ -18,6 +20,15 @@ import { ExamResultPage } from './routes/exams/results';
 import { useAuth } from '@/core/auth/hooks';
 import { InstitutionalAnalytics } from '@/features/analytics/components/InstitutionalAnalytics';
 import { StudentDashboard } from '@/features/analytics/components/StudentDashboard';
+
+/** "super_admin" -> "Super Admin" — roles are stored snake_case in the API. */
+function formatRole(role?: string | null): string {
+  if (!role) return 'User';
+  return role
+    .replace(/_/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function DashboardPage() {
   const { user } = useAuth();
@@ -33,8 +44,8 @@ function DashboardPage() {
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
               Welcome back, {user ? `${user.first_name} ${user.last_name}` : 'Scholar'}
             </h1>
-            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 capitalize border border-slate-200">
-              {user?.roles[0] || 'User'}
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 border border-slate-200">
+              {formatRole(user?.roles[0])}
             </span>
           </div>
           
@@ -50,13 +61,19 @@ function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3 sm:shrink-0">
-          <button className="inline-flex items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 shadow-xs hover:bg-slate-50 hover:text-slate-900 transition-colors">
-            View Schedule
-          </button>
+          <Link
+            to="/courses"
+            className="inline-flex items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 shadow-xs hover:bg-slate-50 hover:text-slate-900 transition-colors"
+          >
+            My Courses
+          </Link>
           {!isStudent && (
-            <button className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-xs hover:bg-slate-800 transition-colors">
-              New Report
-            </button>
+            <Link
+              to="/exams"
+              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-xs hover:bg-slate-800 transition-colors"
+            >
+              Manage Exams
+            </Link>
           )}
         </div>
       </div>
@@ -121,6 +138,14 @@ export const router = createBrowserRouter([
                 <SettingsAdminPage />
               </RoleGuard>
             ),
+          },
+          {
+            path: '/programming',
+            element: <ProgrammingIndexPage />,
+          },
+          {
+            path: '/programming/:id',
+            element: <ProgrammingDetailPage />,
           },
           {
             path: '/question-banks',

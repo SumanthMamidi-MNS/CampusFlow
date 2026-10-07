@@ -9,6 +9,7 @@ import {
 } from '../api';
 import { BulkImportModal } from './BulkImportModal';
 import { CreateQuestionModal } from './CreateQuestionModal';
+import { ConfirmDialog } from '@/core/components/ui';
 import {
   ArrowLeft,
   BookOpen,
@@ -52,29 +53,42 @@ export function QuestionBankDetail() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  const errorMessage = (err: any, fallback: string) =>
+    err?.response?.data?.error?.message || err?.message || fallback;
 
   const handleExportCsv = async () => {
+    setActionError(null);
     try {
       setIsExporting(true);
       await downloadQuestionsCsv(bankId, bank?.title);
     } catch (err) {
-      alert('Failed to export questions CSV.');
+      setActionError(errorMessage(err, 'Failed to export questions CSV.'));
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleApprove = async (qId: string) => {
+    setActionError(null);
     try {
       await approveMutation.mutateAsync(qId);
     } catch (err: any) {
-      alert(err.message || 'Failed to approve question.');
+      setActionError(errorMessage(err, 'Failed to approve question.'));
     }
   };
 
-  const handleDelete = async (qId: string) => {
-    if (window.confirm('Are you sure you want to delete this question?')) {
-      await deleteMutation.mutateAsync(qId);
+  const handleConfirmDelete = async () => {
+    if (!deleteTargetId) return;
+    setActionError(null);
+    try {
+      await deleteMutation.mutateAsync(deleteTargetId);
+    } catch (err: any) {
+      setActionError(errorMessage(err, 'Failed to delete question.'));
+    } finally {
+      setDeleteTargetId(null);
     }
   };
 
@@ -103,6 +117,12 @@ export function QuestionBankDetail() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      {actionError && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-700">
+          {actionError}
+        </div>
+      )}
+
       {/* Back button */}
       <div>
         <button
@@ -292,9 +312,10 @@ export function QuestionBankDetail() {
                     </button>
                   )}
                   <button
-                    onClick={() => handleDelete(q.id)}
+                    onClick={() => setDeleteTargetId(q.id)}
                     className="p-1 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
                     title="Delete Question"
+                    aria-label={`Delete question: ${q.body.slice(0, 60)}`}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -391,6 +412,16 @@ export function QuestionBankDetail() {
         bankId={bankId}
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={deleteTargetId !== null}
+        title="Delete question"
+        body="Are you sure you want to delete this question? This cannot be undone."
+        confirmLabel="Delete question"
+        destructive
+        onCancel={() => setDeleteTargetId(null)}
+        onConfirm={handleConfirmDelete}
       />
     </div>
   );

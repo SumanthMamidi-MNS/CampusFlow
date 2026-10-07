@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   BookOpen,
   FileEdit,
+  Code2,
   ClipboardList,
   Users,
   Settings,
@@ -35,13 +36,14 @@ const navSections: NavSection[] = [
       { label: 'Dashboard', href: '/', icon: LayoutDashboard },
       { label: 'Courses', href: '/courses', icon: BookOpen },
       { label: 'Assignments', href: '/assignments', icon: FileEdit },
+      { label: 'Programming', href: '/programming', icon: Code2 },
       { label: 'Exams', href: '/exams', icon: ClipboardList },
     ]
   },
   {
     title: 'ASSESSMENT',
     items: [
-      { label: 'Question Banks', href: '/question-banks', icon: GraduationCap, roles: ['admin', 'super_admin', 'faculty', 'exam_controller'] },
+      { label: 'Question Banks', href: '/question-banks', icon: GraduationCap, roles: ['admin', 'super_admin', 'faculty', 'exam_controller', 'department_head'] },
     ]
   },
   {

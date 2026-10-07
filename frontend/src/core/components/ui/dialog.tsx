@@ -7,9 +7,15 @@ export interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
+  /** Accessible name for the dialog when no visible title element is present. */
+  label?: string;
+  /** Id of the visible element that names the dialog. */
+  labelledBy?: string;
+  /** Id of the element that describes the dialog. */
+  describedBy?: string;
 }
 
-const Dialog = ({ open, onOpenChange, children }: DialogProps) => {
+const Dialog = ({ open, onOpenChange, children, label, labelledBy, describedBy }: DialogProps) => {
   React.useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onOpenChange(false);
@@ -33,7 +39,14 @@ const Dialog = ({ open, onOpenChange, children }: DialogProps) => {
         onClick={() => onOpenChange(false)}
         aria-hidden="true"
       />
-      <div className="relative z-50 w-full max-w-lg rounded-xl bg-white p-0 shadow-xl transition-all">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
+        className="relative z-50 w-full max-w-lg rounded-xl bg-white p-0 shadow-xl transition-all"
+      >
         {children}
       </div>
     </div>,

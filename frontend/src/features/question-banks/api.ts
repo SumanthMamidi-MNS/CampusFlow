@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/core/api/client';
+import { apiClient, ACCESS_TOKEN_KEY } from '@/core/api/client';
 import type { ApiResponse } from '@/core/api/types';
 import type {
   BulkImportResult,
@@ -157,7 +157,7 @@ export function useBulkImportQuestions(bankId: string) {
 }
 
 export async function downloadQuestionsCsv(bankId: string, title?: string) {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem(ACCESS_TOKEN_KEY);
   const response = await fetch(`/api/v1/question-banks/${bankId}/export-csv`, {
     headers: {
       Authorization: token ? `Bearer ${token}` : '',

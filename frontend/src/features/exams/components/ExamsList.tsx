@@ -39,6 +39,7 @@ export function ExamsList() {
   const [endWindow, setEndWindow] = useState('');
   const [instructions, setInstructions] = useState('');
   const [proctoringEnabled, setProctoringEnabled] = useState(true);
+  const [maxViolations, setMaxViolations] = useState<number>(5);
   const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [showResultsImmediately, setShowResultsImmediately] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -75,6 +76,7 @@ export function ExamsList() {
       instructions: instructions.trim() || undefined,
       config: {
         proctoring_enabled: proctoringEnabled,
+        max_violations: Number(maxViolations) || 5,
         shuffle_questions: shuffleQuestions,
         show_results_immediately: showResultsImmediately,
         max_attempts: 1,
@@ -430,7 +432,7 @@ export function ExamsList() {
               {/* Proctoring & Security Toggles */}
               <div className="space-y-2 rounded-xl bg-slate-50 p-4 border border-slate-200">
                 <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                  <ShieldAlert className="h-4 w-4 text-amber-600" /> Security & Integrity Configuration
+                  <ShieldAlert className="h-4 w-4 text-amber-600" /> Integrity Configuration
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
                   <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
@@ -460,6 +462,23 @@ export function ExamsList() {
                     />
                     <span>Instant Result Release</span>
                   </label>
+                </div>
+                <div className="pt-2 max-w-[16rem]">
+                  <label htmlFor="max-violations" className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    Recorded events tolerated before automatic submission
+                  </label>
+                  <input
+                    id="max-violations"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={maxViolations}
+                    onChange={(e) => setMaxViolations(Number(e.target.value))}
+                    className="w-24 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Events are advisory; reaching this limit submits the attempt automatically.
+                  </p>
                 </div>
               </div>
 

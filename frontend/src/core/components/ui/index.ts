@@ -3,6 +3,7 @@ export * from './input';
 export * from './badge';
 export * from './card';
 export * from './dialog';
+export * from './confirm-dialog';
 export * from './select';
 export * from './table';
 export * from './tabs';

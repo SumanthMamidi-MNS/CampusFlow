@@ -22,6 +22,52 @@ export function useAssignments(offeringId: string) {
   });
 }
 
+export function useMyAssignments() {
+  return useQuery({
+    queryKey: ['my-assignments'],
+    queryFn: async () => {
+      const res = await apiClient.get<ApiResponse<Assignment[]>>('/assignments/me');
+      return res.data.data;
+    },
+  });
+}
+
+/** Submit a file to an assignment from the cross-course coursework view. */
+export function useSubmitMyAssignment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      assignmentId,
+      file,
+      contentText,
+    }: {
+      assignmentId: string;
+      file?: File;
+      contentText?: string;
+    }) => {
+      if (file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (contentText) formData.append('content_text', contentText);
+        const res = await apiClient.post<ApiResponse<AssignmentSubmission>>(
+          `/assignments/${assignmentId}/submit-file`,
+          formData
+        );
+        return res.data.data;
+      }
+      const res = await apiClient.post<ApiResponse<AssignmentSubmission>>(
+        `/assignments/${assignmentId}/submit`,
+        { content_text: contentText || '' }
+      );
+      return res.data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['assignments'] });
+    },
+  });
+}
+
 export function useCreateAssignment(offeringId: string) {
   const queryClient = useQueryClient();
   return useMutation({

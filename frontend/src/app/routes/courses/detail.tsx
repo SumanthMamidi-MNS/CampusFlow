@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { ConfirmDialog } from '@/core/components/ui';
 import {
   ArrowLeft,
   Bell,
@@ -53,6 +54,7 @@ export function CourseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const offeringId = id || '';
 
+  const [dropTarget, setDropTarget] = useState<{ studentId: string; name: string } | null>(null);
   const [activeTab, setActiveTab] = useState<
     'announcements' | 'materials' | 'assignments' | 'gradebook' | 'roster'
   >('announcements');
@@ -817,14 +819,16 @@ export function CourseDetailPage() {
                 <div key={enr.id} className="flex items-center justify-between p-4 hover:bg-slate-50/50">
                   <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 font-bold text-xs uppercase">
-                      {enr.student_name ? enr.student_name[0] : 'S'}
+                      {(enr.student_name || enr.first_name || 'S').charAt(0)}
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold text-slate-900">
-                        {enr.student_name || 'Enrolled Student'}
+                        {enr.student_name ||
+                          [enr.first_name, enr.last_name].filter(Boolean).join(' ') ||
+                          'Enrolled Student'}
                       </h4>
                       <span className="text-xs text-slate-400 font-mono">
-                        {enr.student_email || enr.student_id}
+                        {enr.student_email || enr.email || enr.student_id}
                       </span>
                     </div>
                   </div>
@@ -835,11 +839,15 @@ export function CourseDetailPage() {
                     </span>
                     {isInstructorOrAdmin && (
                       <button
-                        onClick={() => {
-                          if (confirm('Drop student from this course?')) {
-                            dropStudentMutation.mutate(enr.student_id);
-                          }
-                        }}
+                        onClick={() =>
+                          setDropTarget({
+                            studentId: enr.student_id,
+                            name:
+                              enr.student_name ||
+                              [enr.first_name, enr.last_name].filter(Boolean).join(' ') ||
+                              'this student',
+                          })
+                        }
                         title="Drop student"
                         className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50"
                       >
@@ -1391,6 +1399,20 @@ export function CourseDetailPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={dropTarget !== null}
+        title="Drop student"
+        body={`Drop ${dropTarget?.name ?? 'this student'} from this course? Their existing submissions and grades are retained.`}
+        confirmLabel="Drop student"
+        destructive
+        onCancel={() => setDropTarget(null)}
+        onConfirm={() => {
+          const target = dropTarget;
+          setDropTarget(null);
+          if (target) dropStudentMutation.mutate(target.studentId);
+        }}
+      />
     </div>
   );
 }

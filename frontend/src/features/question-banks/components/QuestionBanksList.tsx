@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useCourses, useDepartments } from '@/features/courses/api';
 import { useCreateQuestionBank, useDeleteQuestionBank, useQuestionBanks } from '../api';
 import type { QuestionBankCreateInput } from '../types';
+import { ConfirmDialog } from '@/core/components/ui';
 import {
   BookOpen,
   Building2,
@@ -25,6 +26,9 @@ export function QuestionBanksList() {
     selectedDeptId ? { department_id: selectedDeptId } : undefined
   );
   const deleteBankMutation = useDeleteQuestionBank();
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Create Modal State
   const [newTitle, setNewTitle] = useState('');
@@ -67,10 +71,20 @@ export function QuestionBanksList() {
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, bankId: string, title: string) => {
+  const handleDelete = (e: React.MouseEvent, bankId: string, title: string) => {
     e.stopPropagation();
-    if (window.confirm(`Are you sure you want to delete the question bank "${title}" and all its questions?`)) {
-      await deleteBankMutation.mutateAsync(bankId);
+    setDeleteError(null);
+    setDeleteTarget({ id: bankId, title });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteBankMutation.mutateAsync(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.error?.message || err.message || 'Failed to delete question bank.');
+      setDeleteTarget(null);
     }
   };
 
@@ -78,6 +92,12 @@ export function QuestionBanksList() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      {deleteError && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-700">
+          {deleteError}
+        </div>
+      )}
+
       {/* Top Banner & Action */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
         <div>
@@ -153,6 +173,7 @@ export function QuestionBanksList() {
                     onClick={(e) => handleDelete(e, bank.id, bank.title)}
                     className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-opacity"
                     title="Delete Bank"
+                    aria-label={`Delete question bank ${bank.title}`}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -297,6 +318,16 @@ export function QuestionBanksList() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete question bank"
+        body={`Delete "${deleteTarget?.title ?? ''}" and all of its questions? This cannot be undone.`}
+        confirmLabel="Delete bank"
+        destructive
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }

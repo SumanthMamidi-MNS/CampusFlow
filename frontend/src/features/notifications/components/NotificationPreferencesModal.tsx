@@ -24,6 +24,7 @@ export function NotificationPreferencesModal({
   });
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (preferences) {
@@ -47,6 +48,7 @@ export function NotificationPreferencesModal({
   };
 
   const handleSave = async () => {
+    setSaveError(null);
     try {
       await updateMutation.mutateAsync(form);
       setSavedSuccess(true);
@@ -54,8 +56,10 @@ export function NotificationPreferencesModal({
         setSavedSuccess(false);
         onClose();
       }, 1200);
-    } catch {
-      alert('Failed to update notification preferences.');
+    } catch (err: any) {
+      setSaveError(
+        err?.response?.data?.error?.message || err?.message || 'Failed to update notification preferences.'
+      );
     }
   };
 
@@ -88,7 +92,12 @@ export function NotificationPreferencesModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in duration-150">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Notification preferences"
+        className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in duration-150"
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
@@ -108,6 +117,11 @@ export function NotificationPreferencesModal({
         </div>
 
         <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+          {saveError && (
+            <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+              {saveError}
+            </div>
+          )}
           {isLoading ? (
             <div className="py-8 text-center text-xs text-slate-400">Loading preferences...</div>
           ) : (
@@ -137,6 +151,7 @@ export function NotificationPreferencesModal({
                       type="checkbox"
                       checked={form[cat.inAppKey]}
                       onChange={() => handleToggle(cat.inAppKey)}
+                      aria-label={`${cat.title} — in-app notifications`}
                       className="h-4 w-4 rounded-sm border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                     />
                   </div>
@@ -146,6 +161,7 @@ export function NotificationPreferencesModal({
                       type="checkbox"
                       checked={form[cat.emailKey]}
                       onChange={() => handleToggle(cat.emailKey)}
+                      aria-label={`${cat.title} — email notifications`}
                       className="h-4 w-4 rounded-sm border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                     />
                   </div>
