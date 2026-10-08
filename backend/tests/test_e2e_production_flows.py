@@ -31,12 +31,9 @@ async def test_security_headers_and_request_id(client):
 @pytest.mark.asyncio
 async def test_institution_branding_and_rbac(client, db_session):
     """Verify institutional settings retrieval, RBAC protection, and updates."""
-    # 1. Public retrieval
-    get_res = await client.get("/api/v1/institution")
-    assert get_res.status_code == 200
-    data = get_res.json()["data"]
-    assert "name" in data
-    assert "primary_color" in data
+    # 1. The profile is authenticated, not public: anonymous callers get 401.
+    anon_res = await client.get("/api/v1/institution")
+    assert anon_res.status_code == 401, anon_res.text
 
     # 2. Setup Admin and Student users
     admin = User(
@@ -61,6 +58,15 @@ async def test_institution_branding_and_rbac(client, db_session):
 
     admin_token = create_access_token({"sub": str(admin.id)})
     student_token = create_access_token({"sub": str(student.id)})
+
+    # Any signed-in user may read the institution profile.
+    get_res = await client.get(
+        "/api/v1/institution", headers={"Authorization": f"Bearer {student_token}"}
+    )
+    assert get_res.status_code == 200, get_res.text
+    data = get_res.json()["data"]
+    assert "name" in data
+    assert "primary_color" in data
 
     # 3. Student forbidden from updating institution
     stud_res = await client.put(

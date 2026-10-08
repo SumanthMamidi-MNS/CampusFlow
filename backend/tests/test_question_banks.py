@@ -1,9 +1,12 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from campusflow.bedrock.auth.jwt import create_access_token
 from campusflow.bedrock.auth.pwd import get_password_hash
 from campusflow.bedrock.rbac.service import assign_role_to_user
-from campusflow.domain.courses.models import Course
+from campusflow.domain.academic_terms.models import AcademicTerm
+from campusflow.domain.courses.models import Course, CourseOffering, FacultyAssignment
 from campusflow.domain.departments.models import Department
 from campusflow.domain.users.models import User
 
@@ -58,6 +61,28 @@ async def test_question_banks_and_questions_lifecycle(client, db_session):
         credits=4,
     )
     db_session.add(course)
+    await db_session.flush()
+
+    # Since Wave 1 the question-bank surface is department-scoped: a faculty
+    # member authors in the departments they teach. Give this one a teaching
+    # assignment in the department so the lifecycle exercises real scope.
+    now = datetime.now(UTC)
+    term = AcademicTerm(
+        name="P4 Term",
+        start_date=now.date(),
+        end_date=(now + timedelta(days=120)).date(),
+        is_current=False,
+    )
+    db_session.add(term)
+    await db_session.flush()
+    offering = CourseOffering(
+        course_id=course.id, academic_term_id=term.id, section="A", status="active"
+    )
+    db_session.add(offering)
+    await db_session.flush()
+    db_session.add(
+        FacultyAssignment(course_offering_id=offering.id, faculty_id=faculty.id, role="primary")
+    )
     await db_session.commit()
 
     # 3. Create Question Bank (Faculty)

@@ -220,3 +220,33 @@ This document records the foundational architectural and technical decisions mad
   cross-department 403s and the self-scoped student views, so a regression that re-exposes answer
   material fails the suite instead of reaching a candidate. Faculty authoring is unchanged and
   still receives full definitions.
+
+### ADR-017: Department Scope for Authoring Surfaces & an Executable Route Policy
+
+* **Status:** Accepted (Wave 1 of the approved master plan)
+* **Context:** The Wave 0 kernel answered *offering* questions, but three surfaces still decided
+  access by other means: `/question-banks*` reads were open to any authenticated user (answer
+  keys leaked to student sessions), materials routes performed no offering check, and
+  `list_course_offerings` chose its filter from an `if/elif` chain on raw role names — a
+  department head who was not also faculty fell through every branch into an unscoped,
+  institution-wide query. A programmatic walk additionally found six directory routes
+  (`/departments`, `/departments/{id}`, `/programs`, `/batches`, `/academic-terms`,
+  `/institution`) reachable anonymously.
+* **Decision:**
+  1. **One kernel for every scope question.** Offering-owned data uses `visible_offering_ids` /
+     `assert_can_*_offering`; department-owned data (question banks) uses the new
+     `visible_department_ids` — `None` for administrators, all departments for the examination
+     bureau only when the call site opts in with `allow_exam_bureau=True`, otherwise the
+     departments the user heads or teaches in. `domain/question_banks/access.py` is the only
+     place the question-bank surface interprets that result; no inline role logic in routers.
+  2. **Answer material requires a capability, a session is not enough.** Every
+     `/question-banks*` and `/questions*` route requires `questions:manage` (held by all staff
+     roles, by no student role) *and* the department check; reads and writes alike.
+  3. **The public surface is enumerated and tested.** Public routes are exactly
+     `/api/health` and `/api/v1/auth/*`. `tests/test_route_policy.py` walks the live route
+     table each run, so a new endpoint without a gate fails CI instead of shipping.
+* **Consequences:** Students cannot reach any answer-bearing route (403 at the gate); staff are
+  confined to their departments with 403 elsewhere while own-department authoring, CSV
+  export/import and bureau paper-assembly are unchanged; the directory reads now require a
+  session (the frontend only calls them from authenticated pages, so no UI regression). The
+  route table can no longer grow an ungated endpoint without failing the suite.

@@ -7,6 +7,10 @@ from campusflow.bedrock.api.responses import success_response
 from campusflow.bedrock.auth.dependencies import get_current_active_user
 from campusflow.bedrock.db.session import get_db
 from campusflow.bedrock.rbac.dependencies import require_permission
+from campusflow.domain.courses.access import (
+    assert_can_manage_offering,
+    assert_can_view_offering,
+)
 from campusflow.domain.materials.schemas import (
     MaterialCreate,
     MaterialFolderCreate,
@@ -17,6 +21,7 @@ from campusflow.domain.materials.service import (
     create_folder,
     create_link_or_text_material,
     download_material_file,
+    get_material,
     list_folders,
     list_materials,
     upload_file_material,
@@ -33,6 +38,7 @@ async def get_folders_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    await assert_can_view_offering(db, current_user, offering_id, purpose="course material access")
     folders = await list_folders(db, offering_id)
     return success_response(
         [MaterialFolderResponse.model_validate(f).model_dump(mode="json") for f in folders]
@@ -46,6 +52,9 @@ async def create_folder_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("materials:manage")),
 ):
+    await assert_can_manage_offering(
+        db, current_user, offering_id, purpose="course material management"
+    )
     folder = await create_folder(db, offering_id, payload)
     return success_response(MaterialFolderResponse.model_validate(folder).model_dump(mode="json"))
 
@@ -58,6 +67,7 @@ async def get_materials_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    await assert_can_view_offering(db, current_user, offering_id, purpose="course material access")
     materials = await list_materials(db, offering_id, folder_id=folder_id)
     return success_response(
         [MaterialResponse.model_validate(m).model_dump(mode="json") for m in materials]
@@ -71,6 +81,9 @@ async def create_material_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("materials:manage")),
 ):
+    await assert_can_manage_offering(
+        db, current_user, offering_id, purpose="course material management"
+    )
     material = await create_link_or_text_material(db, offering_id, payload)
     return success_response(MaterialResponse.model_validate(material).model_dump(mode="json"))
 
@@ -84,6 +97,9 @@ async def upload_material_file_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("materials:manage")),
 ):
+    await assert_can_manage_offering(
+        db, current_user, offering_id, purpose="course material management"
+    )
     file_bytes = await file.read()
     material = await upload_file_material(
         db=db,
@@ -103,6 +119,10 @@ async def download_file_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    material = await get_material(db, material_id)
+    await assert_can_view_offering(
+        db, current_user, material.course_offering_id, purpose="course material access"
+    )
     file_bytes, filename, mime_type = await download_material_file(db, material_id)
     return Response(
         content=file_bytes,

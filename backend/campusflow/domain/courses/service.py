@@ -13,7 +13,6 @@ from campusflow.domain.courses.schemas import (
     CourseResponse,
     FacultyAssignmentResponse,
 )
-from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.users.models import User
 
 
@@ -102,9 +101,7 @@ async def list_course_offerings(
     term_id: uuid.UUID | None = None,
     course_id: uuid.UUID | None = None,
 ) -> list[CourseOfferingResponse]:
-    from campusflow.bedrock.rbac.service import get_user_roles
-
-    roles = await get_user_roles(db, user.id)
+    from campusflow.domain.courses.access import visible_offering_ids
 
     query = select(CourseOffering).options(
         selectinload(CourseOffering.course),
@@ -116,19 +113,17 @@ async def list_course_offerings(
     if course_id:
         query = query.where(CourseOffering.course_id == course_id)
 
-    # Scoping by role:
-    if "super_admin" in roles or "admin" in roles or "exam_controller" in roles:
-        pass  # Admins see all offerings
-    elif "faculty" in roles:
-        # Faculty see offerings where they are assigned
-        query = query.join(
-            FacultyAssignment, FacultyAssignment.course_offering_id == CourseOffering.id
-        ).where(FacultyAssignment.faculty_id == user.id)
-    elif "student" in roles:
-        # Students see offerings where they are actively enrolled
-        query = query.join(Enrollment, Enrollment.course_offering_id == CourseOffering.id).where(
-            Enrollment.student_id == user.id, Enrollment.status == "enrolled"
-        )
+    # One kernel answers "who sees which offerings" for every role. The old
+    # role-name elif-chain fell through for department heads (and for any user
+    # with no matching role), leaving the query unscoped — i.e. institution
+    # wide. ``None`` means "every offering" (administrators, examination
+    # bureau); everyone else gets the explicit id list: taught + headed +
+    # enrolled, or nothing at all.
+    permitted = await visible_offering_ids(db, user, allow_exam_bureau=True)
+    if permitted is None:
+        pass  # Institution-wide readers see every offering.
+    else:
+        query = query.where(CourseOffering.id.in_(permitted))
 
     res = await db.execute(query.order_by(CourseOffering.created_at.desc()))
     offerings = res.scalars().all()

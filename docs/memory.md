@@ -127,3 +127,17 @@ This document preserves durable technical context, implementation constraints, a
   (create that database once).
 - **Exit-status trap:** piping pytest into `tail` hides its failure unless `set -o pipefail` is
   set; wrapping it in a subshell makes `$PIPESTATUS` report the filter instead of pytest.
+- **Stale dev server:** `uvicorn campusflow.main:app` without `--reload` keeps serving the code
+  it was started with, so a live "leak still present" observation may just be a stale process.
+  After backend edits, restart the listener (find it with `netstat -ano | grep :8000`, stop the
+  exact PID, relaunch) before drawing conclusions from live HTTP.
+- **Session-shared pytest database:** the test engine is session-scoped, so committed rows from
+  one test are visible to later tests in the same run. Fixtures that create users/departments
+  must tag emails and codes with a per-invocation uuid, and assertions over *institution-wide*
+  collections (admin/bureau listings) must be containment checks (`{mine} <= listed`), not
+  equality — scoped actors can still assert exact lists because their scope never includes
+  another fixture's world.
+- **FastAPI route introspection:** included routers appear as `_IncludedRouter` objects in
+  `app.routes`, not `APIRoute`; policy audits must unwrap `include_context.prefix` /
+  `original_router.routes` (see `tests/test_route_policy.py`) or they silently count only the
+  leaf app-level routes.

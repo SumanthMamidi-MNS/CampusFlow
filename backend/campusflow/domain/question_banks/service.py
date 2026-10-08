@@ -163,7 +163,15 @@ async def list_question_banks(
     db: AsyncSession,
     department_id: uuid.UUID | None = None,
     course_id: uuid.UUID | None = None,
+    *,
+    department_ids: set[uuid.UUID] | None = None,
 ) -> list[QuestionBankResponse]:
+    """List banks, optionally filtered by one department and by the set of
+    departments the caller may see.
+
+    ``department_ids=None`` means "no department restriction" (the caller has
+    institution-wide scope); an explicit empty set yields no rows.
+    """
     query = (
         select(QuestionBank)
         .options(
@@ -176,6 +184,8 @@ async def list_question_banks(
         query = query.where(QuestionBank.department_id == department_id)
     if course_id:
         query = query.where(QuestionBank.course_id == course_id)
+    if department_ids is not None:
+        query = query.where(QuestionBank.department_id.in_(department_ids))
 
     res = await db.execute(query)
     banks = list(res.scalars().all())
@@ -314,7 +324,10 @@ async def get_question(
     query = (
         select(Question)
         .where(Question.id == question_id)
-        .options(selectinload(Question.options))
+        .options(
+            selectinload(Question.options),
+            selectinload(Question.question_bank),
+        )
     )
     res = await db.execute(query)
     q = res.scalar_one_or_none()

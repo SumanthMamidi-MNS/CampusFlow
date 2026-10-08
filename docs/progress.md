@@ -398,3 +398,44 @@ Wave 0 closed them and added the tests that keep them closed.
 - **Harness repair (T1 of the plan):** the PostgreSQL run previously errored in fixtures because
   session-scoped asyncpg connections were reused across per-test event loops; `conftest.py` now
   uses `NullPool` for PostgreSQL, making the authoritative engine actually runnable.
+
+### Phase 15 — Wave 1: shared authorization/scoping kernel applied everywhere
+
+Wave 1 turned the Wave 0 kernel into the *only* way domains answer "whose data is this",
+closed the routes that had no gate at all, and added the tests that keep the policy executable.
+
+- **Route inventory:** all 116 routes were walked programmatically. Twelve declared no gate:
+  health and the five auth routes (deliberately public) plus six directory reads —
+  `/departments`, `/departments/{id}`, `/programs`, `/batches`, `/academic-terms`,
+  `/institution` — which were reachable **anonymously**. The six now require a session; the
+  public surface is exactly `health + /auth/*`.
+- **Department-head fall-through (real defect):** `list_course_offerings` selected its filter
+  from an `if/elif` chain on raw role names; a `department_head` who was not also faculty —
+  and any user with no matching role — fell through every branch and received an *unscoped*
+  query (every offering in the institution). It now calls `visible_offering_ids(...)`; the
+  kernel also gained `visible_department_ids(...)` / `teaching_department_ids(...)` for
+  department-owned resources.
+- **Question-bank answer keys:** `/question-banks*` and `/questions*` reads were reachable by
+  any authenticated user (reproducible live: a student session read bank listings with
+  `is_correct` and explanations). Every bank/question route now requires
+  `questions:manage` **and** passes the department scope check in the new
+  `domain/question_banks/access.py` (bureau opted in, as with exam authoring): students are
+  refused outright, other departments' staff get 403, own-department authoring (including
+  CSV export/import) is unchanged.
+- **Materials:** every read (`folders`, `materials`, `download`) passes
+  `assert_can_view_offering`, every write passes `assert_can_manage_offering` — a student can
+  no longer fetch another cohort's files, and capable faculty can no longer publish into
+  someone else's offering.
+- **Tests:** `test_route_policy.py` (route-table walk: gate or audited public allowlist;
+  answer-material routes must carry a permission gate) and `test_wave1_scoping.py`
+  (fall-through actors, bank leak canaries both directions, materials cross-offering,
+  anonymous directory rejection, positive download through real storage).
+  Existing fixtures were aligned with the new policy where they assumed anonymous
+  `/institution` reads or unscoped faculty authoring — setup data changed, assertions did not
+  weaken.
+- **Verification:** ruff clean; suite **32/32 on SQLite and 32/32 on PostgreSQL**. Live probe
+  against the running stack (restarted to load Wave 1): anonymous directory/institution/bank
+  routes → 401, student bank reads → 403 with no `is_correct` in any body, CSE↔MECH
+  cross-department staff reads/writes → 403, `hod.cse` offerings confined to CSE, faculty
+  authoring still returns 5 `is_correct` keys and CSV export 200, student exam surface
+  (Wave 0 contract) still 200.

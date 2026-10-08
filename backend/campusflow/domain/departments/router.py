@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from campusflow.bedrock.api.responses import success_response
+from campusflow.bedrock.auth.dependencies import get_current_active_user
 from campusflow.bedrock.db.session import get_db
 from campusflow.bedrock.rbac.dependencies import require_permission
 from campusflow.domain.departments.schemas import (
@@ -34,7 +35,10 @@ router = APIRouter(tags=["academic-structure"])
 
 # Departments
 @router.get("/departments")
-async def get_departments_endpoint(db: AsyncSession = Depends(get_db)):
+async def get_departments_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     depts = await list_departments(db)
     return success_response(
         [DepartmentResponse.model_validate(d).model_dump(mode="json") for d in depts]
@@ -52,7 +56,11 @@ async def create_department_endpoint(
 
 
 @router.get("/departments/{dept_id}")
-async def get_department_endpoint(dept_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_department_endpoint(
+    dept_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     dept = await get_department(db, dept_id)
     return success_response(DepartmentResponse.model_validate(dept).model_dump(mode="json"))
 
@@ -62,6 +70,7 @@ async def get_department_endpoint(dept_id: uuid.UUID, db: AsyncSession = Depends
 async def get_programs_endpoint(
     department_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     progs = await list_programs(db, department_id=department_id)
     return success_response(
@@ -84,6 +93,7 @@ async def create_program_endpoint(
 async def get_batches_endpoint(
     program_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     batches = await list_batches(db, program_id=program_id)
     return success_response(
@@ -103,7 +113,10 @@ async def create_batch_endpoint(
 
 # Academic Terms
 @router.get("/academic-terms")
-async def get_academic_terms_endpoint(db: AsyncSession = Depends(get_db)):
+async def get_academic_terms_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     terms = await list_academic_terms(db)
     return success_response(
         [AcademicTermResponse.model_validate(t).model_dump(mode="json") for t in terms]

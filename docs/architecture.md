@@ -177,6 +177,25 @@ only for usability, never as a security boundary.
   - `assert_can_view_offering(...)` — anything broader than manage is explicit;
   - `visible_offering_ids(...)` — returns the set of offerings the caller may see, or `None`
     for unrestricted roles.
+  List endpoints route through the same kernel — `list_course_offerings` filters by
+  `visible_offering_ids(...)` instead of a role-name chain, so a role the chain did not
+  recognise (department head without a faculty assignment, a user with no role) can never
+  fall through to an unscoped query.
+- **Department scope:** resources owned by a department rather than a single offering (question
+  banks) use `visible_department_ids(...)` — `None` for institution administrators, all
+  departments for the examination bureau only when the call site opts in with
+  `allow_exam_bureau=True`, otherwise the departments the user heads or teaches in. The
+  question-bank surface wraps it in `campusflow.domain.question_banks.access`; every bank,
+  question, import and export route is permission-gated **and** department-scoped, because the
+  payloads carry answer material.
+- **Materials:** every `/course-offerings/{id}/materials|folders` and `/materials/{id}/download`
+  route passes `assert_can_view_offering` (reads) or `assert_can_manage_offering` (writes);
+  students reach only offerings they are enrolled in.
+- **Route policy is executable:** `backend/tests/test_route_policy.py` walks the live route
+  table and fails any route that declares no gate while absent from the audited public
+  allowlist (`/api/health` and `/api/v1/auth/*`), and additionally requires a *permission*
+  gate — not mere authentication — on the answer-material routes (`/question-banks*`,
+  `/questions*`).
 - **Authorship fallback:** an exam or assignment author manages what they created even when no
   `FacultyAssignment` row exists. Cohort endpoints have no such fallback and always need the
   teaching link.

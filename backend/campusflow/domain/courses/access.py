@@ -68,6 +68,24 @@ async def teaching_offering_ids(db: AsyncSession, user: User) -> set[uuid.UUID]:
     return set(res.scalars().all())
 
 
+async def teaching_department_ids(db: AsyncSession, user: User) -> set[uuid.UUID]:
+    """Departments whose courses this user is assigned to teach.
+
+    Department-scoped resources that are not attached to a single offering
+    (question banks, for example) use this to answer "is this mine?".
+    """
+    res = await db.execute(
+        select(Course.department_id)
+        .join(CourseOffering, CourseOffering.course_id == Course.id)
+        .join(
+            FacultyAssignment,
+            FacultyAssignment.course_offering_id == CourseOffering.id,
+        )
+        .where(FacultyAssignment.faculty_id == user.id)
+    )
+    return {department_id for department_id in res.scalars().all() if department_id is not None}
+
+
 async def enrolled_offering_ids(
     db: AsyncSession, user: User, *, active_only: bool = True
 ) -> set[uuid.UUID]:
@@ -170,6 +188,33 @@ async def assert_can_view_offering(
         db, user, offering_id, allow_exam_bureau=allow_exam_bureau
     ):
         raise _denied("You do not have access to this course offering", purpose)
+
+
+async def visible_department_ids(
+    db: AsyncSession,
+    user: User,
+    *,
+    allow_exam_bureau: bool = False,
+) -> set[uuid.UUID] | None:
+    """Departments a user may read department-scoped content in.
+
+    Returns ``None`` — meaning "every department" — for institution
+    administrators, and for the examination bureau when the caller opts in.
+    Everyone else gets the union of the departments they head and the
+    departments they teach in; a student gets the empty set.
+    """
+    roles = await roles_for(db, user)
+    if roles & INSTITUTION_ROLES:
+        return None
+    if allow_exam_bureau and roles & EXAM_BUREAU_ROLES:
+        return None
+
+    ids: set[uuid.UUID] = set()
+    if roles & DEPARTMENT_ROLES:
+        ids |= await headed_department_ids(db, user)
+    if roles & (DEPARTMENT_ROLES | {"faculty"}):
+        ids |= await teaching_department_ids(db, user)
+    return ids
 
 
 async def visible_offering_ids(
