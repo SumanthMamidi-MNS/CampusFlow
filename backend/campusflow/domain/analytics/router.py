@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from campusflow.bedrock.api.responses import success_response
 from campusflow.bedrock.auth.dependencies import get_current_active_user
 from campusflow.bedrock.db.session import get_db
-from campusflow.bedrock.rbac.dependencies import require_permission
+from campusflow.bedrock.rbac.dependencies import require_any_role, require_permission
 from campusflow.domain.analytics.service import (
     get_course_analytics,
     get_exam_analytics,
@@ -21,9 +21,16 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("/overview")
 async def get_overview_endpoint(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("analytics:view")),
+    current_user: User = Depends(
+        require_any_role("admin", "department_head", "exam_controller")
+    ),
 ):
-    """Institutional KPI overview for administrators and leadership."""
+    """Institutional KPI overview for administrators and leadership.
+
+    Institution-wide totals and recent audit activity are leadership data, so
+    this is gated on role rather than on the broad ``analytics:view`` capability
+    that individual instructors also hold.
+    """
     data = await get_institutional_overview(db)
     return success_response(data.model_dump(mode="json"))
 
@@ -32,10 +39,10 @@ async def get_overview_endpoint(
 async def get_course_analytics_endpoint(
     course_offering_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("analytics:view")),
 ):
-    """Course-level performance metrics, assignment completion, and grade distribution."""
-    data = await get_course_analytics(db, course_offering_id)
+    """Course-level performance metrics for that course's teaching staff."""
+    data = await get_course_analytics(db, course_offering_id, current_user)
     return success_response(data.model_dump(mode="json"))
 
 
@@ -46,7 +53,7 @@ async def get_exam_analytics_endpoint(
     current_user: User = Depends(require_permission("exams:grade")),
 ):
     """Detailed exam performance analytics, score brackets, and proctoring stats."""
-    data = await get_exam_analytics(db, exam_id)
+    data = await get_exam_analytics(db, exam_id, current_user)
     return success_response(data.model_dump(mode="json"))
 
 

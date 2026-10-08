@@ -23,6 +23,7 @@ from campusflow.domain.assignments.service import (
     export_course_gradebook_csv,
     get_assignment,
     get_course_gradebook,
+    get_my_course_grades,
     get_my_submission,
     grade_submission,
     list_assignments,
@@ -204,10 +205,24 @@ async def grade_submission_endpoint(
 async def get_gradebook_endpoint(
     offering_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("assignments:grade")),
+):
+    """Cohort gradebook for the instructors and administrators of this offering."""
+    gb = await get_course_gradebook(db, course_offering_id=offering_id, current_user=current_user)
+    return success_response(gb.model_dump(mode="json"))
+
+
+@router.get("/course-offerings/{offering_id}/my-grades")
+async def get_my_grades_endpoint(
+    offering_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    gb = await get_course_gradebook(db, course_offering_id=offering_id)
-    return success_response(gb.model_dump(mode="json"))
+    """The caller's own marks in this offering. Never returns cohort data."""
+    grades = await get_my_course_grades(
+        db, course_offering_id=offering_id, student_user=current_user
+    )
+    return success_response(grades.model_dump(mode="json"))
 
 
 @router.get("/course-offerings/{offering_id}/gradebook/export")
@@ -216,7 +231,9 @@ async def export_gradebook_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("assignments:grade")),
 ):
-    csv_content = await export_course_gradebook_csv(db, course_offering_id=offering_id)
+    csv_content = await export_course_gradebook_csv(
+        db, course_offering_id=offering_id, current_user=current_user
+    )
     return Response(
         content=csv_content,
         media_type="text/csv; charset=utf-8",

@@ -185,3 +185,38 @@ This document records the foundational architectural and technical decisions mad
 
 
 
+
+### ADR-016: Offering-Scoped Authorization & Audience-Specific Projections
+
+* **Status:** Accepted (Wave 0, P0 security repair)
+* **Context:** A live audit of the running stack found several read endpoints protected only by
+  `get_current_active_user` while returning staff-shaped payloads. A signed-in student could read
+  every examination's answer key for the whole institution (`is_correct`, `explanation`), the
+  cohort gradebook, the course roster and course analytics — each reproduced against the running
+  PostgreSQL instance. The candidate's own assessment screen also fetched the staff exam payload,
+  so the answer key arrived in the student's browser during the attempt.
+* **Decision:**
+  1. **Authorization is scope-based, not capability-based.** A permission code answers *what* a
+     user may do; it never answers *whose* data they may touch. `campusflow.domain.courses.access`
+     is the single implementation of that question (`can_manage_offering`, `can_view_offering`,
+     `visible_offering_ids`, `assert_can_*_offering`) and every offering-scoped domain routes its
+     access decisions through it. Institution administrators see everything; department heads are
+     limited to departments they head; the examination bureau is institution-wide **only** for
+     examination work and must opt in with `allow_exam_bureau=True`; faculty are limited to
+     offerings they teach (or authored); students are limited to offerings they are enrolled in.
+  2. **One serializer per audience.** `ExamResponse` (staff, carries answer keys) and
+     `ExamStudentResponse` (candidate, metadata only) are separate schemas; the candidate shape
+     has no field capable of carrying answer material. `GET /exams/{id}` is a staff resource and
+     candidates use `GET /exams/{id}/public` for the pre-attempt brief.
+  3. **Cohort data requires teaching scope.** Gradebook, roster and course analytics are
+     staff-of-offering data. A student's own marks come from a dedicated self-scoped endpoint
+     (`GET /course-offerings/{id}/my-grades`) that cannot express another student's identity.
+  4. **Institution-wide reporting is role-gated**, not reachable through the broad `analytics:view`
+     capability individual instructors also hold.
+  5. **No fabricated fallbacks:** where a statistic has no underlying data the API returns `null`
+     ("no data yet") rather than a placeholder percentage.
+* **Consequences:** Negative-path authorization is now testable and tested.
+  `backend/tests/test_authorization_matrix.py` asserts the candidate leak space (forbidden keys),
+  cross-department 403s and the self-scoped student views, so a regression that re-exposes answer
+  material fails the suite instead of reaching a candidate. Faculty authoring is unchanged and
+  still receives full definitions.

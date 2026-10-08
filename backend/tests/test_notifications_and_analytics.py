@@ -7,7 +7,7 @@ from campusflow.bedrock.auth.pwd import get_password_hash
 from campusflow.bedrock.rbac.service import assign_role_to_user
 from campusflow.domain.academic_terms.models import AcademicTerm
 from campusflow.domain.assignments.models import Assignment, AssignmentSubmission, SubmissionGrade
-from campusflow.domain.courses.models import Course, CourseOffering
+from campusflow.domain.courses.models import Course, CourseOffering, FacultyAssignment
 from campusflow.domain.departments.models import Department
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.exams.models import Exam, ExamAttempt, ExamQuestion
@@ -112,6 +112,11 @@ async def test_analytics_and_exam_results_export(client, db_session):
     offering = CourseOffering(course_id=course.id, academic_term_id=term.id, section="Sec-1", status="active")
     db_session.add(offering)
     await db_session.flush()
+
+    # Faculty teaches this offering (the real access record used for scoping).
+    db_session.add(
+        FacultyAssignment(course_offering_id=offering.id, faculty_id=faculty.id, role="primary")
+    )
 
     enrollment = Enrollment(course_offering_id=offering.id, student_id=student.id, status="enrolled")
     db_session.add(enrollment)

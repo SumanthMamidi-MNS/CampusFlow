@@ -370,3 +370,31 @@ against a live stack. Evidence and the defect ledger are in `docs/live-qa-log.md
   Piston; browser walkthrough across the role matrix recorded in `docs/live-qa-log.md`.
 
 
+
+### Phase 14 — Wave 0: P0 access-control repair (examination keys, cohort data)
+
+An audit of the running stack (PostgreSQL, live HTTP) reproduced four P0/P1 disclosure defects
+that the existing green suite could not detect because it only exercised staff-actor happy paths.
+Wave 0 closed them and added the tests that keep them closed.
+
+- **Defects (all reproduced live before the fix):** a student session received 24 `is_correct`
+  keys and 10 explanations from `GET /api/v1/exams` (including draft examinations and other
+  offerings) and the full answer key from `GET /api/v1/exams/{id}` — which the candidate's own
+  assessment screen fetched during an attempt; the same session read the cohort gradebook, the
+  course roster and course analytics.
+- **Fix:** new offering-scope authorization kernel (`domain/courses/access.py`); role-aware
+  examination reads with a candidate-safe projection (`ExamStudentResponse`) plus a new
+  `GET /exams/{id}/public` brief; `GET /exams/{id}` restricted to examination staff with offering
+  scope; gradebook, roster, course analytics and institution-wide reporting now require teaching,
+  departmental, bureau or leadership scope as appropriate; new self-scoped
+  `GET /course-offerings/{id}/my-grades`; fabricated `85%`/`100%` analytics fallbacks replaced by
+  `null`; the assessment surface no longer fetches the staff payload and receives
+  `proctoring_enabled` from the server instead.
+- **Verification:** `backend/tests/test_authorization_matrix.py` (role matrix + forbidden-key
+  canaries) — suite now **25/25 on SQLite and 25/25 on PostgreSQL**; live re-verification of the
+  frozen leak calls returned `is_correct_present=False`, `GET /exams/{id}` → 403, gradebook → 403,
+  roster → 403, course analytics → 403, with faculty authoring still returning answer keys and
+  other-department faculty correctly refused. `tsc -b && vite build` clean, oxlint 0 errors.
+- **Harness repair (T1 of the plan):** the PostgreSQL run previously errored in fixtures because
+  session-scoped asyncpg connections were reused across per-test event loops; `conftest.py` now
+  uses `NullPool` for PostgreSQL, making the authoritative engine actually runnable.

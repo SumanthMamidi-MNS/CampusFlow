@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from campusflow.bedrock.api.errors import ConflictError, NotFoundError
+from campusflow.domain.courses.access import assert_can_manage_offering
 from campusflow.domain.courses.models import CourseOffering
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.enrollments.schemas import BulkEnrollResult, EnrollmentResponse
@@ -104,8 +105,17 @@ async def drop_student(db: AsyncSession, offering_id: uuid.UUID, student_id: uui
 
 
 async def list_enrolled_students(
-    db: AsyncSession, offering_id: uuid.UUID
+    db: AsyncSession, offering_id: uuid.UUID, current_user: User
 ) -> list[EnrollmentResponse]:
+    """The roster for one offering.
+
+    A course roster identifies every enrolled student, so it is readable only by
+    those who teach or administer the offering (and the examination bureau).
+    """
+    await assert_can_manage_offering(
+        db, current_user, offering_id, purpose="course roster", allow_exam_bureau=True
+    )
+
     stmt = (
         select(Enrollment, User)
         .join(User, User.id == Enrollment.student_id)

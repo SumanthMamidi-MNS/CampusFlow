@@ -7,6 +7,7 @@ import type {
   ExamCreateInput,
   ExamDelivery,
   ExamResponseDetail,
+  ExamSummary,
   ExamUpdateInput,
   ProctoringEvent,
   ProctoringEventCreate,
@@ -17,6 +18,13 @@ import type {
 
 // ── Exam Queries & Mutations ────────────────────────────────────────────────
 
+/**
+ * Exam list for the current user.
+ *
+ * The server returns a candidate-safe summary to candidates and the full
+ * definition to examination staff, so this deliberately types the response as
+ * the common (safe) shape.
+ */
 export function useExams(courseOfferingId?: string, status?: string) {
   return useQuery({
     queryKey: ['exams', courseOfferingId, status],
@@ -25,12 +33,31 @@ export function useExams(courseOfferingId?: string, status?: string) {
       if (courseOfferingId) searchParams.set('course_offering_id', courseOfferingId);
       if (status) searchParams.set('status', status);
       const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
-      const res = await apiClient.get<ApiResponse<Exam[]>>(`/exams${query}`);
+      const res = await apiClient.get<ApiResponse<ExamSummary[]>>(`/exams${query}`);
       return res.data.data;
     },
   });
 }
 
+/**
+ * Candidate-safe brief for one exam (metadata only).
+ *
+ * This is what the assessment-taking surface uses before an attempt starts;
+ * it never returns question content or answer keys.
+ */
+export function useExamBrief(examId: string) {
+  return useQuery({
+    queryKey: ['exam-brief', examId],
+    queryFn: async () => {
+      const res = await apiClient.get<ApiResponse<ExamSummary>>(`/exams/${examId}/public`);
+      return res.data.data;
+    },
+    enabled: Boolean(examId),
+    retry: false,
+  });
+}
+
+/** Full exam definition for authorised examination staff (includes answer keys). */
 export function useExam(examId: string) {
   return useQuery({
     queryKey: ['exam', examId],

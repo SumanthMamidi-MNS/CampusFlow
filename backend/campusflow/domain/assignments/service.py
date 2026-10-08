@@ -26,7 +26,13 @@ from campusflow.domain.assignments.schemas import (
     GradebookResponse,
     GradebookStudentEntry,
     GradeSubmissionRequest,
+    MyAssignmentGrade,
+    MyCourseGradesResponse,
     SubmissionGradeResponse,
+)
+from campusflow.domain.courses.access import (
+    assert_can_manage_offering,
+    assert_can_view_offering,
 )
 from campusflow.domain.courses.models import CourseOffering, FacultyAssignment
 from campusflow.domain.enrollments.models import Enrollment
@@ -683,10 +689,16 @@ async def grade_submission(
 async def get_course_gradebook(
     db: AsyncSession,
     course_offering_id: uuid.UUID,
+    current_user: User,
 ) -> GradebookResponse:
+    """Cohort gradebook. Teaching or administrative scope over the offering only."""
     offering = await db.get(CourseOffering, course_offering_id)
     if not offering:
         raise NotFoundError("Course offering not found")
+
+    await assert_can_manage_offering(
+        db, current_user, course_offering_id, purpose="course gradebook"
+    )
 
     # Get published assignments
     assign_res = await db.execute(
@@ -783,8 +795,9 @@ async def get_course_gradebook(
 async def export_course_gradebook_csv(
     db: AsyncSession,
     course_offering_id: uuid.UUID,
+    current_user: User,
 ) -> str:
-    gb = await get_course_gradebook(db, course_offering_id)
+    gb = await get_course_gradebook(db, course_offering_id, current_user)
     output = io.StringIO()
     writer = csv.writer(output)
 
@@ -808,3 +821,88 @@ async def export_course_gradebook_csv(
         writer.writerow(row)
 
     return output.getvalue()
+
+
+# ── Self-scoped student grades ──────────────────────────────────────────────
+async def get_my_course_grades(
+    db: AsyncSession,
+    course_offering_id: uuid.UUID,
+    student_user: User,
+) -> MyCourseGradesResponse:
+    """The caller's own marks in one offering — never the cohort.
+
+    Uses the same weighted arithmetic as the staff gradebook so a student and
+    their instructor always read the same number.
+    """
+    offering = await db.get(CourseOffering, course_offering_id)
+    if not offering:
+        raise NotFoundError("Course offering not found")
+
+    await assert_can_view_offering(
+        db, student_user, course_offering_id, purpose="your course grades"
+    )
+
+    assign_res = await db.execute(
+        select(Assignment)
+        .where(
+            Assignment.course_offering_id == course_offering_id,
+            Assignment.is_published.is_(True),
+        )
+        .order_by(Assignment.due_date.asc())
+    )
+    assignments = list(assign_res.scalars().all())
+
+    my_subs: dict[uuid.UUID, AssignmentSubmission] = {}
+    if assignments:
+        sub_res = await db.execute(
+            select(AssignmentSubmission)
+            .where(
+                AssignmentSubmission.assignment_id.in_([a.id for a in assignments]),
+                AssignmentSubmission.student_id == student_user.id,
+            )
+            .options(selectinload(AssignmentSubmission.grade))
+        )
+        my_subs = {s.assignment_id: s for s in sub_res.scalars().all()}
+
+    entries: list[MyAssignmentGrade] = []
+    total_weighted = 0.0
+    for a in assignments:
+        submission = my_subs.get(a.id)
+        grade = submission.grade if submission else None
+        if grade is not None and a.total_marks > 0:
+            ratio = min(1.0, grade.final_marks / a.total_marks)
+            total_weighted += ratio * a.weightage
+        entries.append(
+            MyAssignmentGrade(
+                assignment_id=a.id,
+                title=a.title,
+                total_marks=a.total_marks,
+                weightage=a.weightage,
+                due_date=a.due_date,
+                submission_status=submission.status if submission else None,
+                submitted_at=submission.submitted_at if submission else None,
+                is_late=submission.is_late if submission else False,
+                marks_obtained=grade.marks_obtained if grade else None,
+                penalty_deducted=grade.penalty_deducted if grade else None,
+                final_marks=grade.final_marks if grade else None,
+                feedback=grade.feedback if grade else None,
+                graded_at=grade.graded_at if grade else None,
+            )
+        )
+
+    max_possible_weighted = sum(a.weightage for a in assignments)
+    percentage = (
+        round((total_weighted / max_possible_weighted) * 100.0, 2)
+        if max_possible_weighted > 0
+        else 0.0
+    )
+
+    return MyCourseGradesResponse(
+        course_offering_id=course_offering_id,
+        course_title=offering.course.title if offering.course else "Course",
+        student_id=student_user.id,
+        assignments=entries,
+        total_weighted_score=round(total_weighted, 2),
+        max_possible_weighted=round(max_possible_weighted, 2),
+        percentage=percentage,
+    )

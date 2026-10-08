@@ -56,6 +56,39 @@ export interface Exam {
   questions: ExamQuestion[];
 }
 
+/**
+ * The only examination configuration a candidate may see.
+ * The server never sends grading internals to a candidate.
+ */
+export interface ExamStudentConfig {
+  proctoring_enabled: boolean;
+  max_attempts: number;
+}
+
+/**
+ * Examination metadata as returned to a candidate (and to the exam list for
+ * every role). Deliberately has no `questions`: answer material is only ever
+ * delivered through the staff-only exam detail endpoint.
+ */
+export interface ExamSummary {
+  id: string;
+  course_offering_id: string;
+  course_title?: string | null;
+  course_code?: string | null;
+  title: string;
+  description?: string | null;
+  exam_type: ExamType;
+  total_marks: number;
+  passing_marks?: number | null;
+  duration_minutes: number;
+  start_window: string;
+  end_window: string;
+  instructions?: string | null;
+  status: ExamStatus;
+  questions_count: number;
+  config: Partial<ExamStudentConfig>;
+}
+
 export interface ExamCreateInput {
   course_offering_id: string;
   title: string;
@@ -105,6 +138,8 @@ export interface ExamDelivery {
   duration_minutes: number;
   remaining_seconds: number;
   status: AttemptStatus;
+  /** Server-authoritative integrity configuration for this attempt. */
+  proctoring_enabled: boolean;
   questions: ExamDeliveryQuestion[];
   saved_answers: Record<string, { answer_data: any; flagged_for_review: boolean }>;
 }

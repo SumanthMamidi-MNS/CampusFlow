@@ -99,3 +99,31 @@ This document preserves durable technical context, implementation constraints, a
   none matched), `error` (did not compile or never ran successfully).
 
 
+
+## Wave 0 — authorization, audience separation, and the PostgreSQL test harness
+
+- **Audience rule:** never hand a staff-shaped payload to a candidate. `ExamResponse` carries
+  `is_correct`/`explanation`; `ExamStudentResponse` deliberately has no field that can. Candidate
+  reads go through `GET /exams` (scoped list, non-draft states, enrolled offerings only) and
+  `GET /exams/{id}/public` (brief). `GET /exams/{id}` now requires
+  `exams:create|grade|proctor_view` **and** offering scope.
+- **Scope kernel:** `campusflow.domain.courses.access` owns every offering-scope question.
+  `allow_exam_bureau=True` is the only way to give `exam_controller` institution-wide reach, and
+  it applies to examination objects (rosters, exam authoring, exam analytics) — never to the
+  gradebook, which the bureau must not read.
+- **Authorship fallback:** an exam/assignment author manages what they created even when no
+  `FacultyAssignment` row exists. Tests that build an offering directly in the ORM must still add
+  the teaching link, because cohort endpoints (gradebook, roster, analytics) have no author to
+  fall back on.
+- **Student self-service:** `GET /course-offerings/{id}/my-grades` returns only the caller's rows
+  and mirrors the staff gradebook's weighted arithmetic, so student and instructor never disagree.
+- **Anti-enumeration:** a candidate asking for an exam they may not see (draft, or another
+  offering) receives **404**, not 403, so direct URLs cannot be probed.
+- **pytest + PostgreSQL:** asyncpg connections belong to the event loop that created them. A
+  session-scoped engine plus a fresh loop per test hands a poisoned connection to the next test
+  ("cannot rollback; the transaction is in error state"). `tests/conftest.py` therefore uses
+  `NullPool` for PostgreSQL (SQLite keeps `StaticPool`). Run PG-backed tests with
+  `TEST_DATABASE_URL=postgresql+asyncpg://campusflow:campusflow@localhost:5432/campusflow_test`
+  (create that database once).
+- **Exit-status trap:** piping pytest into `tail` hides its failure unless `set -o pipefail` is
+  set; wrapping it in a subshell makes `$PIPESTATUS` report the filter instead of pytest.

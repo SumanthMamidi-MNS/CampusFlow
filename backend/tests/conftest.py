@@ -4,7 +4,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 # Tests exercise the app in debug mode so the production secret guard does not
 # block the suite. Must be set before the settings module is imported below.
@@ -30,6 +30,14 @@ async def test_engine():
             "connect_args": {"check_same_thread": False},
             "poolclass": StaticPool,
         }
+    else:
+        # asyncpg connections belong to the event loop that created them. This
+        # engine is session-scoped while each test runs in its own loop, so a
+        # pooled connection would be handed to the next test's loop and fail
+        # with "cannot rollback; the transaction is in error state". NullPool
+        # opens every connection inside the currently running loop, which is
+        # what makes the PostgreSQL run a faithful representation of the app.
+        kwargs = {"poolclass": NullPool}
     engine = create_async_engine(TEST_DATABASE_URL, **kwargs)
     async with engine.begin() as conn:
         if IS_SQLITE:

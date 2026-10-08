@@ -129,3 +129,34 @@ class GradebookResponse(BaseModel):
     course_title: str
     assignments: list[dict[str, Any]]
     students: list[GradebookStudentEntry]
+
+
+# ── Self-scoped student grades ──────────────────────────────────────────────
+# A candidate may always see their own marks, but never the cohort. These
+# schemas carry exactly one student's data and no other identity.
+
+
+class MyAssignmentGrade(BaseModel):
+    assignment_id: uuid.UUID
+    title: str
+    total_marks: float
+    weightage: float
+    due_date: datetime
+    submission_status: str | None = None
+    submitted_at: datetime | None = None
+    is_late: bool = False
+    marks_obtained: float | None = None
+    penalty_deducted: float | None = None
+    final_marks: float | None = None
+    feedback: str | None = None
+    graded_at: datetime | None = None
+
+
+class MyCourseGradesResponse(BaseModel):
+    course_offering_id: uuid.UUID
+    course_title: str
+    student_id: uuid.UUID
+    assignments: list[MyAssignmentGrade]
+    total_weighted_score: float
+    max_possible_weighted: float
+    percentage: float

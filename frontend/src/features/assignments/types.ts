@@ -96,3 +96,31 @@ export interface GradebookResponse {
   }>;
   students: GradebookStudentEntry[];
 }
+
+/** One assignment's outcome for the signed-in student only. */
+export interface MyAssignmentGrade {
+  assignment_id: string;
+  title: string;
+  total_marks: number;
+  weightage: number;
+  due_date: string;
+  submission_status?: string | null;
+  submitted_at?: string | null;
+  is_late: boolean;
+  marks_obtained?: number | null;
+  penalty_deducted?: number | null;
+  final_marks?: number | null;
+  feedback?: string | null;
+  graded_at?: string | null;
+}
+
+/** A student's own marks in a course. Never contains another student's data. */
+export interface MyCourseGrades {
+  course_offering_id: string;
+  course_title: string;
+  student_id: string;
+  assignments: MyAssignmentGrade[];
+  total_weighted_score: number;
+  max_possible_weighted: number;
+  percentage: number;
+}

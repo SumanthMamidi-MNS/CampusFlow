@@ -12,6 +12,15 @@ from sqlalchemy.orm import selectinload
 
 from campusflow.bedrock.api.errors import AuthorizationError, NotFoundError
 from campusflow.bedrock.audit.service import record_audit_event
+from campusflow.bedrock.rbac.service import get_user_permissions
+from campusflow.domain.courses.access import (
+    EXAM_BUREAU_ROLES,
+    INSTITUTION_ROLES,
+    assert_can_manage_offering,
+    enrolled_offering_ids,
+    roles_for,
+    visible_offering_ids,
+)
 from campusflow.domain.courses.models import CourseOffering
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.exams.models import (
@@ -29,6 +38,8 @@ from campusflow.domain.exams.schemas import (
     ExamQuestionBatchAdd,
     ExamQuestionResponse,
     ExamQuestionStudentDelivery,
+    ExamStudentConfig,
+    ExamStudentResponse,
     ExamUpdate,
     GradeSingleResponseRequest,
     ProctoringEventCreate,
@@ -140,6 +151,183 @@ def serialize_exam_with_questions(exam: Exam, q_list: list[ExamQuestionResponse]
         questions_count=len(exam.questions),
         questions=q_list,
     )
+
+
+# ── Audience separation ─────────────────────────────────────────────────────
+#
+# Two audiences read examinations. Staff (authoring, grading, proctoring) receive
+# `ExamResponse`, which carries answer keys and grading internals. Candidates
+# receive `ExamStudentResponse`, which carries metadata only. Nothing may hand a
+# staff payload to a candidate, and no candidate-facing route may return
+# `is_correct`, `explanation` or another student's work.
+
+STAFF_EXAM_PERMISSIONS = frozenset({"exams:create", "exams:grade", "exams:proctor_view"})
+
+# Exam states a candidate may see. Drafts are invisible to candidates.
+STUDENT_VISIBLE_EXAM_STATUSES = frozenset(
+    {"scheduled", "live", "completed", "graded", "published"}
+)
+
+
+def build_student_exam(exam: Exam, questions_count: int) -> ExamStudentResponse:
+    """Project an exam into the candidate-safe shape."""
+    course = exam.course_offering.course if exam.course_offering else None
+    config = exam.config or {}
+    try:
+        max_attempts = max(1, int(config.get("max_attempts", 1)))
+    except (TypeError, ValueError):
+        max_attempts = 1
+    return ExamStudentResponse(
+        id=exam.id,
+        course_offering_id=exam.course_offering_id,
+        course_title=course.title if course else None,
+        course_code=course.code if course else None,
+        title=exam.title,
+        description=exam.description,
+        exam_type=exam.exam_type,
+        total_marks=exam.total_marks,
+        passing_marks=exam.passing_marks,
+        duration_minutes=exam.duration_minutes,
+        start_window=exam.start_window,
+        end_window=exam.end_window,
+        instructions=exam.instructions,
+        status=exam.status,
+        questions_count=questions_count,
+        config=ExamStudentConfig(
+            proctoring_enabled=bool(config.get("proctoring_enabled", True)),
+            max_attempts=max_attempts,
+        ),
+    )
+
+
+async def is_exam_staff(db: AsyncSession, user: User) -> bool:
+    """True when the user holds any examination-staff capability."""
+    roles = await roles_for(db, user)
+    if roles & (INSTITUTION_ROLES | EXAM_BUREAU_ROLES):
+        return True
+    perms = await get_user_permissions(db, user.id)
+    return bool(perms & STAFF_EXAM_PERMISSIONS)
+
+
+async def _exam_row(db: AsyncSession, exam_id: uuid.UUID) -> Exam:
+    """Load one exam with the offering/course joined (safe for async access)."""
+    res = await db.execute(
+        select(Exam)
+        .where(Exam.id == exam_id)
+        .options(selectinload(Exam.course_offering).selectinload(CourseOffering.course))
+    )
+    exam = res.scalar_one_or_none()
+    if not exam:
+        raise NotFoundError("Exam not found")
+    return exam
+
+
+async def _question_counts(db: AsyncSession, exam_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    if not exam_ids:
+        return {}
+    res = await db.execute(
+        select(ExamQuestion.exam_id, func.count(ExamQuestion.id))
+        .where(ExamQuestion.exam_id.in_(exam_ids))
+        .group_by(ExamQuestion.exam_id)
+    )
+    return {row[0]: row[1] for row in res.all()}
+
+
+async def _assert_can_manage_exam(
+    db: AsyncSession,
+    exam: Exam,
+    user: User,
+    *,
+    purpose: str,
+) -> None:
+    """Authoring/grading scope for a single exam.
+
+    The author always manages their own exam, which also covers examinations
+    created before a teaching assignment existed.
+    """
+    if exam.created_by_id is not None and exam.created_by_id == user.id:
+        return
+    await assert_can_manage_offering(
+        db, user, exam.course_offering_id, purpose=purpose, allow_exam_bureau=True
+    )
+
+
+async def get_exam_for_staff(
+    db: AsyncSession, exam_id: uuid.UUID, current_user: User
+) -> ExamResponseSchema:
+    """Staff view of one exam, scoped to the caller's offerings."""
+    exam = await _exam_row(db, exam_id)
+    await _assert_can_manage_exam(db, exam, current_user, purpose="exam authoring and grading")
+    return await get_exam(db, exam_id)
+
+
+async def list_exams_for_staff(
+    db: AsyncSession,
+    current_user: User,
+    course_offering_id: uuid.UUID | None = None,
+    status: str | None = None,
+) -> list[ExamResponseSchema]:
+    """Staff exam list, limited to offerings the caller may administer."""
+    permitted = await visible_offering_ids(db, current_user, allow_exam_bureau=True)
+    exams = await list_exams(db, course_offering_id=course_offering_id, status=status)
+    if permitted is None:
+        return exams
+    return [e for e in exams if e.course_offering_id in permitted]
+
+
+async def list_student_exams(
+    db: AsyncSession,
+    student_user: User,
+    course_offering_id: uuid.UUID | None = None,
+    status: str | None = None,
+) -> list[ExamStudentResponse]:
+    """Candidate exam list: enrolled offerings only, non-draft states only."""
+    if status is not None and status not in STUDENT_VISIBLE_EXAM_STATUSES:
+        # A candidate asking for drafts (or an unknown state) sees nothing.
+        return []
+
+    enrolled = await enrolled_offering_ids(db, student_user)
+    if not enrolled:
+        return []
+
+    query = (
+        select(Exam)
+        .where(
+            Exam.course_offering_id.in_(enrolled),
+            Exam.status.in_(STUDENT_VISIBLE_EXAM_STATUSES),
+        )
+        .options(selectinload(Exam.course_offering).selectinload(CourseOffering.course))
+        .order_by(desc(Exam.created_at))
+    )
+    if course_offering_id:
+        query = query.where(Exam.course_offering_id == course_offering_id)
+    if status:
+        query = query.where(Exam.status == status)
+
+    rows = list((await db.execute(query)).scalars().all())
+    counts = await _question_counts(db, [r.id for r in rows])
+    return [build_student_exam(r, counts.get(r.id, 0)) for r in rows]
+
+
+async def get_exam_brief(
+    db: AsyncSession, exam_id: uuid.UUID, current_user: User
+) -> ExamStudentResponse:
+    """Candidate-safe brief for one exam.
+
+    Raises ``NotFoundError`` rather than ``AuthorizationError`` when a candidate
+    may not see the exam, so direct URLs cannot be used to enumerate exams in
+    other offerings or still in draft.
+    """
+    exam = await _exam_row(db, exam_id)
+    roles = await roles_for(db, current_user)
+    if not (roles & (INSTITUTION_ROLES | EXAM_BUREAU_ROLES)):
+        if exam.status not in STUDENT_VISIBLE_EXAM_STATUSES:
+            raise NotFoundError("Exam not found")
+        if exam.course_offering_id not in await enrolled_offering_ids(db, current_user):
+            raise NotFoundError("Exam not found")
+
+    counts = await _question_counts(db, [exam.id])
+    return build_student_exam(exam, counts.get(exam.id, 0))
 
 
 async def get_exam(db: AsyncSession, exam_id: uuid.UUID) -> ExamResponseSchema:
@@ -493,6 +681,10 @@ async def start_or_resume_attempt(
     remaining = max(0, int((exam.duration_minutes * 60) - elapsed))
 
     # Build student delivery questions (without revealing is_correct!)
+    if exam.status == "draft" and not await is_exam_staff(db, student_user):
+        # Draft examinations are invisible to candidates even inside the window.
+        raise NotFoundError("Exam not found")
+
     delivery_questions: list[ExamQuestionStudentDelivery] = []
     for eq in exam.questions:
         q = eq.question
@@ -527,6 +719,7 @@ async def start_or_resume_attempt(
         duration_minutes=exam.duration_minutes,
         remaining_seconds=remaining,
         status=attempt.status,
+        proctoring_enabled=bool((exam.config or {}).get("proctoring_enabled", True)),
         questions=delivery_questions,
         saved_answers=saved_answers,
     )

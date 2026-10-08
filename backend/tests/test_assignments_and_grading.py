@@ -6,7 +6,7 @@ from campusflow.bedrock.auth.jwt import create_access_token
 from campusflow.bedrock.auth.pwd import get_password_hash
 from campusflow.bedrock.rbac.service import assign_role_to_user
 from campusflow.domain.academic_terms.models import AcademicTerm
-from campusflow.domain.courses.models import Course, CourseOffering
+from campusflow.domain.courses.models import Course, CourseOffering, FacultyAssignment
 from campusflow.domain.departments.models import Batch, Department, Program
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.users.models import User
@@ -80,6 +80,11 @@ async def test_assignments_grading_and_gradebook_lifecycle(client, db_session):
     )
     db_session.add(offering)
     await db_session.flush()
+
+    # Faculty teaches this offering (the real access record used for scoping).
+    db_session.add(
+        FacultyAssignment(course_offering_id=offering.id, faculty_id=faculty.id, role="primary")
+    )
 
     # Enroll student1 and student2
     enr1 = Enrollment(course_offering_id=offering.id, student_id=student1.id, status="enrolled")

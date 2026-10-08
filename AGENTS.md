@@ -37,7 +37,15 @@ This document contains permanent instructions for software engineering agents an
    - Update `docs/development.md` whenever dependencies, commands, testing methods, or deployment steps evolve.
    - Documentation must accurately reflect actual working code; never state features are complete when they are not.
 
-7. **Verification and Automated Continuation**
+7. **Authorization, Scoping, and Audience Projections**
+   - Backend authorization is the source of truth. Hiding a control in the UI is not security, and no frontend check may substitute for a server-side gate.
+   - Every route must declare an explicit dependency: a permission (`require_permission` / `require_any_permission`), a role set (`require_any_role`), or be deliberately and obviously public (health, login). A route with no declared gate is a defect.
+   - Permission alone is not enough for cohort data. Gradebook, roster, and course/exam analytics endpoints must also pass the offering-scope kernel in `campusflow.domain.courses.access` (`assert_can_manage_offering`, `assert_can_view_offering`, `visible_offering_ids`). Never re-implement scope checks inline in a router.
+   - Preserve the two-projection rule: staff and students never share a response model. Candidate-facing payloads must not be able to carry answer keys, hidden test expectations, rubrics, or peer grades — see `ExamStudentResponse`, `MyCourseGradesResponse`.
+   - Student-facing lookups for objects the caller may not see return **404** (anti-enumeration), not 403. Staff-facing denials stay 403.
+   - `exam_controller` (exam bureau) reach is opt-in per call site with `allow_exam_bureau=True` and never extends to the gradebook.
+
+8. **Verification and Automated Continuation**
    - Test and verify changes before marking any milestone or phase complete. Run automated test suites and ensure builds pass.
    - Fix all regressions and test failures immediately.
    - Commit completed milestones with clear, descriptive commit messages.

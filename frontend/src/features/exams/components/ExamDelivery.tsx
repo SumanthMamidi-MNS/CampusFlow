@@ -15,7 +15,7 @@ import {
 import { useAuth } from '@/core/auth/hooks';
 import { PageLoading } from '@/core/components/ui/loading';
 import {
-  useExam,
+  useExamBrief,
   useRecordProctoringEvent,
   useSaveExamAnswers,
   useStartExam,
@@ -56,7 +56,9 @@ export function ExamDelivery() {
   const { user } = useAuth();
   const examId = id || '';
 
-  const { data: exam } = useExam(examId);
+  // Candidate-safe metadata only: the staff exam definition (which contains
+  // answer keys) is never fetched from the assessment-taking surface.
+  const { data: examBrief } = useExamBrief(examId);
   const startMutation = useStartExam(examId);
 
   const [delivery, setDelivery] = useState<ExamDeliveryData | null>(null);
@@ -234,7 +236,10 @@ export function ExamDelivery() {
     [attemptId, recordEvent, navigate, examId]
   );
 
-  const proctoringEnabled = exam?.config?.proctoring_enabled !== false;
+  // Integrity configuration is server-authoritative: once an attempt exists the
+  // start response decides, and the brief only covers the pre-attempt screen.
+  const proctoringEnabled =
+    delivery?.proctoring_enabled ?? (examBrief?.config?.proctoring_enabled !== false);
 
   useEffect(() => {
     if (!hasBegun || !proctoringEnabled) return;
@@ -383,17 +388,17 @@ export function ExamDelivery() {
             Assessment brief
           </p>
           <h1 className="text-xl font-bold text-slate-900 mt-1">
-            {exam?.title || 'Examination'}
+            {examBrief?.title || 'Examination'}
           </h1>
           <div className="mt-4 space-y-3 text-sm text-slate-600">
             <p>
-              Duration: <strong className="text-slate-900">{exam?.duration_minutes ?? '—'} minutes</strong>
+              Duration: <strong className="text-slate-900">{examBrief?.duration_minutes ?? '—'} minutes</strong>
               {' · '}
-              Total marks: <strong className="text-slate-900">{exam?.total_marks ?? '—'}</strong>
+              Total marks: <strong className="text-slate-900">{examBrief?.total_marks ?? '—'}</strong>
             </p>
-            {exam?.instructions && (
+            {examBrief?.instructions && (
               <p className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-slate-700">
-                {exam.instructions}
+                {examBrief.instructions}
               </p>
             )}
             {proctoringEnabled && (

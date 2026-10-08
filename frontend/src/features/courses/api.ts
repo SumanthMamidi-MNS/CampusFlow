@@ -90,7 +90,7 @@ export function useCreateCourseOffering() {
 }
 
 // ── Enrollments ─────────────────────────────────────────────────────────────
-export function useOfferingEnrollments(offeringId: string) {
+export function useOfferingEnrollments(offeringId: string, enabled = true) {
   return useQuery({
     queryKey: ['enrollments', offeringId],
     queryFn: async () => {
@@ -99,7 +99,9 @@ export function useOfferingEnrollments(offeringId: string) {
       );
       return res.data.data;
     },
-    enabled: !!offeringId,
+    // A course roster is teaching/administration data, so students never ask for
+    // it (the server also refuses the request without scope).
+    enabled: !!offeringId && enabled,
   });
 }
 

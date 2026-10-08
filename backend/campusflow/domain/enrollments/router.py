@@ -26,7 +26,7 @@ async def get_enrolled_students_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    students = await list_enrolled_students(db, offering_id)
+    students = await list_enrolled_students(db, offering_id, current_user)
     return success_response([s.model_dump(mode="json") for s in students])
 
 

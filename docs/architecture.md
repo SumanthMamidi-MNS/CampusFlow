@@ -50,7 +50,7 @@ The Bedrock layer contains project-agnostic engineering infrastructure that can 
 3. `bedrock.api`: Standard API response envelopes (`success_response`, `paginated_response`), RFC-7807 structured error handlers (`register_exception_handlers`), and pagination helpers.
 4. `bedrock.middleware`: Request tracking (`X-Request-ID`), rate limiting, and HTTP security response headers (`SecurityHeadersMiddleware` enforcing nosniff, DENY frame options, XSS blocking, and strict referrer policies).
 5. `bedrock.auth`: JWT issuance, verification, refresh token rotation, and password hashing (bcrypt).
-6. `bedrock.rbac`: Role and permission models, permission dependency injection (`require_permission`).
+6. `bedrock.rbac`: Role and permission models, capability dependencies (`require_permission`, `require_any_permission`, `require_any_role`). Offering-scope logic deliberately lives in the domain (`campusflow.domain.courses.access`), because Bedrock must not know domain concepts.
 7. `bedrock.audit`: Append-only audit trail logging for all mutations.
 8. `bedrock.storage`: File storage abstraction with pluggable drivers (`LocalFilesystemBackend`, `S3CompatibleBackend`).
 9. `bedrock.mail`: Email delivery abstraction (`ConsoleBackend`, `SMTPBackend`).
@@ -61,7 +61,7 @@ Domain modules implement higher-level academic and examination logic:
 - `institution`: Global institution profile, branding, academic terms, and policies.
 - `users`: User profiles, lifecycle states (pending, active, inactive), and bulk provisioning.
 - `departments`: Academic divisions and programs.
-- `courses`: Course definitions, offerings, and sections.
+- `courses`: Course definitions, offerings, sections, and the shared offering-scope kernel (`campusflow.domain.courses.access`) that every domain uses for authorization scoping.
 - `enrollments`: Student roster management and instructor assignments.
 - `materials`: Structured learning materials, folders, and resources.
 - `assignments`: Task creation, student submissions, and grading.
@@ -161,6 +161,36 @@ All successful responses return a JSON object containing `data` and request `met
 ---
 
 ## 6. Security, Authentication & Proctoring
+
+### Authorization & Offering Scoping (ADR-016)
+
+The backend is the single source of truth for authorization; the frontend hides affordances
+only for usability, never as a security boundary.
+
+- **Capability gate:** every route declares an explicit dependency — a permission
+  (`require_permission` / `require_any_permission`) or a role set (`require_any_role`) — or is
+  deliberately public. Routes that read or mutate cohort data are never public.
+- **Scope gate:** owning a permission is not enough. Any route that answers questions about a
+  *cohort* (gradebook, roster, course analytics) additionally calls the offering-scope kernel
+  in `campusflow.domain.courses.access`:
+  - `assert_can_manage_offering(...)` — instructor of record (or admin) may grade/manage;
+  - `assert_can_view_offering(...)` — anything broader than manage is explicit;
+  - `visible_offering_ids(...)` — returns the set of offerings the caller may see, or `None`
+    for unrestricted roles.
+- **Authorship fallback:** an exam or assignment author manages what they created even when no
+  `FacultyAssignment` row exists. Cohort endpoints have no such fallback and always need the
+  teaching link.
+- **Exam bureau:** `exam_controller` reach is opt-in via `allow_exam_bureau=True`, and applies
+  only to examination objects (exam authoring, rosters, exam analytics). It never grants
+  gradebook access.
+- **Audience projections (two-projection rule):** a candidate and a staff member never receive
+  the same payload type. `ExamResponse` carries `is_correct` and `explanation` and is staff-only;
+  candidates get `ExamStudentResponse` (metadata only, `config` reduced to
+  `{proctoring_enabled, max_attempts}`) from `GET /exams` and `GET /exams/{id}/public`. The same
+  rule applies to gradebooks (`MyCourseGradesResponse` for students) and to any future domain: a
+  shared response model that mixes staff and candidate fields is a defect.
+- **Anti-enumeration:** a candidate requesting an exam they may not see (draft, or another
+  offering) receives **404**, not 403, so direct URLs cannot be probed.
 
 ### Authentication Flow
 1. **Access Tokens:** Short-lived JWTs (15 minutes) passed in the `Authorization: Bearer <token>` header.

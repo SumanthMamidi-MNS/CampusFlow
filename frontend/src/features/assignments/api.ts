@@ -6,6 +6,7 @@ import type {
   AssignmentSubmission,
   CreateAssignmentPayload,
   GradebookResponse,
+  MyCourseGrades,
   SubmissionGrade,
 } from './types';
 
@@ -185,7 +186,7 @@ export function useGradeSubmission(assignmentId: string, offeringId: string) {
   });
 }
 
-export function useGradebook(offeringId: string) {
+export function useGradebook(offeringId: string, enabled = true) {
   return useQuery({
     queryKey: ['gradebook', offeringId],
     queryFn: async () => {
@@ -194,6 +195,26 @@ export function useGradebook(offeringId: string) {
       );
       return res.data.data;
     },
-    enabled: Boolean(offeringId),
+    // The cohort gradebook is instructor/admin data; students must not request it.
+    enabled: Boolean(offeringId) && enabled,
+  });
+}
+
+/**
+ * The signed-in student's own marks in one course.
+ *
+ * This is the student-facing counterpart to the cohort gradebook: the server
+ * scopes the response to the caller, so it is safe for every authenticated user.
+ */
+export function useMyCourseGrades(offeringId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['my-grades', offeringId],
+    queryFn: async () => {
+      const res = await apiClient.get<ApiResponse<MyCourseGrades>>(
+        `/course-offerings/${offeringId}/my-grades`
+      );
+      return res.data.data;
+    },
+    enabled: Boolean(offeringId) && enabled,
   });
 }

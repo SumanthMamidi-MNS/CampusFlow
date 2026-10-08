@@ -42,6 +42,7 @@ import {
   useAssignmentSubmissions,
   useGradeSubmission,
   useGradebook,
+  useMyCourseGrades,
 } from '@/features/assignments/api';
 import type {
   Assignment,
@@ -56,7 +57,7 @@ export function CourseDetailPage() {
 
   const [dropTarget, setDropTarget] = useState<{ studentId: string; name: string } | null>(null);
   const [activeTab, setActiveTab] = useState<
-    'announcements' | 'materials' | 'assignments' | 'gradebook' | 'roster'
+    'announcements' | 'materials' | 'assignments' | 'gradebook' | 'roster' | 'my-grades'
   >('announcements');
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
 
@@ -113,9 +114,12 @@ export function CourseDetailPage() {
   const { data: announcements } = useOfferingAnnouncements(offeringId);
   const { data: folders } = useOfferingFolders(offeringId);
   const { data: materials } = useOfferingMaterials(offeringId, selectedFolderId);
-  const { data: enrollments } = useOfferingEnrollments(offeringId);
+  // Staff-only queries are disabled for students so the interface never asks for
+  // cohort data that the server would (correctly) refuse.
+  const { data: enrollments } = useOfferingEnrollments(offeringId, isInstructorOrAdmin);
   const { data: assignments } = useAssignments(offeringId);
-  const { data: gradebook } = useGradebook(offeringId);
+  const { data: gradebook } = useGradebook(offeringId, isInstructorOrAdmin);
+  const { data: myGrades } = useMyCourseGrades(offeringId, !isInstructorOrAdmin);
   const { data: submissionsForAssign } = useAssignmentSubmissions(
     selectedAssignForGrading?.id || ''
   );
@@ -357,29 +361,47 @@ export function CourseDetailPage() {
           )}
         </button>
 
-        <button
-          onClick={() => setActiveTab('gradebook')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition shrink-0 ${
-            activeTab === 'gradebook'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <GraduationCap className="h-4 w-4" />
-          <span>Gradebook</span>
-        </button>
+        {isInstructorOrAdmin && (
+          <button
+            onClick={() => setActiveTab('gradebook')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition shrink-0 ${
+              activeTab === 'gradebook'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <GraduationCap className="h-4 w-4" />
+            <span>Gradebook</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('roster')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition shrink-0 ${
-            activeTab === 'roster'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Users className="h-4 w-4" />
-          <span>Student Roster</span>
-        </button>
+        {!isInstructorOrAdmin && (
+          <button
+            onClick={() => setActiveTab('my-grades')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition shrink-0 ${
+              activeTab === 'my-grades'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <GraduationCap className="h-4 w-4" />
+            <span>My Grades</span>
+          </button>
+        )}
+
+        {isInstructorOrAdmin && (
+          <button
+            onClick={() => setActiveTab('roster')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition shrink-0 ${
+              activeTab === 'roster'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Users className="h-4 w-4" />
+            <span>Student Roster</span>
+          </button>
+        )}
       </div>
 
       {/* ── Tab Content: Announcements ─────────────────────────────────── */}
@@ -697,6 +719,79 @@ export function CourseDetailPage() {
                 );
               })}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Tab Content: My Grades (student self-view) ─────────────────── */}
+      {activeTab === 'my-grades' && (
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">My Grades</h3>
+            <p className="text-xs text-slate-500">
+              Your own marks and instructor feedback for this course
+            </p>
+          </div>
+
+          {!myGrades || myGrades.assignments.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-sm text-slate-500">
+              No graded work yet.
+            </div>
+          ) : (
+            <>
+              <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-8 text-sm">
+                <div>
+                  <span className="block text-[11px] uppercase tracking-wide text-slate-500">
+                    Weighted total
+                  </span>
+                  <span className="font-bold text-slate-900">
+                    {myGrades.total_weighted_score} / {myGrades.max_possible_weighted}
+                  </span>
+                </div>
+                <div>
+                  <span className="block text-[11px] uppercase tracking-wide text-slate-500">
+                    Percentage
+                  </span>
+                  <span className="font-bold text-slate-900">{myGrades.percentage}%</span>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-xs">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50/75 text-slate-700 font-bold">
+                      <th className="py-3 px-4">Assignment</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-center">Marks</th>
+                      <th className="py-3 px-4">Feedback</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {myGrades.assignments.map((row) => (
+                      <tr key={row.assignment_id} className="hover:bg-slate-50/50">
+                        <td className="py-3 px-4 font-semibold text-slate-900">
+                          {row.title}
+                          <span className="ml-2 text-[10px] font-normal text-slate-400">
+                            {row.total_marks} pts ({row.weightage}%)
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="capitalize px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700">
+                            {row.is_late ? 'late' : row.submission_status || 'not submitted'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center font-semibold text-slate-800">
+                          {row.final_marks !== null && row.final_marks !== undefined
+                            ? `${row.final_marks} / ${row.total_marks}`
+                            : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">{row.feedback || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

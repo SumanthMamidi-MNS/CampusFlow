@@ -21,10 +21,12 @@ from campusflow.domain.assignments.models import (
     AssignmentSubmission,
     SubmissionGrade,
 )
+from campusflow.domain.courses.access import assert_can_manage_offering
 from campusflow.domain.courses.models import Course, CourseOffering
 from campusflow.domain.departments.models import Department
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.exams.models import Exam, ExamAttempt
+from campusflow.domain.users.models import User
 
 
 async def get_institutional_overview(db: AsyncSession) -> InstitutionalOverviewResponse:
@@ -62,7 +64,8 @@ async def get_institutional_overview(db: AsyncSession) -> InstitutionalOverviewR
         passed_count = sum(1 for p in percentages if p >= 50.0)
         overall_pass_rate = round((passed_count / len(percentages)) * 100.0, 1)
     else:
-        overall_pass_rate = 85.0  # default baseline if no attempts yet
+        # No graded attempts yet: report "no data" rather than a placeholder rate.
+        overall_pass_rate = None
 
     # 4. Department breakdown
     depts_q = select(Department)
@@ -122,7 +125,7 @@ async def get_institutional_overview(db: AsyncSession) -> InstitutionalOverviewR
 
 
 async def get_course_analytics(
-    db: AsyncSession, course_offering_id: uuid.UUID
+    db: AsyncSession, course_offering_id: uuid.UUID, current_user: User
 ) -> CourseAnalyticsResponse:
     offering_q = (
         select(CourseOffering)
@@ -133,6 +136,11 @@ async def get_course_analytics(
     offering = res.scalar_one_or_none()
     if not offering:
         raise NotFoundError("Course offering not found")
+
+    # Cohort performance is teaching/administration-only data.
+    await assert_can_manage_offering(
+        db, current_user, course_offering_id, purpose="course analytics", allow_exam_bureau=True
+    )
 
     course_code = offering.course.code if offering.course else "COURSE"
     course_title = offering.course.title if offering.course else "Course"
@@ -221,7 +229,7 @@ async def get_course_analytics(
 
     pass_count = sum(1 for s in all_scores if s >= 50.0)
     overall_course_pass_rate = (
-        round((pass_count / len(all_scores)) * 100.0, 1) if all_scores else 100.0
+        round((pass_count / len(all_scores)) * 100.0, 1) if all_scores else None
     )
 
     return CourseAnalyticsResponse(
@@ -237,10 +245,19 @@ async def get_course_analytics(
     )
 
 
-async def get_exam_analytics(db: AsyncSession, exam_id: uuid.UUID) -> ExamAnalyticsResponse:
+async def get_exam_analytics(
+    db: AsyncSession, exam_id: uuid.UUID, current_user: User
+) -> ExamAnalyticsResponse:
     exam = await db.get(Exam, exam_id)
     if not exam:
         raise NotFoundError("Exam not found")
+
+    # The exam author, the offering's teaching staff, administrators and the
+    # examination bureau may read cohort examination statistics.
+    if exam.created_by_id is None or exam.created_by_id != current_user.id:
+        await assert_can_manage_offering(
+            db, current_user, exam.course_offering_id, purpose="exam analytics", allow_exam_bureau=True
+        )
 
     att_q = select(ExamAttempt).where(ExamAttempt.exam_id == exam_id)
     att_res = await db.execute(att_q)

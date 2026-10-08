@@ -13,7 +13,9 @@ class InstitutionalOverviewResponse(BaseModel):
     total_courses: int
     total_exams: int
     total_submissions: int
-    overall_pass_rate: float
+    # ``None`` means "not enough data yet" and must never be replaced with a
+    # placeholder percentage: fabricated statistics are worse than a blank.
+    overall_pass_rate: float | None = None
     department_enrollment_breakdown: list[dict[str, Any]]
     recent_activity: list[dict[str, Any]]
 
@@ -28,7 +30,7 @@ class CourseAnalyticsResponse(BaseModel):
     assignment_completion_rate: float
     average_assignment_score: float | None = None
     exam_average_score: float | None = None
-    overall_course_pass_rate: float
+    overall_course_pass_rate: float | None = None
     grade_distribution: dict[str, int]
 
 

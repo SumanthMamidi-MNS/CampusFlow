@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from campusflow.bedrock.api.responses import success_response
 from campusflow.bedrock.auth.dependencies import get_current_active_user
 from campusflow.bedrock.db.session import get_db
-from campusflow.bedrock.rbac.dependencies import require_permission
+from campusflow.bedrock.rbac.dependencies import require_any_permission, require_permission
 from campusflow.domain.exams.schemas import (
     BatchSaveAnswersRequest,
     ExamAttemptSummary,
@@ -24,12 +24,16 @@ from campusflow.domain.exams.service import (
     delete_exam,
     export_exam_results_csv,
     get_exam,
+    get_exam_brief,
+    get_exam_for_staff,
     get_proctoring_timeline,
     get_student_exam_result,
     grade_attempt_response,
+    is_exam_staff,
     list_attempt_responses,
     list_attempts_for_exam,
-    list_exams,
+    list_exams_for_staff,
+    list_student_exams,
     publish_exam_results,
     record_proctoring_event,
     remove_question_from_exam,
@@ -64,17 +68,50 @@ async def list_exams_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    exams = await list_exams(db, course_offering_id=course_offering_id, status=status)
-    return success_response([e.model_dump(mode="json") for e in exams])
+    """Examinations visible to the caller.
+
+    Staff receive full definitions (scoped to the offerings they administer).
+    Candidates receive metadata only, for offerings they are enrolled in.
+    """
+    if await is_exam_staff(db, current_user):
+        exams = await list_exams_for_staff(
+            db,
+            current_user=current_user,
+            course_offering_id=course_offering_id,
+            status=status,
+        )
+        return success_response([e.model_dump(mode="json") for e in exams])
+
+    student_exams = await list_student_exams(
+        db,
+        student_user=current_user,
+        course_offering_id=course_offering_id,
+        status=status,
+    )
+    return success_response([e.model_dump(mode="json") for e in student_exams])
+
+
+@router.get("/exams/{exam_id}/public")
+async def get_exam_brief_endpoint(
+    exam_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Candidate-safe examination brief (metadata only, never question content)."""
+    brief = await get_exam_brief(db, exam_id=exam_id, current_user=current_user)
+    return success_response(brief.model_dump(mode="json"))
 
 
 @router.get("/exams/{exam_id}")
 async def get_exam_endpoint(
     exam_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(
+        require_any_permission("exams:create", "exams:grade", "exams:proctor_view")
+    ),
 ):
-    exam = await get_exam(db, exam_id=exam_id)
+    """Full examination definition for authorised staff (contains answer keys)."""
+    exam = await get_exam_for_staff(db, exam_id=exam_id, current_user=current_user)
     return success_response(exam.model_dump(mode="json"))
 
 

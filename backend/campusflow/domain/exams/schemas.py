@@ -81,6 +81,8 @@ class ExamUpdate(BaseModel):
 
 
 class ExamResponse(BaseModel):
+    """Staff view of an exam. Contains answer keys — never send to a student."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -102,6 +104,43 @@ class ExamResponse(BaseModel):
     created_at: datetime
     questions_count: int = 0
     questions: list[ExamQuestionResponse] = []
+
+
+class ExamStudentConfig(BaseModel):
+    """The only examination configuration a candidate may see.
+
+    Deliberately excludes grading internals and any answer material.
+    """
+
+    proctoring_enabled: bool = True
+    max_attempts: int = 1
+
+
+class ExamStudentResponse(BaseModel):
+    """Candidate-safe view of an exam: metadata only, never question content.
+
+    Used by ``GET /exams`` (students) and ``GET /exams/{id}/public`` so a
+    candidate's browser never receives answer keys or grading internals.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    course_offering_id: uuid.UUID
+    course_title: str | None = None
+    course_code: str | None = None
+    title: str
+    description: str | None = None
+    exam_type: str
+    total_marks: float
+    passing_marks: float | None = None
+    duration_minutes: int
+    start_window: datetime
+    end_window: datetime
+    instructions: str | None = None
+    status: str
+    questions_count: int = 0
+    config: ExamStudentConfig = ExamStudentConfig()
 
 
 # ── Student Attempt & Delivery Schemas ──────────────────────────────────────
@@ -129,6 +168,8 @@ class ExamDeliveryResponse(BaseModel):
     duration_minutes: int
     remaining_seconds: int
     status: str
+    # Server-authoritative integrity configuration for this attempt.
+    proctoring_enabled: bool = True
     questions: list[ExamQuestionStudentDelivery]
     saved_answers: dict[str, dict[str, Any]] = {}  # exam_question_id -> answer_data & flagged status
 
