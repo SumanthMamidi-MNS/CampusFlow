@@ -6,6 +6,7 @@ import type {
   ExamAttemptSummary,
   ExamCreateInput,
   ExamDelivery,
+  ExamGenerateInput,
   ExamResponseDetail,
   ExamSummary,
   ExamUpdateInput,
@@ -36,6 +37,10 @@ export function useExams(courseOfferingId?: string, status?: string) {
       const res = await apiClient.get<ApiResponse<ExamSummary[]>>(`/exams${query}`);
       return res.data.data;
     },
+    // The list is the source of truth for whether a student may begin/resume an
+    // exam, so keep it reasonably fresh without spamming the server while the
+    // student is reading the page.
+    staleTime: 10_000,
   });
 }
 
@@ -109,6 +114,55 @@ export function useDeleteExam() {
   });
 }
 
+/**
+ * Draw a random paper from the syllabus scope (banks + topic tags + difficulty)
+ * on the server. `replace_existing` swaps the current paper for the new draw;
+ * otherwise the drawn questions are appended.
+ */
+export function useGenerateExamQuestions(examId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: ExamGenerateInput): Promise<Exam> => {
+      const res = await apiClient.post<ApiResponse<Exam>>(
+        `/exams/${examId}/generate-questions`,
+        payload
+      );
+      return res.data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+      queryClient.invalidateQueries({ queryKey: ['exams'] });
+    },
+  });
+}
+
+/**
+ * Same draw, for the scheduling flow where the exam id only exists after the
+ * exam has been created.
+ */
+export function useGenerateExamQuestionsAfterCreate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      examId,
+      payload,
+    }: {
+      examId: string;
+      payload: ExamGenerateInput;
+    }): Promise<Exam> => {
+      const res = await apiClient.post<ApiResponse<Exam>>(
+        `/exams/${examId}/generate-questions`,
+        payload
+      );
+      return res.data.data;
+    },
+    onSuccess: (_data, { examId }) => {
+      queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+      queryClient.invalidateQueries({ queryKey: ['exams'] });
+    },
+  });
+}
+
 export function useAddQuestionsToExam(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -140,12 +194,18 @@ export function useRemoveQuestionFromExam(examId: string) {
 // ── Exam Delivery (Student) ─────────────────────────────────────────────────
 
 export function useStartExam(examId: string) {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (fingerprint?: string) => {
       const res = await apiClient.post<ApiResponse<ExamDelivery>>(`/exams/${examId}/start`, {
         browser_fingerprint: fingerprint || null,
       });
       return res.data.data;
+    },
+    onSuccess: () => {
+      // Keep the exam list fresh so a resumed attempt is reflected everywhere.
+      queryClient.invalidateQueries({ queryKey: ['exams'] });
+      queryClient.invalidateQueries({ queryKey: ['exam-brief', examId] });
     },
   });
 }
@@ -183,11 +243,19 @@ export function useSubmitExam(attemptId: string) {
 
 // ── Grading & Results ───────────────────────────────────────────────────────
 
-export function useExamAttempts(examId: string) {
+/**
+ * Staff view of an exam's attempts. `flaggedOnly` narrows it to the integrity
+ * review queue; the server does the filtering so the browser never decides what
+ * counts as flagged.
+ */
+export function useExamAttempts(examId: string, flaggedOnly = false) {
   return useQuery({
-    queryKey: ['exam-attempts', examId],
+    queryKey: ['exam-attempts', examId, flaggedOnly],
     queryFn: async () => {
-      const res = await apiClient.get<ApiResponse<ExamAttemptSummary[]>>(`/exams/${examId}/attempts`);
+      const res = await apiClient.get<ApiResponse<ExamAttemptSummary[]>>(
+        `/exams/${examId}/attempts`,
+        { params: flaggedOnly ? { flagged_only: true } : undefined }
+      );
       return res.data.data;
     },
     enabled: Boolean(examId),

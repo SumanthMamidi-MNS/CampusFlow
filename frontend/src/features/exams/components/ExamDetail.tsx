@@ -8,22 +8,32 @@ import {
   useAttemptResponses,
   useExam,
   useExamAttempts,
+  useGenerateExamQuestions,
   useGradeExamResponse,
   useProctoringTimeline,
   usePublishExamResults,
   useRemoveQuestionFromExam,
   useUnlockExamAttempt,
 } from '../api';
+import { RandomPaperFields } from './RandomPaperFields';
+import {
+  EMPTY_RANDOM_PAPER,
+  toGeneratePayload,
+  type RandomPaperValue,
+} from '../random-paper';
 import type { ExamAttemptSummary } from '../types';
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
   Eye,
+  Flag,
   KeyRound,
   Plus,
   Send,
   ShieldCheck,
+  Shuffle,
+  Loader2,
   Trash2,
   X,
 } from 'lucide-react';
@@ -54,7 +64,12 @@ export function ExamDetail() {
   const examId = id || '';
 
   const { data: exam, isLoading: isExamLoading } = useExam(examId);
-  const { data: attempts } = useExamAttempts(examId);
+  // The review queue is a server-side filter: what counts as flagged is decided
+  // by the backend, never by this screen.
+  const [reviewQueueOnly, setReviewQueueOnly] = useState(false);
+  const { data: attempts } = useExamAttempts(examId, reviewQueueOnly);
+  const { data: allAttempts } = useExamAttempts(examId, false);
+  const awaitingReview = (allAttempts || []).filter((a) => a.flagged_for_review).length;
 
   const [activeTab, setActiveTab] = useState<Tab>('questions');
   const [message, setMessage] = useState('');
@@ -73,11 +88,17 @@ export function ExamDetail() {
   const { data: questionBanks } = useQuestionBanks();
   const { data: bankQuestions } = useQuestions(selectedBankId);
 
+  // Random-paper (syllabus draw) modal
+  const [isGenerateOpen, setIsGenerateOpen] = useState(false);
+  const [generateValue, setGenerateValue] = useState<RandomPaperValue>(EMPTY_RANDOM_PAPER);
+  const [generateReplace, setGenerateReplace] = useState(true);
+
   // Grading / review modals
   const [gradingAttemptId, setGradingAttemptId] = useState<string | null>(null);
   const [auditAttemptId, setAuditAttemptId] = useState<string | null>(null);
 
   const addQuestionsMutation = useAddQuestionsToExam(examId);
+  const generateMutation = useGenerateExamQuestions(examId);
   const removeQuestionMutation = useRemoveQuestionFromExam(examId);
   const publishResultsMutation = usePublishExamResults(examId);
   const unlockAttemptMutation = useUnlockExamAttempt(examId);
@@ -123,6 +144,20 @@ export function ExamDetail() {
       notify('Questions added to the examination.');
     } catch (err: any) {
       fail(err?.response?.data?.error?.message || 'Could not add the selected questions.');
+    }
+  };
+
+  const handleGeneratePaper = async () => {
+    try {
+      const updated = await generateMutation.mutateAsync(
+        toGeneratePayload(generateValue, generateReplace)
+      );
+      setIsGenerateOpen(false);
+      notify(
+        `Random paper drawn: ${updated.questions.length} question(s), ${updated.total_marks} marks.`
+      );
+    } catch (err: any) {
+      fail(err?.response?.data?.error?.message || 'Could not draw a random paper.');
     }
   };
 
@@ -232,12 +267,24 @@ export function ExamDetail() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <h2 className="text-sm font-bold text-slate-900">Examination questions</h2>
-            <button
-              onClick={() => setIsAddOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add from bank
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setGenerateValue(EMPTY_RANDOM_PAPER);
+                  setGenerateReplace(true);
+                  setIsGenerateOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+              >
+                <Shuffle className="h-3.5 w-3.5" aria-hidden="true" /> Randomise from syllabus
+              </button>
+              <button
+                onClick={() => setIsAddOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Pick manually
+              </button>
+            </div>
           </div>
           {exam.questions.length === 0 ? (
             <p className="p-6 text-sm text-slate-500">
@@ -283,11 +330,32 @@ export function ExamDetail() {
 
       {activeTab === 'submissions' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-3">
             <h2 className="text-sm font-bold text-slate-900">Candidate attempts</h2>
+            {awaitingReview > 0 && (
+              <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                {awaitingReview} awaiting review
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setReviewQueueOnly((v) => !v)}
+              aria-pressed={reviewQueueOnly}
+              className={`ml-auto inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
+                reviewQueueOnly
+                  ? 'border-amber-400 bg-amber-50 text-amber-900'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Flag className="h-3.5 w-3.5" aria-hidden="true" /> Review queue only
+            </button>
           </div>
           {!attempts || attempts.length === 0 ? (
-            <p className="p-6 text-sm text-slate-500">No attempts recorded for this examination yet.</p>
+            <p className="p-6 text-sm text-slate-500">
+              {reviewQueueOnly
+                ? 'No attempts are awaiting integrity review for this examination.'
+                : 'No attempts recorded for this examination yet.'}
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -313,6 +381,18 @@ export function ExamDetail() {
                         <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(attempt.status)}`}>
                           {humanize(attempt.status)}
                         </span>
+                        {attempt.flagged_for_review && (
+                          <span
+                            title={
+                              attempt.review_flagged_at
+                                ? `Flagged for review on ${new Date(attempt.review_flagged_at).toLocaleString()}`
+                                : 'Flagged for review'
+                            }
+                            className="mt-1 block w-fit rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                          >
+                            Flagged for review
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-700">
                         {attempt.total_score != null ? (
@@ -351,7 +431,10 @@ export function ExamDetail() {
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Review
                           </button>
-                          {(attempt.status === 'auto_submitted' || attempt.proctor_violations_count > 0) && (
+                          {(attempt.status === 'locked_violation' ||
+                            attempt.status === 'auto_submitted' ||
+                            attempt.flagged_for_review ||
+                            attempt.proctor_violations_count > 0) && (
                             <button
                               onClick={() => handleUnlockAttempt(attempt)}
                               disabled={unlockAttemptMutation.isPending}
@@ -459,6 +542,75 @@ export function ExamDetail() {
                 className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {addQuestionsMutation.isPending ? 'Adding…' : `Add ${selectedQIds.length || ''} question(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isGenerateOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="generate-paper-title"
+            className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden"
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h2 id="generate-paper-title" className="text-base font-bold text-slate-900">
+                  Randomise paper from syllabus
+                </h2>
+                <p className="text-xs text-slate-500">
+                  The server draws a shuffled selection from the scope you choose. Manual curation
+                  stays available under “Pick manually”.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsGenerateOpen(false)}
+                aria-label="Close dialog"
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <RandomPaperFields
+                banks={questionBanks || []}
+                value={generateValue}
+                onChange={setGenerateValue}
+                idPrefix="generate"
+              />
+              <label className="flex items-start gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded text-blue-600"
+                  checked={generateReplace}
+                  onChange={(e) => setGenerateReplace(e.target.checked)}
+                />
+                <span>
+                  Replace the current paper
+                  {exam.questions.length > 0 ? ` (${exam.questions.length} question(s))` : ''} with
+                  the new draw. Unchecked, the drawn questions are appended.
+                </span>
+              </label>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+              <button
+                onClick={() => setIsGenerateOpen(false)}
+                className="rounded-lg px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGeneratePaper}
+                disabled={generateMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {generateMutation.isPending && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                )}
+                {generateMutation.isPending ? 'Drawing…' : 'Draw random paper'}
               </button>
             </div>
           </div>
@@ -718,6 +870,18 @@ function IntegrityLogModal({
                     <p className="text-[11px] text-slate-500">
                       {new Date(event.timestamp).toLocaleString()} · {event.severity} severity
                     </p>
+                    {typeof event.details?.snapshot === 'string' && (
+                      <figure className="mt-1.5 inline-block">
+                        <img
+                          src={event.details.snapshot}
+                          alt={`Camera frame recorded at ${new Date(event.timestamp).toLocaleString()}`}
+                          className="h-24 w-32 rounded-md border border-slate-200 object-cover"
+                        />
+                        <figcaption className="text-[10px] text-slate-400">
+                          Candidate camera frame
+                        </figcaption>
+                      </figure>
+                    )}
                   </li>
                 ))}
               </ol>

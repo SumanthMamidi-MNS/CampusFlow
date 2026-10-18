@@ -1,6 +1,13 @@
 export type ExamType = 'quiz' | 'midterm' | 'final' | 'practice';
 export type ExamStatus = 'draft' | 'scheduled' | 'live' | 'completed' | 'graded' | 'published';
 export type AttemptStatus = 'in_progress' | 'submitted' | 'auto_submitted' | 'graded' | 'locked_violation';
+/**
+ * What reaching the integrity tolerance does to a candidate.
+ * `remove` locks the attempt until a lecturer reopens it; `review` flags the
+ * attempt for faculty review and the candidate keeps working. Authored per
+ * exam and enforced by the server, never by the browser.
+ */
+export type ExamWarningPolicy = 'remove' | 'review';
 
 export interface ExamQuestionOption {
   id?: string;
@@ -46,6 +53,14 @@ export interface Exam {
     show_results_immediately?: boolean;
     proctoring_enabled?: boolean;
     max_violations?: number;
+    /**
+     * What reaching the tolerance does. `remove` (the default) takes the
+     * candidate out of the paper until a lecturer reopens the attempt;
+     * `review` flags the attempt and lets them keep working.
+     */
+    warning_policy?: ExamWarningPolicy;
+    device_detection_enabled?: boolean;
+    obstruction_threshold_seconds?: number;
     max_attempts?: number;
     allowed_cidrs?: string[];
   };
@@ -63,6 +78,14 @@ export interface Exam {
 export interface ExamStudentConfig {
   proctoring_enabled: boolean;
   max_attempts: number;
+  /** Disclosed to the candidate before the paper starts. */
+  warning_policy?: ExamWarningPolicy;
+  /** On-device camera analysis for prohibited electronics (ADR-024). */
+  device_detection_enabled?: boolean;
+  /** Seconds of continuous camera obstruction before it is reported (D-12). */
+  obstruction_threshold_seconds?: number;
+  /** Days after which captured evidence images are erased (D-2); 0 = kept. */
+  evidence_retention_days?: number;
 }
 
 /**
@@ -87,6 +110,16 @@ export interface ExamSummary {
   status: ExamStatus;
   questions_count: number;
   config: Partial<ExamStudentConfig>;
+  /**
+   * The candidate's own latest attempt status for this exam, when known.
+   * One of: in_progress | submitted | auto_submitted | graded | locked_violation | null
+   */
+  latest_attempt_status?: string | null;
+  /**
+   * How many attempts this candidate has already used. Compare with
+   * `config.max_attempts` to decide whether a further attempt is permitted.
+   */
+  attempts_used?: number;
 }
 
 export interface ExamCreateInput {
@@ -118,6 +151,24 @@ export interface ExamUpdateInput {
   status?: ExamStatus;
 }
 
+/**
+ * A random paper drawn on the server from the syllabus scope.
+ *
+ * `question_bank_ids` narrows the pool to specific banks; leaving it empty
+ * makes the whole course/department pool the syllabus. `tags` are the syllabus
+ * topics (each question's tags), which is how a lecturer scopes a paper to a
+ * unit of the syllabus without hand-picking questions.
+ */
+export interface ExamGenerateInput {
+  question_bank_ids?: string[];
+  tags?: string[];
+  difficulties?: string[];
+  question_types?: string[];
+  question_count?: number;
+  replace_existing?: boolean;
+  shuffle?: boolean;
+}
+
 export interface ExamDeliveryQuestion {
   id: string;
   question_id: string;
@@ -140,6 +191,11 @@ export interface ExamDelivery {
   status: AttemptStatus;
   /** Server-authoritative integrity configuration for this attempt. */
   proctoring_enabled: boolean;
+  warning_policy?: ExamWarningPolicy;
+  device_detection_enabled?: boolean;
+  obstruction_threshold_seconds?: number;
+  /** Days after which captured evidence images are erased (D-2); 0 = kept. */
+  evidence_retention_days?: number;
   questions: ExamDeliveryQuestion[];
   saved_answers: Record<string, { answer_data: any; flagged_for_review: boolean }>;
 }
@@ -164,6 +220,10 @@ export interface ExamAttemptSummary {
   total_score?: number | null;
   percentage?: number | null;
   proctor_violations_count: number;
+  /** The attempt awaits faculty integrity review (ADR-023). Server-derived. */
+  flagged_for_review?: boolean;
+  /** When the tolerance was crossed and the review flag was stamped. */
+  review_flagged_at?: string | null;
 }
 
 export interface ExamResponseDetail {
@@ -216,6 +276,8 @@ export interface ProctoringStatus {
   warning?: string | null;
   is_locked?: boolean;
   status?: string;
+  /** The policy in force for this attempt, as the server enforces it. */
+  warning_policy?: ExamWarningPolicy;
 }
 
 export interface UnlockAttemptPayload {

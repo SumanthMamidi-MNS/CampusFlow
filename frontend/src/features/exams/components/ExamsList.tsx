@@ -1,9 +1,17 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/core/auth/hooks';
+import apiClient, { ACCESS_TOKEN_KEY } from '@/core/api/client';
 import { useCourseOfferings } from '@/features/courses/api';
-import { useCreateExam, useExams } from '../api';
-import type { ExamCreateInput, ExamStatus, ExamType } from '../types';
+import { useQuestionBanks } from '@/features/question-banks/api';
+import { useCreateExam, useExams, useGenerateExamQuestionsAfterCreate } from '../api';
+import { RandomPaperFields } from './RandomPaperFields';
+import {
+  EMPTY_RANDOM_PAPER,
+  toGeneratePayload,
+  type RandomPaperValue,
+} from '../random-paper';
+import type { ExamCreateInput, ExamStatus, ExamType, ExamWarningPolicy } from '../types';
 import {
   AlertCircle,
   BookOpen,
@@ -13,14 +21,43 @@ import {
   HelpCircle,
   Plus,
   ShieldAlert,
+  Shuffle,
   Sparkles,
   X,
 } from 'lucide-react';
+
+/** Format a Date for a datetime-local input, honouring the local timezone. */
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export function ExamsList() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isFacultyOrAdmin = user && ['admin', 'super_admin', 'faculty', 'exam_controller'].some((r) => user.roles.includes(r));
+
+  // One-click demo: provisions/uses only purpose-built demo objects and signs
+  // the caller in as the dedicated demo student, so it can never touch
+  // institutional data.
+  const [isDemoStarting, setIsDemoStarting] = useState(false);
+  const startDemoExam = async () => {
+    setIsDemoStarting(true);
+    setListError(null);
+    try {
+      const res = await apiClient.post('/exams/demo/login');
+      localStorage.setItem(ACCESS_TOKEN_KEY, res.data.data.access_token);
+      navigate(`/exams/${res.data.data.exam_id}/take`, { replace: true });
+    } catch (err: any) {
+      setListError(
+        err.response?.data?.error?.message ||
+          err.message ||
+          'Could not start the demo examination. Please try again.'
+      );
+    } finally {
+      setIsDemoStarting(false);
+    }
+  };
 
   const [statusFilter, setStatusFilter] = useState<string>('');
   const { data: exams, isLoading } = useExams(undefined, statusFilter || undefined);
@@ -40,11 +77,60 @@ export function ExamsList() {
   const [instructions, setInstructions] = useState('');
   const [proctoringEnabled, setProctoringEnabled] = useState(true);
   const [maxViolations, setMaxViolations] = useState<number>(5);
+  // What reaching the tolerance does. Removal stays the default so a new exam
+  // behaves exactly like the ones already on the platform.
+  const [warningPolicy, setWarningPolicy] = useState<ExamWarningPolicy>('remove');
+  // On-device device check is offered on by default for new assessments, because
+  // a lecturer scheduling a proctored paper expects it; existing exams keep the
+  // behaviour they were authored with, since the server default is off.
+  const [deviceDetection, setDeviceDetection] = useState(true);
+  const [obstructionSeconds, setObstructionSeconds] = useState(4);
   const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [showResultsImmediately, setShowResultsImmediately] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+
+  // Question paper source: hand-pick later, or draw a random paper from the
+  // syllabus scope as part of scheduling.
+  const [questionSource, setQuestionSource] = useState<'manual' | 'random'>('manual');
+  const [randomValue, setRandomValue] = useState<RandomPaperValue>(EMPTY_RANDOM_PAPER);
+
+  // ── Scheduling ergonomics: presets, auto end-window, live summary ──────
+  // Typing two raw datetime pickers is error-prone; the end window defaults to
+  // start + duration (extended by 15 minutes of grace for late joiners), can
+  // be nudged with one-tap presets, and always shows the resolved window in
+  // plain words before scheduling.
+  const applyWindowPreset = (days: number) => {
+    const start = new Date();
+    start.setMinutes(start.getMinutes() + 5); // just ahead: schedulers get time to inform the room
+    start.setSeconds(0, 0);
+    const end = new Date(start.getTime() + Math.max(15, durationMinutes) * 60_000 + 15 * 60_000 + days * 86_400_000);
+    setStartWindow(toLocalInput(start));
+    setEndWindow(toLocalInput(end));
+  };
+
+  const windowSummary = useMemo(() => {
+    if (!startWindow || !endWindow) return null;
+    const start = new Date(startWindow);
+    const end = new Date(endWindow);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    if (end <= start) {
+      return { ok: false as const, text: 'End window must come after the start window.' };
+    }
+    const hours = (end.getTime() - start.getTime()) / 3_600_000;
+    return {
+      ok: true as const,
+      text: `Open ${start.toLocaleString()} → ${end.toLocaleString()} (${hours < 1 ? `${Math.round(hours * 60)} min` : `${Math.round(hours * 10) / 10} h`} availability).` ,
+    };
+  }, [startWindow, endWindow]);
+
+  const selectedOffering = offerings?.find((o) => o.id === offeringId);
+  const { data: syllabusBanks } = useQuestionBanks(
+    selectedOffering?.course_id ? { course_id: selectedOffering.course_id } : undefined
+  );
 
   const createExamMutation = useCreateExam();
+  const generateMutation = useGenerateExamQuestionsAfterCreate();
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +148,10 @@ export function ExamsList() {
       setFormError('Please configure both start and end availability windows.');
       return;
     }
+    if (questionSource === 'random' && randomValue.questionCount < 0) {
+      setFormError('Question count must be zero (all matching) or a positive number.');
+      return;
+    }
 
     const payload: ExamCreateInput = {
       course_offering_id: offeringId,
@@ -77,6 +167,9 @@ export function ExamsList() {
       config: {
         proctoring_enabled: proctoringEnabled,
         max_violations: Number(maxViolations) || 5,
+        warning_policy: warningPolicy,
+        device_detection_enabled: deviceDetection,
+        obstruction_threshold_seconds: Number(obstructionSeconds) || 4,
         shuffle_questions: shuffleQuestions,
         show_results_immediately: showResultsImmediately,
         max_attempts: 1,
@@ -85,10 +178,30 @@ export function ExamsList() {
     };
 
     try {
-      await createExamMutation.mutateAsync(payload);
+      const created = await createExamMutation.mutateAsync(payload);
+      if (questionSource === 'random') {
+        try {
+          await generateMutation.mutateAsync({
+            examId: created.id,
+            payload: toGeneratePayload(randomValue, true),
+          });
+        } catch (genErr: any) {
+          // The exam itself exists now; never let the paper draw hide that.
+          setListError(
+            `Exam “${payload.title}” was scheduled, but its random paper could not be drawn: ${
+              genErr?.response?.data?.error?.message || genErr?.message || 'unknown error'
+            } Open the examination and use “Randomise from syllabus”.`
+          );
+          setIsCreateOpen(false);
+          setTitle('');
+          setDescription('');
+          return;
+        }
+      }
       setIsCreateOpen(false);
       setTitle('');
       setDescription('');
+      setRandomValue(EMPTY_RANDOM_PAPER);
     } catch (err: any) {
       setFormError(err.response?.data?.error?.message || err.message || 'Failed to schedule exam.');
     }
@@ -111,6 +224,22 @@ export function ExamsList() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      {listError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <div className="flex-1">{listError}</div>
+          <button
+            onClick={() => setListError(null)}
+            aria-label="Dismiss"
+            className="rounded p-1 text-rose-500 hover:bg-rose-100"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {/* Banner */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
         <div>
@@ -140,14 +269,25 @@ export function ExamsList() {
             <option value="published">Results Published</option>
           </select>
 
-          {isFacultyOrAdmin && (
-            <button
-              onClick={() => setIsCreateOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 shadow-xs transition-colors shrink-0"
-            >
+          {isFacultyOrAdmin && (          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 shadow-xs transition-colors shrink-0"
+          >
               <Plus className="h-4 w-4" /> Schedule Exam
             </button>
           )}
+          <button
+            onClick={startDemoExam}
+            disabled={isDemoStarting}
+            className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 shadow-xs transition-colors shrink-0 disabled:opacity-50"
+            title="Signs you into the demo student account and opens a ready practice paper"
+          >
+            {isDemoStarting ? 'Preparing…' : (
+              <>
+                <Sparkles className="h-4 w-4" /> Take demo exam
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -179,6 +319,68 @@ export function ExamsList() {
             const start = new Date(exam.start_window);
             const end = new Date(exam.end_window);
             const isWindowOpen = now >= start && now <= end;
+
+            const attemptStatus = (exam.latest_attempt_status || '').toString();
+            const concludedStatuses = new Set(['submitted', 'auto_submitted', 'graded']);
+            const lockedStatuses = new Set(['locked_violation']);
+            const hasAttempt = attemptStatus && attemptStatus !== 'null';
+
+            const maxAttempts = Math.max(1, Number(exam.config?.max_attempts ?? 1));
+            const attemptsUsed = Number(exam.attempts_used ?? 0);
+            const retakeAllowed = attemptsUsed < maxAttempts;
+
+            const studentAction = (() => {
+              const takeExamAction = {
+                label: attemptsUsed > 0 ? 'Retake Exam' : 'Take Exam',
+                onClick: () => navigate(`/exams/${exam.id}/take`),
+                className:
+                  'w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 shadow-xs transition-colors',
+                icon: <Clock className="h-4 w-4" />,
+              };
+              const viewResultsAction = {
+                label: 'View Results',
+                onClick: () => navigate(`/exams/${exam.id}/results`),
+                className:
+                  'w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors',
+                icon: <CheckCircle2 className="h-4 w-4" />,
+              };
+
+              if (lockedStatuses.has(attemptStatus)) {
+                // The locked candidate needs the red instructions screen, not
+                // results: it explains who reopens the attempt and re-checks
+                // for them automatically.
+                return {
+                  label: 'Locked — Contact Lecturer',
+                  onClick: () => navigate(`/exams/${exam.id}/take`),
+                  className:
+                    'w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 transition-colors',
+                  icon: <HelpCircle className="h-4 w-4" />,
+                };
+              }
+              if (attemptStatus === 'in_progress') {
+                return {
+                  label: 'Continue Attempt',
+                  onClick: () => navigate(`/exams/${exam.id}/take`),
+                  className:
+                    'w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 shadow-xs transition-colors',
+                  icon: <Clock className="h-4 w-4" />,
+                };
+              }
+              if (hasAttempt && concludedStatuses.has(attemptStatus)) {
+                // "Take Exam" means *a permitted attempt*, not merely an open
+                // window: a concluded attempt stays a results link unless the
+                // examination still allows another sitting.
+                if (retakeAllowed && isWindowOpen) return takeExamAction;
+                return viewResultsAction;
+              }
+              if (isWindowOpen) return takeExamAction;
+              return {
+                label: (now < start ? 'Testing window not open yet' : 'Testing window closed') as string,
+                onClick: undefined,
+                className: 'text-xs text-slate-400 italic',
+                icon: null as null,
+              };
+            })();
 
             return (
               <div
@@ -246,23 +448,19 @@ export function ExamsList() {
                     </>
                   ) : (
                     <>
-                      {exam.status === 'published' ? (
+                      {studentAction.icon && (
+                        <span className="shrink-0">{studentAction.icon}</span>
+                      )}
+                      {studentAction.onClick ? (
                         <button
-                          onClick={() => navigate(`/exams/${exam.id}/results`)}
-                          className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
+                          onClick={studentAction.onClick}
+                          className={studentAction.className}
                         >
-                          <CheckCircle2 className="h-4 w-4" /> View Results
-                        </button>
-                      ) : isWindowOpen ? (
-                        <button
-                          onClick={() => navigate(`/exams/${exam.id}/take`)}
-                          className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 shadow-xs transition-colors"
-                        >
-                          <Clock className="h-4 w-4" /> Take Exam
+                          {studentAction.label}
                         </button>
                       ) : (
-                        <span className="text-xs text-slate-400 italic">
-                          {now < start ? 'Testing window not open yet' : 'Testing window closed'}
+                        <span className={studentAction.className}>
+                          {studentAction.label}
                         </span>
                       )}
                     </>
@@ -416,6 +614,49 @@ export function ExamsList() {
                 </div>
               </div>
 
+              {/* Quick presets + derived summary. Enter inside the form still
+                  submits; this makes the primary action discoverable too. */}
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Quick windows
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => applyWindowPreset(0)}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Right away
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyWindowPreset(1)}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Tomorrow
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyWindowPreset(7)}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Next week
+                  </button>
+                  <span className="ml-auto text-[11px] text-slate-400">
+                    End window defaults to start + duration + 15 min grace.
+                  </span>
+                </div>
+                {windowSummary && (
+                  <p
+                    className={`mt-2 text-[11px] font-medium ${
+                      windowSummary.ok ? 'text-emerald-700' : 'text-rose-700'
+                    }`}
+                  >
+                    {windowSummary.text}
+                  </p>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                   Instructions / Exam Notes
@@ -427,6 +668,72 @@ export function ExamsList() {
                   placeholder="e.g. Scientific calculators allowed. No external tabs."
                   className="w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-hidden"
                 />
+              </div>
+
+              {/* Question paper source */}
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Question paper
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label
+                    className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-xs ${
+                      questionSource === 'manual'
+                        ? 'border-blue-300 bg-blue-50'
+                        : 'border-slate-200 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="question-source"
+                      className="mt-0.5 h-4 w-4 text-blue-600"
+                      checked={questionSource === 'manual'}
+                      onChange={() => setQuestionSource('manual')}
+                    />
+                    <span>
+                      <span className="block font-semibold text-slate-800">Pick questions myself</span>
+                      <span className="block text-slate-500">
+                        Schedule now, then choose every question explicitly from a bank.
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-xs ${
+                      questionSource === 'random'
+                        ? 'border-blue-300 bg-blue-50'
+                        : 'border-slate-200 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="question-source"
+                      className="mt-0.5 h-4 w-4 text-blue-600"
+                      checked={questionSource === 'random'}
+                      onChange={() => setQuestionSource('random')}
+                    />
+                    <span>
+                      <span className="block font-semibold text-slate-800">
+                        <span className="inline-flex items-center gap-1">
+                          <Shuffle className="h-3.5 w-3.5" aria-hidden="true" /> Randomise from
+                          syllabus
+                        </span>
+                      </span>
+                      <span className="block text-slate-500">
+                        Select the syllabus scope and the server draws a shuffled paper for you.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+                {questionSource === 'random' && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <RandomPaperFields
+                      banks={syllabusBanks || []}
+                      value={randomValue}
+                      onChange={setRandomValue}
+                      idPrefix="schedule"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Proctoring & Security Toggles */}
@@ -462,23 +769,76 @@ export function ExamsList() {
                     />
                     <span>Instant Result Release</span>
                   </label>
-                </div>
-                <div className="pt-2 max-w-[16rem]">
-                  <label htmlFor="max-violations" className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Recorded events tolerated before automatic submission
+                  <label className="flex items-start gap-2 cursor-pointer text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={deviceDetection}
+                      onChange={(e) => setDeviceDetection(e.target.checked)}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      On-device device check (phones, earbuds, watches)
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        Analyses the candidate’s camera picture inside their own browser. A
+                        probable device is recorded for your review — it never fails them
+                        automatically and it uses none of their warning allowance.
+                      </span>
+                    </span>
                   </label>
-                  <input
-                    id="max-violations"
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={maxViolations}
-                    onChange={(e) => setMaxViolations(Number(e.target.value))}
-                    className="w-24 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
-                  />
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Events are advisory; reaching this limit submits the attempt automatically.
-                  </p>
+                </div>
+                <div className="grid gap-4 pt-2 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="max-violations" className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Recorded events tolerated before action
+                    </label>
+                    <input
+                      id="max-violations"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={maxViolations}
+                      onChange={(e) => setMaxViolations(Number(e.target.value))}
+                      className="w-24 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[11px] text-slate-500">Between 1 and 20 events.</p>
+                  </div>
+                  <div>
+                    <label htmlFor="obstruction-seconds" className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Report camera obstruction after (seconds)
+                    </label>
+                    <input
+                      id="obstruction-seconds"
+                      type="number"
+                      min={2}
+                      max={30}
+                      value={obstructionSeconds}
+                      onChange={(e) => setObstructionSeconds(Number(e.target.value))}
+                      className="w-24 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Continuous stillness before the candidate is warned. Between 2 and 30
+                      seconds; disclosed to them before they start.
+                    </p>
+                  </div>
+                  <div>
+                    <label htmlFor="warning-policy" className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      When the candidate reaches that limit
+                    </label>
+                    <select
+                      id="warning-policy"
+                      value={warningPolicy}
+                      onChange={(e) => setWarningPolicy(e.target.value as ExamWarningPolicy)}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
+                    >
+                      <option value="remove">Remove them until I reopen the attempt</option>
+                      <option value="review">Flag the attempt for my review; they keep working</option>
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {warningPolicy === 'remove'
+                        ? 'Reaching the limit locks the candidate out; only you can reopen the attempt. Disclosed to them before they start.'
+                        : 'Reaching the limit flags the attempt in your review queue. The candidate keeps working and is never failed automatically.'}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -492,10 +852,18 @@ export function ExamsList() {
                 </button>
                 <button
                   type="submit"
-                  disabled={createExamMutation.isPending}
+                  disabled={
+                    createExamMutation.isPending ||
+                    (questionSource === 'random' && generateMutation.isPending) ||
+                    !(startWindow && endWindow && title.trim() && offeringId)
+                  }
+                  title="Press Enter anywhere in the form to schedule"
                   className="rounded-lg bg-blue-600 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {createExamMutation.isPending ? 'Scheduling...' : 'Schedule Exam'}
+                  {createExamMutation.isPending ||
+                  (questionSource === 'random' && generateMutation.isPending)
+                    ? 'Scheduling...'
+                    : 'Schedule Exam ⏎'}
                 </button>
               </div>
             </form>

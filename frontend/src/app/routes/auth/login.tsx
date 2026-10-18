@@ -50,15 +50,15 @@ export function LoginPage() {
           </div>
 
           <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-            {error && (
-              <div
-                role="alert"
-                className="flex items-start gap-2.5 rounded-lg bg-rose-50 border border-rose-200 p-3 text-xs text-rose-700"
-              >
-                <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" aria-hidden="true" />
-                <span>{error}</span>
-              </div>
-            )}
+          {error && (
+            <div
+              role="alert"
+              className="flex items-start gap-2.5 rounded-lg bg-rose-50 border border-rose-200 p-3 text-xs text-rose-700"
+            >
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" aria-hidden="true" />
+              <span>{error}</span>
+            </div>
+          )}
 
             <div>
               <label htmlFor="login-email" className="block text-xs font-medium text-slate-700 mb-1.5">
@@ -115,6 +115,7 @@ export function LoginPage() {
               )}
             </button>
           </form>
+
         </div>
 
         <div className="mt-8 text-center space-y-2">

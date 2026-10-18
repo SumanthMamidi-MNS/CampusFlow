@@ -15,6 +15,11 @@ function onLoginRoute(): boolean {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/login');
 }
 
+// Endpoints that establish or end a session must never refresh themselves.
+// `/auth/me` is deliberately absent: it is exactly the call a page reload makes
+// with a possibly stale access token, so it has to be allowed to refresh.
+const NO_REFRESH_PREFIXES = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/password/'];
+
 /** Clear the session and send the user to sign-in exactly once. */
 function forceSignOut(): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
@@ -38,12 +43,14 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
 
-    const isAuthEndpoint = Boolean(originalRequest?.url?.startsWith('/auth/'));
+    const isCredentialEndpoint = NO_REFRESH_PREFIXES.some((prefix) =>
+      Boolean(originalRequest?.url?.startsWith(prefix))
+    );
     const canRetry =
       error.response?.status === 401 &&
       originalRequest &&
       !originalRequest._retry &&
-      !isAuthEndpoint;
+      !isCredentialEndpoint;
 
     if (canRetry && originalRequest) {
       originalRequest._retry = true;
@@ -58,8 +65,14 @@ apiClient.interceptors.response.use(
         localStorage.setItem(ACCESS_TOKEN_KEY, token);
         originalRequest.headers.Authorization = `Bearer ${token}`;
         return apiClient(originalRequest);
-      } catch {
-        forceSignOut();
+      } catch (refreshError) {
+        // Only a definitive rejection ends the session. A refresh that failed
+        // for an infrastructural reason (offline, backend 5xx) must not delete
+        // the stored token, so a later reload can still recover the session.
+        const status = (refreshError as AxiosError)?.response?.status;
+        if (status === 401 || status === 403) {
+          forceSignOut();
+        }
       }
     }
 
