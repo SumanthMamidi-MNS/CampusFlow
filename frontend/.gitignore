@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Disposable measurement sample fetched by backend/scripts/fetch_device_detection_sample.py.
+# Deliberately outside public/: everything in public/ is copied into dist/ by the
+# build, and this sample is ~100 MB of COCO images.
+dev-measure/

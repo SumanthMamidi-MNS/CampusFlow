@@ -24,6 +24,7 @@ import campusflow.domain.notifications.models  # noqa: F401
 import campusflow.domain.question_banks.models  # noqa: F401
 import campusflow.domain.exams.models  # noqa: F401
 import campusflow.domain.programming.models  # noqa: F401
+import campusflow.domain.roster_import.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
