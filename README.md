@@ -357,7 +357,7 @@ CampusFlow/
 | :--- | :--- |
 | [docs/master-plan.md](docs/master-plan.md) | The product plan: phases, scope, acceptance criteria. |
 | [docs/architecture.md](docs/architecture.md) | Module boundaries, data model, API surface, authorization kernel. |
-| [docs/decisions.md](docs/decisions.md) | 26 ADRs, including the supersessions — the reasoning is part of the record. |
+| [docs/decisions.md](docs/decisions.md) | 27 ADRs, including the supersessions — the reasoning is part of the record. |
 | [docs/development.md](docs/development.md) | Local setup, testing, the measurement harnesses, and the production runbook (§7). |
 | [docs/progress.md](docs/progress.md) | Phase-by-phase progress with the verification evidence for each wave. |
 | [docs/memory.md](docs/memory.md) | Durable operational gotchas and measured numbers. |
