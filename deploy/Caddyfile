@@ -1,0 +1,41 @@
+# CampusFlow production reverse proxy.
+#
+# As shipped this serves plain HTTP on :80 so an internal or lab deployment
+# works before DNS exists. To go live, replace the site address with the real
+# hostname and Caddy obtains and renews certificates automatically (ports
+# 80/443 must be reachable from the internet):
+#
+#   campusflow.example.edu {
+#       ...same handle blocks as below...
+#   }
+:80 {
+	encode zstd gzip
+
+	# Security headers for every response, including the SPA's own HTML.
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+		Strict-Transport-Security "max-age=31536000" defer
+		-Server
+	}
+
+	# Roster imports are 5 MiB; anything larger is refused before it reaches the
+	# application.
+	request_body {
+		max_size 10MB
+	}
+
+	# API: one hop to the backend, with the original client identity preserved.
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Everything else is the SPA plus its hashed assets.
+	handle {
+		reverse_proxy frontend:80
+	}
+}

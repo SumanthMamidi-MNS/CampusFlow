@@ -1,0 +1,220 @@
+# Distinct project name: the dev stack in docker-compose.yml is also named
+# "campusflow" (from the directory), and two projects sharing a name share
+# containers, networks and volumes — a prod `up` would otherwise recreate the
+# developer's own Postgres. Distinct name, distinct volumes, no crosstalk.
+name: campusflow-prod
+
+# ── Production stack ─────────────────────────────────────────────────────────
+# Usage (see docs/development.md §7):
+#   cp .env.production.example .env      # then fill in the secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Every secret is interpolated from the project `.env`; nothing below ships a
+# usable credential. Compose refuses to start if POSTGRES_PASSWORD or
+# JWT_SECRET_KEY are missing, because the application refuses to start with the
+# shipped placeholder JWT secret when DEBUG=false (ADR-015).
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-campusflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-campusflow}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Loopback only: operators can psql / pg_dump from the host, the internet
+    # cannot reach the database. The port defaults to 5433 so a developer
+    # running the dev stack side by side is not overwritten.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-campusflow} -d ${POSTGRES_DB:-campusflow}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Redis (rate-limit store, shared cache) ──────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Piston (sandboxed code execution) ───────────────────────
+  # Student code is NEVER executed by the API. Piston is not published on any
+  # host port here: the backend reaches it over the compose network only.
+  piston:
+    image: ghcr.io/engineer-man/piston:latest
+    restart: unless-stopped
+    privileged: true # isolate needs namespaces/cgroups for its sandbox
+    volumes:
+      - piston-data:/piston
+    tmpfs:
+      - /piston/jobs:exec
+    environment:
+      # Keep at or above CODE_RUN_MAX_TIMEOUT_MS: Piston rejects larger budgets
+      # with HTTP 400.
+      - PISTON_RUN_TIMEOUT=10000
+      - PISTON_COMPILE_TIMEOUT=10000
+
+  # Installs every runtime the platform offers (Python, C, C++, Java) on first
+  # start. Each package install is idempotent and failure-tolerant: a runtime
+  # that is already present answers non-2xx and is skipped.
+  piston-init:
+    image: curlimages/curl:latest
+    restart: "no"
+    depends_on:
+      - piston
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo 'Waiting for Piston...'
+        until curl -sf http://piston:2000/api/v2/runtimes >/dev/null 2>&1; do sleep 2; done
+        for spec in 'python 3.10.0' 'c 10.2.0' 'cpp 10.2.0' 'java 15.0.2'; do
+          set -- $$spec
+          echo "Installing $$1 $$2 (no-op if present)..."
+          curl -s -X POST http://piston:2000/api/v2/packages \
+            -H 'Content-Type: application/json' \
+            -d "{\"language\":\"$$1\",\"version\":\"$$2\"}" >/dev/null || true
+        done
+        echo 'Piston runtimes ready.'
+
+  # ── Backend (FastAPI) ───────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-campusflow}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-campusflow}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env (see .env.production.example)}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost"]}
+      INSTITUTION_NAME: ${INSTITUTION_NAME:-CampusFlow}
+      INSTITUTION_TIMEZONE: ${INSTITUTION_TIMEZONE:-UTC}
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-console}
+      # Sandboxed execution: the container is privileged on the Piston side, so
+      # a real memory ceiling can be enforced (D-5). 0 disables it.
+      CODE_RUNNER_ENABLED: ${CODE_RUNNER_ENABLED:-true}
+      CODE_RUNNER_BACKEND: piston
+      CODE_RUNNER_URL: http://piston:2000
+      CODE_RUNNER_PYTHON_VERSION: ${CODE_RUNNER_PYTHON_VERSION:-3.10.0}
+      CODE_RUN_DEFAULT_TIMEOUT_MS: ${CODE_RUN_DEFAULT_TIMEOUT_MS:-5000}
+      CODE_RUN_MAX_TIMEOUT_MS: ${CODE_RUN_MAX_TIMEOUT_MS:-10000}
+      CODE_RUN_MEMORY_LIMIT_KB: ${CODE_RUN_MEMORY_LIMIT_KB:-131072}
+      # How long camera evidence frames are kept before the image is erased
+      # (D-2). Disclosed to candidates in the assessment brief. 0 keeps them.
+      PROCTORING_EVIDENCE_RETENTION_DAYS: ${PROCTORING_EVIDENCE_RETENTION_DAYS:-90}
+    volumes:
+      - backend-storage:/app/storage
+    # Loopback: health checks and ops tooling. The public path is through the
+    # proxy, and a locally running dev API already owns :8000.
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      piston:
+        condition: service_started
+
+  # ── Frontend (static assets behind nginx) ───────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - backend
+
+  # ── Public reverse proxy ────────────────────────────────────
+  # The only service that should be reachable from outside the host.
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+
+  # ── Daily backups ───────────────────────────────────────────
+  backup:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-campusflow}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PGDATABASE: ${POSTGRES_DB:-campusflow}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_START_HOUR: ${BACKUP_START_HOUR:-2}
+    volumes:
+      - backups:/backups
+      - ./deploy/backup.sh:/usr/local/bin/backup.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Camera evidence retention (D-2) ─────────────────────────
+  # Erases stored evidence frames once they age past the institutional window.
+  # Reuses the backend image so the purge runs through the same service code and
+  # writes the same audit trail. One run a day; a failed run is logged and never
+  # stops the next one.
+  evidence-retention:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -c
+      - |
+        sleep 120
+        while true; do
+          python scripts/purge_proctoring_evidence.py || echo '[evidence-retention] purge failed; retrying tomorrow'
+          sleep 86400
+        done
+    # The image's healthcheck probes the API on :8000. This service is a batch
+    # loop, not the API, so inheriting it would leave it permanently unhealthy.
+    healthcheck:
+      disable: true
+    environment:
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-campusflow}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-campusflow}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env (see .env.production.example)}
+      PROCTORING_EVIDENCE_RETENTION_DAYS: ${PROCTORING_EVIDENCE_RETENTION_DAYS:-90}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  piston-data:
+  backend-storage:
+  backups:
+  caddy_data:
+  caddy_config:

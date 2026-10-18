@@ -1,10 +1,17 @@
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.py[cod]
 .venv/
 venv/
 .env
+.env.*
 *.db
+*.sqlite
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 storage/
+tests/
+.git/
+*.log
