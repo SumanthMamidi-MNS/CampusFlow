@@ -1,0 +1,18 @@
+# Development image: the Vite dev server with hot reload.
+#
+# The production image (Dockerfile) ends on nginx and has no Node runtime, so it
+# cannot run `npm run dev`. The dev Compose stack builds this file instead.
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Dependencies first so a source edit does not re-run the install layer.
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 5173
+
+# --host is required: inside a container the dev server must not bind loopback.
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

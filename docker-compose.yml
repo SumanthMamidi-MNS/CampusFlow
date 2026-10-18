@@ -109,6 +109,10 @@ services:
       - CODE_RUNNER_BACKEND=piston
       - CODE_RUNNER_URL=http://piston:2000
       - CODE_RUNNER_PYTHON_VERSION=3.10.0
+      # Same ceiling as production: Piston runs privileged in both stacks, so
+      # the cgroup limit is real and a runaway allocation is killed instead of
+      # taking the sandbox host down (D-5).
+      - CODE_RUN_MEMORY_LIMIT_KB=131072
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,17 +123,21 @@ services:
     command: uvicorn campusflow.main:app --host 0.0.0.0 --port 8000 --reload
 
   # ── Frontend (Vite dev server) ──────────────────────────────
+  # Built from Dockerfile.dev: the production image ends on nginx and has no
+  # Node runtime, so it cannot serve `npm run dev`. The proxy target is the
+  # backend service because the dev server runs inside this container.
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     restart: unless-stopped
     ports:
       - "5173:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    command: npm run dev -- --host 0.0.0.0
+    environment:
+      - VITE_PROXY_TARGET=http://backend:8000
     depends_on:
       - backend
 

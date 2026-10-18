@@ -18,7 +18,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // Host development reaches the API on localhost; the dev Compose stack
+        // runs the server in a container, where the API is the `backend`
+        // service, so the target is overridable rather than hard-coded.
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8000',
         changeOrigin: true,
       },
     },
