@@ -1021,3 +1021,43 @@ live:     POST /auth/login through the Vite proxy         →  200 (the proxy fi
 live:     candidate demo journey, browser                 →  assessment brief rendered; harness captured
 images:   docs/images/*.png                               →  eight 1440x900 captures, all resolvable
 docs:     every README link target and image path         →  resolves
+
+---
+
+### Phase 19 — Portfolio identity: brand system, house-style README header, and clean authorship
+
+The repository now presents itself the way the rest of the portfolio does, and the history attributes
+only its author.
+
+- **Brand assets follow one system, shared with the other repositories.** `docs/assets/campusflow-banner.svg`
+  is the logo lockup on the dark panel (the composition from the design reference): tile with a
+  periwinkle gradient border, graduation cap, "CampusFlow" wordmark in white + `#818CF8`, on a
+  `#121A38 → #0A0C22` panel with a faint `#6366F1` glow and a hairline gradient edge. The lockup
+  geometry, colours and font are taken verbatim from the project's existing logo asset, so the mark
+  is identical across the portfolio. `docs/assets/campusflow-logo.svg` carries the same lockup with a
+  transparent background for dark contexts.
+- **A badge row in the house style, not a shields.io wall.** Nine 32px pills in
+  `docs/assets/badges/` — `Python 3.12`, `FastAPI REST + WS`, `React 19`, `PostgreSQL 15`,
+  `Docker Compose`, `Authorization Offering scope`, `Sandbox Piston isolate`, `Tests 83 Passing`
+  (pulsing, as the other repositories do for test counts) and `License MIT`. Each links to the thing
+  it claims: upstream docs for the stack, `docs/architecture.md` for the authorization kernel,
+  ADR-014 for the sandbox, `backend/tests/` for the count, `LICENSE` for the licence.
+- **The README header is now the house pattern**: centered banner at `height="106"` (so the lockup
+  itself renders at the standard 88px), a centered `<h3>` with the positioning line and a `<small>`
+  capability tagline, the badge row, then centered prose. The live CI status moved into the
+  Verification section, where a dynamic badge belongs — the top row is all static, verifiable facts.
+- **Tools are no longer named in the repository or its history.** Removed the tool-specific ignore
+  entry from `.gitignore` (it moved to `.git/info/exclude`), and rewrote all history to strip the
+  automated co-author trailers that GitHub displayed as a second contributor. Author and committer
+  are now "Sumanth Mamidi" on every commit. `AGENTS.md` gained rule 8 so no future agent reintroduces
+  attribution, and rule 9 so the brand system stays consistent.
+
+#### Verification this phase
+
+```
+assets:   docs/assets/campusflow-banner.svg + logo + 9 badges   → render on light and dark themes
+readme:   header markup rendered in a browser mock            → banner, tagline, 2-row badge row, prose
+links:    every badge target and image path                   → resolves
+history:  git log --format=%B | grep -ci 'co-authored-by'    → 0 matches
+history:  git log --format='%an <%ae> | %cn <%ce>' | sort -u  → Sumanth Mamidi only
+```

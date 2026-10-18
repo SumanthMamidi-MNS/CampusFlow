@@ -460,3 +460,12 @@ This document preserves durable technical context, implementation constraints, a
   were produced by the verification run recorded in `docs/progress.md` Phase 18. Re-run those
   commands and update the README in the same commit as any change that moves them; otherwise the
   most-read file in the repository becomes the least accurate one.
+- **Commit authorship is the owner's alone.** Every commit is authored and committed by
+  "Sumanth Mamidi <mamidinagasaisumanth@gmail.com>"; no AI attribution, co-author trailer or
+  tool footer appears in the history or in any tracked file (see `AGENTS.md` rule 8). The history
+  was rewritten once, on 2026-10-18, to strip the automated co-author trailers a coding tool had
+  appended, which GitHub was rendering as a second contributor — that rewrite required a force-push
+  of `main`. If a tool offers to append a footer, decline: re-adding one means rewriting again.
+- **A coding tool's workspace directory is ignored locally, not in `.gitignore`.** It is listed in
+  `.git/info/exclude` (see that file) so the tracked ignore list carries no tool-specific names while
+  `git status` stays clean. Add future tool state the same way.

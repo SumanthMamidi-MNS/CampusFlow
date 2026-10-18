@@ -69,9 +69,6 @@ coverage.xml
 # Alembic
 alembic/versions/__pycache__/
 
-# Agent / tooling workspace
-.freebuff/
-
 # Launcher runtime state
 startup/.backend.pid
 startup/.frontend.pid

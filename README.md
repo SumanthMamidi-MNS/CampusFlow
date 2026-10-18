@@ -1,21 +1,33 @@
-# CampusFlow
+<p align="center">
+  <img src="docs/assets/campusflow-banner.svg" alt="CampusFlow" height="106">
+</p>
 
-### College LMS & secure examination platform — academic operations, integrity-monitored assessment and automated code grading in one deployable system.
+<h3 align="center">
+  <strong>College LMS &amp; Secure Examination Platform</strong><br>
+  <small>Academic Operations &bull; Integrity-Monitored Assessment &bull; Sandboxed Code Grading</small>
+</h3>
 
-[![CI](https://github.com/SumanthMamidi-MNS/CampusFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/SumanthMamidi-MNS/CampusFlow/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![PostgreSQL 15](https://img.shields.io/badge/PostgreSQL-15-4169E1?logo=postgresql&logoColor=white)
-![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+<p align="center">
+  <a href="https://www.python.org/"><img src="docs/assets/badges/python.svg" alt="Python 3.12" height="30"></a>
+  <a href="https://fastapi.tiangolo.com"><img src="docs/assets/badges/fastapi.svg" alt="FastAPI REST + WS" height="30"></a>
+  <a href="https://react.dev"><img src="docs/assets/badges/react.svg" alt="React 19" height="30"></a>
+  <a href="https://www.postgresql.org/"><img src="docs/assets/badges/postgresql.svg" alt="PostgreSQL 15" height="30"></a>
+  <a href="https://docs.docker.com/compose/"><img src="docs/assets/badges/docker.svg" alt="Docker Compose" height="30"></a>
+  <a href="docs/architecture.md"><img src="docs/assets/badges/authorization.svg" alt="Authorization: offering scope" height="30"></a>
+  <a href="docs/decisions.md#adr-014-piston-sidecar-for-sandboxed-student-code-execution"><img src="docs/assets/badges/sandbox.svg" alt="Sandbox: Piston isolate" height="30"></a>
+  <a href="backend/tests/"><img src="docs/assets/badges/tests.svg" alt="83 Passing" height="30"></a>
+  <a href="LICENSE"><img src="docs/assets/badges/license.svg" alt="MIT License" height="30"></a>
+</p>
+
+<p align="center">
+  <strong>CampusFlow</strong> is a self-hosted platform for a single college or university: departments,
+  programmes, terms, courses, sections and rosters; learning materials, assignments, submissions and
+  gradebooks; question banks and scheduled examinations with an auditable integrity trail;
+  institution-wide analytics; and an in-browser programming environment where student code runs in a
+  sandbox and is graded automatically against test cases.
+</p>
 
 ![Institutional dashboard — enrolment, faculty, course and examination analytics](docs/images/02-dashboard.png)
-
-**CampusFlow** is a self-hosted platform for a single college or university: departments, programmes,
-terms, courses, sections and rosters; learning materials, assignments, submissions and gradebooks;
-question banks and scheduled examinations with an auditable integrity trail; institution-wide
-analytics; and an in-browser programming environment where student code runs in a sandbox and is
-graded automatically against test cases.
 
 It is one repository that a college IT team can deploy on a single server. There is no SaaS
 dependency, no public sign-up, and no fabricated demo data in the product paths: every screen is
@@ -281,6 +293,10 @@ frontend  npm run lint                                    →   0 errors (14 war
 frontend  npm run build                                   →  success
 compose   docker compose config / up --build              →  every service healthy
 ```
+
+Live status of that suite on `main`:
+
+[![CI](https://github.com/SumanthMamidi-MNS/CampusFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/SumanthMamidi-MNS/CampusFlow/actions/workflows/ci.yml)
 
 The two SQLite skips are PostgreSQL-only tests (advisory-lock and concurrent-commit behaviour); they
 run in CI. The suite covers the authorization matrix and forbidden-key canaries, the cohort-scope

@@ -45,8 +45,27 @@ This document contains permanent instructions for software engineering agents an
    - Student-facing lookups for objects the caller may not see return **404** (anti-enumeration), not 403. Staff-facing denials stay 403.
    - `exam_controller` (exam bureau) reach is opt-in per call site with `allow_exam_bureau=True` and never extends to the gradebook.
 
-8. **Verification and Automated Continuation**
+8. **Commit Authorship**
+   - Every commit is authored and committed solely by the repository owner (Sumanth Mamidi
+     <mamidinagasaisumanth@gmail.com>). Never add AI attribution, co-author trailers, bot
+     footers, or tool names to a commit message, and never mention an assistant or coding tool
+     in any tracked file.
+   - Write commit messages that stand on their own: what changed and why, in the repository's
+     existing `type(scope): summary` style.
+
+9. **Brand Assets**
+   - Product branding lives in `docs/assets/` and follows one design system: `campusflow-banner.svg`
+     (logo lockup on a dark panel, displayed at `height="106"` so the lockup renders at the
+     house-standard 88px), `campusflow-logo.svg` (transparent lockup, 88px) and
+     `docs/assets/badges/*.svg` (32px pill, `#161B22` fill, accent stroke, gradient value chip,
+     displayed at `height="30"`).
+   - Readme presentation follows the house pattern: centered banner, centered `<h3>` with a
+     `<small>` tagline, a centered badge row, then centered prose. Do not introduce shields.io
+     stack badges, emoji headings, or a different palette.
+
+10. **Verification and Automated Continuation**
    - Test and verify changes before marking any milestone or phase complete. Run automated test suites and ensure builds pass.
    - Fix all regressions and test failures immediately.
-   - Commit completed milestones with clear, descriptive commit messages.
+   - Commit completed milestones with clear, descriptive commit messages (and no AI attribution —
+     see rule 8).
    - Automatically advance to the next implementation phase without pausing for confirmation until all roadmap phases or execution limits are reached.
