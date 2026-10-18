@@ -244,9 +244,329 @@ This document records the foundational architectural and technical decisions mad
      roles, by no student role) *and* the department check; reads and writes alike.
   3. **The public surface is enumerated and tested.** Public routes are exactly
      `/api/health` and `/api/v1/auth/*`. `tests/test_route_policy.py` walks the live route
-     table each run, so a new endpoint without a gate fails CI instead of shipping.
-* **Consequences:** Students cannot reach any answer-bearing route (403 at the gate); staff are
+     table each run, so a new endpoint without a gate fails CI instead of shipping.* **Consequences:** Students cannot reach any answer-bearing route (403 at the gate); staff are
   confined to their departments with 403 elsewhere while own-department authoring, CSV
-  export/import and bureau paper-assembly are unchanged; the directory reads now require a
+export/import and bureau paper-assembly are unchanged; the directory reads now require a
   session (the frontend only calls them from authenticated pages, so no UI regression). The
   route table can no longer grow an ungated endpoint without failing the suite.
+
+---
+
+### ADR-018: A Section Is a Course Offering; Multi-Section Assessments Share a Series
+
+* **Status:** Accepted (Wave 3)
+* **Context:** The requirement to manage sections, section ownership and section-specific
+  assessments invited a new `Section` entity. The existing schema already has one:
+  `course_offerings.section` (a course + term + section = one offering row), and the Wave 0/1
+  offering-scope kernel already answers every "whose section is this?" question. A parallel
+  Section table would have created a second source of truth and a second scope kernel.
+* **Decision:** Sections stay a property of the course offering; the offering *is* the section
+  and `domain/courses/access.py` is its authorization. To let one assessment target several
+  authorised sections without weakening any existing scope check, `exams.series_id` groups the
+  per-section `Exam` rows created together. `POST /exams/multi-section` validates **every**
+  selected offering against the caller's teaching scope before writing anything, in one
+  transaction, so a substituted section id is refused and no partial paper exists.
+* **Consequences:** Zero new authorization surface: section isolation is the already-tested
+  offering isolation. A multi-section assessment is N exams sharing a series; grading, attempt
+  and roster logic keep working per offering. `tests/test_multi_section_assessment.py` pins the
+  cross-section refusal.
+
+### ADR-019: The Campus Lead Invariant Is Enforced Transactionally, Recovered by Super Admin
+
+* **Status:** Accepted (Wave 3)
+* **Context:** An institution with no active Campus Lead (the `admin` role) cannot administer
+  itself. A pre-insert count in the router would not survive two concurrent removals of
+  different leads: both could read `count = 2` and both delete.
+* **Decision:** `domain/institution/leadership.py` owns the invariant. Every removal path in
+  `domain/users/service.py` (role demotion, deactivation, soft delete) calls
+  `guard_campus_lead_removal` **before** mutating, which takes a PostgreSQL
+  transaction-level advisory lock (`pg_advisory_xact_lock`) and then counts. Concurrent removals
+  therefore serialise: the loser observes the reduced count and is refused with 409. SQLite
+  serialises writers already, so the lock is a no-op there — which is why the concurrency
+  criterion is PostgreSQL-gated in the suite. Recovery from a zero-lead state is a separate,
+  explicitly authorised endpoint (`require_any_role("super_admin")`) that refuses when a lead
+  already exists and is always audited.
+* **Consequences:** Institutions cannot be locked out by a normal edit, and the platform role
+  — not the institution's own admin — is required to recover. Ordering is load-bearing: the
+  guard must run before the mutation, because a status change applied first would both answer
+  its own question wrongly and be flushed by the guard's own query.
+
+### ADR-020: The Database Is the Final Authority for Duplicate Prevention
+
+* **Status:** Accepted (Wave 3)
+* **Context:** The product had pre-insert `SELECT` checks but almost no unique constraints, so
+  two concurrent requests could both create the "same" record. Wave 2 additionally reported
+  duplicate `attempt_number` rows for one candidate.
+* **Decision:** Every domain declares a normalised business key and encodes it as a database
+  constraint, with the pre-check kept only for message quality. Added: unique
+  `users.registration_number` (when present), `faculty_assignments (course_offering_id,
+  faculty_id)`, `exam_attempts (exam_id, student_id, attempt_number)`, and
+  `roster_import_batches.idempotency_key`. Student identifiers normalise on **case and
+  whitespace only** — punctuation is preserved, because `A-12` and `A12` can be different
+  people. The migration reconciles pre-existing duplicate attempt numbers by *renumbering* them
+  in `started_at` order (no row is deleted) and refuses to merge duplicate teaching assignments
+  automatically.
+* **Consequences:** A retried or concurrent write is refused by the database, and the service
+  translates that refusal into 409 rather than a 500. A unique violation can surface on any
+  `flush` inside a multi-row batch, so the whole write loop — not only the final commit — is
+  wrapped in the conflict guard.
+
+### ADR-021: Roster Import Is Two-Phase, Idempotent, and Credential-Free
+
+* **Status:** Accepted (Wave 4)
+* **Context:** The existing CSV provisioning created accounts by email only, with no preview,
+  no column mapping and no protection against re-import; it also accepted a default password.
+  Institution spreadsheets share no fixed layout.
+* **Decision:** A roster import is a staged batch (`roster_import_batches`): preview parses and
+  *classifies* every row (valid / invalid / duplicate-in-file / conflict / already existing)
+  without writing an account, and an explicit commit writes the committable rows in one
+  transaction. Headers are aliased to canonical fields and an explicit mapping overrides the
+  aliasing. `idempotency_key` makes a retried submit return the original result, and a re-import
+  of the same roster matches existing accounts instead of duplicating them. Conflicts (the same
+  student already enrolled in another section of the same course and term) are reported, never
+  auto-moved. XLSX is read `read_only`/`data_only` so formulas are never evaluated, and generated
+  reports are sanitised against spreadsheet formula injection. Imported accounts receive a
+  random temporary credential and `must_change_password = True`; **no credential ever appears**
+  in staged rows, reports, logs or audit records, and onboarding proceeds through the existing
+  password-reset flow.
+* **Consequences:** Re-uploading a roster is safe by construction. The requirement to use
+  registration numbers as initial passwords is deliberately **not** implemented: it would make
+  a public identifier the secret for every new account. `must_change_password` is currently
+  recorded but not yet enforced at login (see progress, Wave 4 residual).
+
+### ADR-022: The Cohort Boundary Applies to Attempt-Level Examination Surfaces; the Bureau Invigilates but Does Not Grade
+
+* **Status:** Accepted (2026-10-11)
+* **Context:** ADR-016 made the offering-scope kernel the single answer to "whose cohort is
+  this?" and ADR-017 wired it through authoring surfaces and question banks. The
+  examination's *attempt-level* surfaces were missed: `GET /exams/{id}/attempts`,
+  `/exam-attempts/{id}/responses`, `/exam-attempts/{id}/proctoring-events`,
+  `/exams/{id}/export-results`, `grade`, `publish`, `unlock`, `PUT /exams/{id}`,
+  `POST /exams/{id}/questions` and `DELETE .../questions/{id}` checked only the capability
+  (`exams:grade` / `exams:proctor_view` / `exams:create`). Every one of those capabilities is
+  institution-wide, so any lecturer — and the examination bureau — could read or alter another
+  offering's attempt list (names, emails, marks, violation counts), responses, results CSV and
+  integrity timeline including captured camera frames, by supplying that offering's id.
+* **Decision:** Attempt-level examination services resolve scope through
+  `_assert_can_manage_exam` / `_assert_can_manage_attempt` in
+  `domain/exams/service.py`, which call the offering kernel. `allow_exam_bureau` is opt-in per
+  call site and is **false** for everything that is the gradebook on paper — the attempt list,
+  the response queue, the results CSV, single-response grading and result publication — because
+  invigilation and paper assembly are institution-wide but cohort marks are classroom work.
+  Invigilation surfaces (the proctoring timeline) and the resumption path pass
+  `allow_exam_bureau=True`. Authorship of an exam still grants management regardless of a
+  later teaching link (unchanged from ADR-016).
+* **Consequences:** A capability alone no longer reaches another section's candidates;
+  `tests/test_exam_cohort_scope.py` pins both directions (own cohort 200, foreign 403) for the
+  same actor so a denial can never be confused with a missing permission. The examination
+  bureau keeps institution-wide invigilation and can resume a candidate it reviewed, while its
+  `exams:grade` grant stops at the gradebook. Attempt ids are UUIDv4, so the previous exposure
+  was not enumerable, but the rule is now structural rather than accidental.
+
+### ADR-023: The Integrity Tolerance Is a Per-Exam Policy, Defaulting to Removal
+
+* **Status:** Accepted (Wave 4)
+* **Context:** The revised brief specifies a five-step warning ladder ending in "flag the attempt
+  for faculty review", while the shipping behaviour (ADR-015) removes the candidate at the
+  tolerance until a lecturer reopens the attempt. Both are defensible — removal protects the
+  paper, the ladder keeps a candidate with a flaky laptop in the exam — and choosing one
+  globally would either contradict the brief or silently change every assessment already
+  scheduled. Raised as D-11 in `docs/completion-audit.md`, the question was put to the product
+  owner, who chose a per-exam setting with **removal as the default**.
+* **Decision:** `exams.config.warning_policy` is `"remove"` or `"review"`.
+  `_resolve_warning_policy` in `domain/exams/service.py` is the only reader, defaults to
+  `"remove"` when the key is absent or unrecognised, and the resolved policy is stamped onto every
+  candidate-facing payload (`ExamStudentConfig`, `ExamDeliveryResponse`,
+  `ProctoringStatusResponse`) so the browser renders the consequence the server will actually
+  apply rather than assuming one. Under `review`, crossing the tolerance writes
+  `flagged_for_review` plus `review_flagged_at:<iso>` **once**, audits `exam.attempt_flagged_for_review`
+  once, leaves the attempt `in_progress` and lets the candidate keep working; warnings 1–4 walk the
+  brief's ladder (reminder → recovery guidance → explanation → "further incidents may flag this
+  attempt"). Under `remove` the lockout copy and the ADR-015 flow are untouched. Authoring rejects
+  any other value at the schema (`invalid_warning_policy`, `max_violations_out_of_range`, HTTP 422)
+  instead of falling back silently, and `max_violations` is bounded to 1–20. Reopening an attempt
+  clears both markers, so an actioned review stops looking unreviewed in the queue.
+* **Consequences:** The policy is now a disclosure rather than a hidden switch — the candidate
+  brief and the live integrity banner both state which consequence applies, and a mid-paper change
+  by faculty takes effect on the next recorded event. `camera_obstructed` keeps consuming a warning
+  under both policies: the alternative (evidence-only) was put to the product owner with D-13 and
+  declined, which is also why the four-second threshold still reports it as a warning.
+  The flag is also **actionable**: `GET /exams/{id}/attempts` derives
+  `flagged_for_review`/`review_flagged_at` from the flag list through `review_flag_state` (one
+  reader for both the screen and the queue filter) and accepts `flagged_only=true`, and the
+  faculty screen shows a "flagged for review" chip with an "N awaiting review" count and a
+  review-queue toggle. Reopening an attempt clears the flag, so an actioned review leaves the
+  queue it was raised in.
+  `tests/test_warning_policy.py` pins the flag path, the ladder, the single audit entry, the
+  `remove` default, and the authoring refusals; the ladder was additionally observed live
+  (1/3 → 2/3 → 3/3 flagged, 4/3 still `in_progress` with answers saving and the paper resumable).
+
+### ADR-024: Prohibited-Device Detection Runs On-Device, Is Disclosed Per Exam, and Is Evidence Rather Than a Verdict
+
+* **Status:** Accepted (Wave 5). Reverses ADR-013's blanket "no camera models" for this one
+  feature. Everything else ADR-013 removed — fabricated candidate feeds, the fabricated faculty
+  video wall, gaze and biometric inference — stays removed.
+* **Context:** `docs/completion-audit.md` D-16 recorded that the mission's Priority 1 (phones,
+  earbuds and smartwatches with **measured precision/recall**) did not exist at all, and that
+  re-adding it would reverse an accepted decision. Two failure modes had to be avoided: the
+  ADR-013 one (canvas heuristics presented as AI, over frames streamed to the server) and its
+  mirror image (a real model whose output is treated as a verdict, so a wrong prediction removes
+  a candidate from a paper). Any decision here also had to answer the question ADR-013 settled by
+  prohibition: **what accuracy claim can this platform actually defend?**
+* **Decision:**
+  - **On-device, always.** Detection runs in the candidate's browser with TensorFlow.js on WebGL,
+    over a 480px frame drawn from the existing preview element into a private canvas. No video
+    and no frame leaves the machine for analysis and the server never receives a stream; the only
+    image the server ever sees is the evidence snapshot the proctoring trail already carries,
+    attached when an observation is reported.
+  - **Two models, because they answer different questions.** COCO-SSD (ssdlite_mobilenet_v2)
+    *localises* a `cell phone` — a box is what makes a report reviewable — and MobileNet v2
+    (alpha 0.5) *classifies* the frame for the ImageNet electronics classes COCO lacks
+    (`earphone`, `digital watch`). The phone path is the measured one; the wearable path is a
+    weaker whole-frame signal and is presented as such.
+  - **One frame is never enough.** `DeviceConfirmationTracker` requires three consecutive agreeing
+    scans at a three-second cadence before anything is reported, and each category reports at
+    most once per 120 s, so a phone left on the desk for ten minutes is one observation rather
+    than two hundred.
+  - **A model output raises a question, never a verdict.** Server-side, `second_device_detected`
+    belongs to `DEVICE_OBSERVATION_EVENT_TYPES`: it is recorded with its evidence frame, raises
+    the faculty review flag (audited as `exam.attempt_flagged_device_observation`), consumes **no**
+    warning allowance, and never changes the attempt state or submits it. A false positive can
+    therefore cost a candidate nothing but a lecturer's glance.
+  - **Opt-in per exam and disclosed before the candidate begins.** `config.device_detection_enabled`
+    defaults to `False`, is validated as a boolean (anything else is 422) and is carried into the
+    candidate-facing payload (`ExamStudentConfig.device_detection_enabled`), so an assessment
+    written before this feature keeps the behaviour its cohort was told about and a candidate is
+    told that their camera picture is analysed on their own device before the paper starts.
+  - **Accuracy is measured, not asserted.** `frontend/scripts/measure-device-detection.js` scores
+    the shipped module against COCO val2017 ground truth (procedure in `docs/development.md`;
+    results below and in `docs/memory.md`). Thresholds and the confirmation count are the
+    measured defaults, not guesses.
+* **Consequences:** On 91 COCO images with an annotated phone (0.5–100% of the frame) and 100
+  person-only negatives, the shipped thresholds (phoneScore 0.60, box area ≥2%) give
+  **precision 0.973, recall 0.396** (36/1/55/99) — and the aggregate hides the only number that
+  matters at examination distance: recall is **9/10 above 20%, 11/11 at 10–20%, 7/8 at 5–10%, but
+  7/17 at 2–5%, 1/16 at 1–2% and 1/29 at 0.5–1%**. The detector works when the phone is a
+  substantial part of the frame and stops working when it is small, which is the honest shape of
+  a single webcam with a phone-sized model. Sensitivity: at score 0.30 with the area filter off,
+  precision 0.979 and recall 0.516, so both the 0.60 bar and the 2% filter cost recall without
+  buying precision **on this sample** — but 100 negatives cannot resolve small precision
+  differences, so the shipped values stay conservative rather than being re-tuned to a thinner
+  sample (the trade is left to real exam footage). The one false positive is a person-only frame
+  with an 8%-of-frame "phone" box at 0.66 — the phone-shaped-object mode, which is why an
+  observation must stay an observation. The wearable signal never cleared its 0.50 bar (the only
+  mapped outputs were 0.07 and 0.03), so **no wearable accuracy is claimed** and that path is
+  effectively inert until measured on real footage. Stills are not webcam frames: these numbers
+  bound the detector's behaviour, they do not promise field performance. Cost: one scan of both
+  models measured 88–430 ms per frame depending on the run, with 2.6–6.8 s of lazy model loading
+  on the first scan only, so the three-second cadence is comfortable. Where a single camera
+  fundamentally cannot see (a phone under the desk, in a pocket, off-frame, or held by someone
+  else) is disclosed rather than papered over, and the retention gap for evidence frames (D-2) now
+  applies to device evidence too.
+
+---
+
+### ADR-025: Production Is One Compose Stack with a Static SPA and a Single Proxy Front Door
+
+* **Status:** Accepted (2026-10-12)
+* **Context:** Until now the repository could be *run* but not *deployed*: the backend image
+  installed dependencies into the same layer it ran from, the frontend image only existed as a dev
+  server, and there was no proxy, no backup loop, no TLS story and no way to create the first
+  account in a fresh database. Every deployment would have been improvised per institution.
+* **Decision:**
+  - **One project, one command.** `docker-compose.prod.yml` under the project name
+    `campusflow-prod` runs PostgreSQL, Redis, Piston, the API, a static SPA, a Caddy proxy, the
+    backup loop and the evidence-retention job. The distinct name matters: the dev stack is also
+    called `campusflow` (from the directory), and two compose projects sharing a name share
+    containers and volumes — a production `up` would otherwise recreate a developer's database.
+  - **The SPA is a static build.** `frontend/Dockerfile` runs `npm ci && npm run build` and serves
+    `dist/` from `nginx:alpine` with an SPA history fallback. No Node process, no dev server and no
+    proxy-through-Vite in production.
+  - **Only the proxy is public.** Backend, frontend and database bind to loopback (or not at all,
+    for Piston); Caddy owns `:80`/`:443`, routes `/api/*` to the API and everything else to the
+    SPA, and adds security headers and a 10 MB body cap. Same-origin serving keeps the cookie/CSRF
+    model intact and makes `CORS_ORIGINS` a single entry.
+  - **Secrets fail closed.** Compose interpolates `POSTGRES_PASSWORD` and `JWT_SECRET_KEY` with
+    `:?`, so a missing value refuses to start; the application independently refuses to start with
+    the shipped placeholder JWT secret when `DEBUG=false` (ADR-015).
+  - **The image migrates at start, once.** The backend command is
+    `alembic upgrade head && uvicorn …`, so the first `up` creates the schema and an upgrade applies
+    itself. Migrations are idempotent and the deployment has one replica; if more replicas are ever
+    added, the migration moves to a one-off job before the rollout (documented in §7.1) so two
+    starts cannot race the same migration.
+  - **The first account is provisioned, not self-registered.** `scripts/provision_admin.py`
+    creates or repairs one account holding `admin` (the mandatory Campus Lead, ADR-019) and
+    `super_admin`, from flags or `CAMPUSFLOW_ADMIN_*` environment variables. It refuses a password
+    under 12 characters, is idempotent, and audits `user.bootstrap_admin`.
+* **Consequences:** A fresh server needs Docker, two secrets and three commands
+  (`up`, `alembic upgrade head`, `provision_admin.py`); the runbook is `docs/development.md` §7.
+  The stack is verified on this host: SPA and API answered through Caddy on `:80`, unauthenticated
+  API access refused with 401, a real login worked through the proxy, `pg_dump -Fc` produced a
+  restorable 115 KB dump, and the sandbox memory ceiling killed a 512 MB allocation under a
+  128 MB limit. The deployment has no orchestration story beyond compose (no rolling upgrades, no
+  multi-node), which is the right scope for a single-institution install and is stated rather than
+  implied.
+
+---
+
+### ADR-026: Camera Evidence Frames Expire; the Integrity Event Does Not (D-2)
+
+* **Status:** Accepted (2026-10-12)
+* **Context:** Integrity mode stores a downscaled still every minute so a reviewer can confirm who
+  was present. That is the most sensitive payload in the platform — an identifiable image of a
+  student — and it was retained forever, with no policy, no erasure and no way for an institution
+  to set a window. A review trail that cannot distinguish "this happened" from "we kept the picture
+  forever" is a liability, not evidence.
+* **Decision:**
+  - **The image expires; the event stays.** `PROCTORING_EVIDENCE_RETENTION_DAYS` (default 90) sets
+    the window. The daily retention job erases `details.snapshot` from `camera_snapshot` events
+    older than it and stamps `details.evidence_purged_at`. Type, timestamp and severity survive, so
+    the timeline still proves a frame existed and records when it was erased.
+  - **0 means keep, never erase-now.** A retention of 0 leaves frames alone; the purge is a no-op.
+    The alternative reading ("delete everything before today") is exactly the mistake a careless
+    operator would make.
+  - **The window is institutional, not per-exam.** It is a data-protection policy, not an
+    authoring choice, so it lives in settings and is applied uniformly.
+  - **It is disclosed.** The value travels to the candidate with the exam
+    (`ExamStudentConfig.evidence_retention_days`, the delivery response) and the brief says the
+    pictures are deleted after N days while the log entry remains.
+  - **Erasure is audited and idempotent.** A run that erases anything writes
+    `proctoring.evidence_purge` with the window, cutoff and count; a second run erases nothing.
+* **Consequences:** The production stack runs the purge daily in its own service, and
+  `scripts/purge_proctoring_evidence.py` can be run by hand (safe). `tests/test_proctoring_security.py`
+  pins the boundary: an expired frame loses its image, a recent frame keeps it, a non-evidence
+  event is untouched, a second run is a no-op and 0 is a no-op. Device-detection evidence that
+  includes a snapshot is covered by the same rule because the purge keys on the event vocabulary,
+  not on which feature created the frame.
+
+---
+
+### ADR-027: MIT Licensing and a Deployable Stack Instead of a Public Demo
+
+* **Status:** Accepted (2026-10-18)
+* **Context:** This repository is also the project's portfolio artefact: a reviewer forms a judgement
+  in the first screen, before reading any code. Two packaging questions followed from that. Licensing
+  first — the tree shipped with no `LICENSE` file and a README ending in "Proprietary. All rights
+  reserved.", which is worse than either choice: no licence is actually granted, and a reader cannot
+  tell a deliberate decision from an oversight. Then demonstration: a hosted demo is the most
+  compelling proof for a web application, but this is a multi-tenant examination platform with a
+  privileged code sandbox, real proctoring evidence and no public sign-up. A public instance would be
+  a writable anonymous surface holding personal data, and its inevitable bit-rot (sleeping free tiers,
+  rotated secrets, dead links) would misrepresent the work more than its absence does.
+* **Decision:**
+  - **MIT, with the file present.** `LICENSE` carries the standard text (© 2026 Sumanth Mamidi); both
+    package manifests declare `MIT`; the README links the file instead of restating it.
+  - **The deployment path is the demo.** `docker-compose.prod.yml` installs the complete product in
+    three commands on any server. The README leads with that path, states plainly why there is no
+    public instance, and treats a local run as the way to evaluate the system.
+  - **Screenshots are evidence, not decoration.** They are captured from the running product — headless
+    Chrome against a freshly seeded database — never staged mock-ups, and the capture recipe is
+    recorded in `docs/development.md` so they can be regenerated rather than hand-edited.
+  - **README claims are bounded by measurement.** Every number quoted there (test counts, lint
+    results, service health) comes from a run performed on the tree being pushed, and the
+    "Known limitations" section names what is unfinished instead of leaving a reviewer to discover it.
+* **Consequences:** A reviewer can read the repository as a product pitch and run the real thing
+  locally in about five minutes. The trade-off accepted is that there is no single URL to click; the
+  screenshots, the measured verification section and the three-command install carry that job instead.
+  Screenshots become a maintenance obligation — they are honest, so they age, and a UI change means
+  recapturing them.

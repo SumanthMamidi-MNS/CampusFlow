@@ -65,7 +65,8 @@ Domain modules implement higher-level academic and examination logic:
 - `enrollments`: Student roster management and instructor assignments.
 - `materials`: Structured learning materials, folders, and resources.
 - `assignments`: Task creation, student submissions, and grading.
-- `question_banks`: Question authoring, tagging, versioning, and option pools.
+- `roster_import`: Two-phase CSV/Excel roster import (preview → commit), column mapping,
+  duplicate/conflict classification, idempotent re-import, and safe row-level reports.
 - `exams`: Examination lifecycle, delivery engine, auto-save state, auto/manual grading, and proctoring observability.
 - `notifications`: Multi-channel alerts (in-app and email).
 - `analytics`: Aggregated institutional, course, and exam performance metrics.
@@ -217,19 +218,63 @@ only for usability, never as a security boundary.
 3. **Password Security:** Salted `bcrypt` hashing with configurable complexity and lockout policies.
 
 ### Observable Proctoring Model
-CampusFlow implements **observable, rule-based proctoring only** (ADR-003). There is no
-webcam capture, no gaze/facial analysis, no screen recording, and no biometric processing.
-Events are recorded as an append-only audit trail; they are advisory evidence for a human
-reviewer and never an automated judgement about a candidate.
+CampusFlow implements **observable, rule-based proctoring only** (ADR-003, ADR-013). There is
+no gaze or facial analysis, no biometric processing, no screen recording and no automated
+cheating verdict. Events are recorded as an append-only audit trail; they are advisory
+evidence for a human reviewer. The single camera model in the product is on-device
+*object* detection for prohibited devices (ADR-024, below): it recognises things, never
+people, and it never leaves the candidate's browser.
 
-- **Recorded telemetry (client-reported, server-stored):**
+- **Camera-integrity mode (per exam, covered by `proctoringEnabled`):** when the exam requires
+the camera, the candidate's browser asks for it explicitly and the page reports readiness
+only when *real frames are rendering* (live track + real frame size + progressing playback
+clock + sampled pixel content). The on-screen self-view is **mirrored**
+(`SELF_VIEW_STYLE`, `ExamDelivery.tsx`) so the candidate reads their own left/right the way a
+mirror shows it; the frames written to the trail are captured from the raw video pixels and
+keep the camera's **true, un-mirrored** orientation.
+- **Evidence frames:** one 320px-wide JPEG (≈a few KB) a minute while the attempt runs, stored
+as `camera_snapshot` event details on the attempt and shown only to staff holding
+`exams:proctor_view` in the integrity timeline (`ExamDetail`). Camera signals recorded:
+`camera_off` (the required camera stopped), `camera_obstructed` (a frame that stops changing,
+reported once after the four-second policy grace, recovering silently), `second_device_detected`
+(a phone in view) — evidence for a lecturer, never a verdict.
+  - **Retention and erasure (ADR-026):** frames are personal data and do not live forever.
+    `PROCTORING_EVIDENCE_RETENTION_DAYS` (institution setting, default 90, `0` = keep) drives a
+    daily retention job (`purge_proctoring_evidence`, `scripts/purge_proctoring_evidence.py`) that
+    erases the image from expired `camera_snapshot` events and stamps `evidence_purged_at`. The
+    event itself — type, time, severity — survives, so the timeline still shows that a frame
+    existed and when it was erased. Each erasing run is audited
+    (`proctoring.evidence_purge`). The window is disclosed to the candidate in the assessment
+    brief (`ExamStudentConfig.evidence_retention_days`).
+- **On-device prohibited-device detection (ADR-024, opt-in per exam):** when
+  `config.device_detection_enabled` is true — off unless an author turns it on, and disclosed
+  in the candidate's brief before they begin — the candidate's browser runs TensorFlow.js on a
+  downscaled 480px frame drawn from the existing preview element. COCO-SSD localises a
+  `cell phone` (a box, because a box is reviewable) and MobileNet v2 classifies the frame for
+  the ImageNet electronics classes COCO has no category for (`earphone`, `digital watch`).
+  Nothing is streamed: no video and no frame leaves the machine for analysis, and the only image
+  the server ever receives is the evidence frame the proctoring trail already carries, attached
+  when an observation is reported. Three consecutive agreeing scans are required before anything
+  is reported, each category reports at most once per two minutes, and the server treats
+  `second_device_detected` as an **observation** — recorded with its frame, raising the faculty
+  review flag, consuming no warning allowance and never changing the attempt state. Accuracy is
+  measured, not asserted (`frontend/scripts/measure-device-detection.js`, procedure in
+  `docs/development.md`, results in `docs/memory.md` and ADR-024; the numbers are bounded by
+  COCO stills and cover the phone path
+  only).
+- **Recorded telemetry (client-reported, server-stored; the server fixes the vocabulary in
+`PROCTORING_EVENT_TYPES`):**
   - Tab switching (`visibilitychange`) and window blur.
   - Fullscreen exit.
   - Clipboard activity (copy/paste) and right-click context menu.
   - Developer-tools shortcut attempts.
-- **Tolerated-event threshold:** Each exam carries `config.max_violations` (default 5,
-authored per exam and validated by the API). Reaching the threshold **auto-submits** the
-attempt with a `max_violations_exceeded` flag (ADR-008) rather than locking the candidate out.
+  - Returning inside the five-second grace (`quick_tab_return`: recorded, never charged) and
+    a window resize (low-signal).
+- **Tolerated-event threshold:** Each exam carries `config.max_violations` (default 5, authored
+per exam and validated by the API) and a `config.warning_policy` (ADR-023). Under `remove`
+(the default) reaching the threshold locks the attempt until a lecturer reopens it; under
+`review` the attempt is flagged once for faculty review and the candidate keeps working.
+Either way an automated signal never decides guilt.
 - **Neutral candidate messaging:** Candidates see a calm, informational notice of the
 remaining allowance. There is no flashing/strobe warning, no shouting copy, and no
 lockdown screen.
@@ -266,4 +311,96 @@ returned to students.
 
 See docs/decisions.md ADR-014 for the full isolation rationale and limits.
 
+---
 
+## 7. Institutional Hierarchy, Identity & Roster Import (Wave 3/4)
+
+### Sections are course offerings (ADR-018)
+
+`course_offerings.section` already models "this course, this term, this section", so a section
+**is** an offering and `campusflow.domain.courses.access` is its authorization — no second
+scope kernel exists. A lecturer manages only offerings they teach; a department head only
+offerings of departments they head; students only offerings they are enrolled in.
+
+One assessment may cover several authorised sections: `exams.series_id` groups the per-section
+`Exam` rows, and `POST /api/v1/exams/multi-section` validates every selected offering against
+the caller's scope in a single transaction before any row is written.
+
+### The mandatory Campus Lead (ADR-019)
+
+The `admin` role is the institution's **Campus Lead / College Admin**. `domain/institution/leadership.py`
+enforces "at least one active Campus Lead": every removal path in `domain/users/service.py`
+calls `guard_campus_lead_removal` *before* mutating, under a PostgreSQL transaction advisory
+lock, and is refused with 409 if it would leave zero. Recovery is a separate
+`super_admin`-only, audited endpoint that refuses when a lead already exists.
+
+| Endpoint | Gate |
+|---|---|
+| `GET /api/v1/admin/institution/campus-leads` | `require_any_role("super_admin", "admin")` |
+| `POST /api/v1/admin/institution/campus-lead/recover` | `require_any_role("super_admin")`, audited |
+
+### Student identity and duplicate prevention (ADR-020)
+
+`users.registration_number` is the stable student identity, stored **normalised** (trimmed,
+internal whitespace collapsed, uppercased) and unique when present; `admission_year` records
+cohort. Punctuation is preserved on purpose (`A-12` ≠ `A12`). Business keys are encoded as
+database constraints — `uq_faculty_assignment_offering_faculty`,
+`uq_exam_attempt_student_number`, `ix_users_registration_number` — because a pre-insert `SELECT`
+does not hold under concurrency; services translate the resulting `IntegrityError` into 409.
+
+### Roster import (ADR-021)
+
+```
+POST /api/v1/roster-imports/preview        stage + classify (writes no accounts)
+POST /api/v1/roster-imports/{id}/commit    write committable rows in one transaction
+GET  /api/v1/roster-imports               recent batches
+GET  /api/v1/roster-imports/{id}/report    row-level CSV report (formula-injection safe)
+```
+
+Gated by `roster:import | users:bulk_import | enrollments:manage` **and**, when a section is
+targeted, the offering-scope kernel. Rows are classified as valid / invalid / duplicate-in-file
+/ conflict / already-existing; nothing is written during preview; `idempotency_key` makes a
+retried submit return the original result; imported accounts get a temporary random credential
+and `must_change_password`, and no credential appears in any staged row, report or audit record.
+
+
+
+---
+
+## 8. Deployment Topology (ADR-025)
+
+```
+                    ┌──────────────────────────── host ────────────────────────────┐
+  browser ──:80/:443──► proxy (Caddy)                                             │
+                        │  /api/*  ──► backend (FastAPI)  ──► postgres / redis      │
+                        │  else    ──► frontend (nginx, static SPA build)           │
+                        │                                                           │
+                        │  piston (isolate sandbox, internal only)                  │
+                        │  piston-init (installs Python/C/C++/Java runtimes)        │
+                        │  backup (nightly pg_dump -Fc + prune)                     │
+                        │  evidence-retention (daily camera-frame erasure)          │
+                        └───────────────────────────────────────────────────────────┘
+```
+
+- **One compose project, `campusflow-prod`.** The dev stack (`docker-compose.yml`) derives the name
+  `campusflow` from the directory; the production file sets its own name so the two never share
+  containers or volumes.
+- **The proxy is the only public surface.** The API (`127.0.0.1:8001`), the static frontend
+  (`127.0.0.1:8080`) and PostgreSQL (`127.0.0.1:5433`) are loopback-bound; Piston has no host port.
+  The SPA and API share an origin, so cookies/CSRF work without cross-site exceptions and
+  `CORS_ORIGINS` is one entry.
+- **The API is stateless; PostgreSQL and the storage volume are the state.** Redis holds rate-limit
+  counters and cache, with AOF persistence. The `backend-storage` volume holds uploaded materials.
+- **Migrations run at container start** (`alembic upgrade head && uvicorn …`) for a single replica;
+  a multi-replica rollout would move the migration to a one-off job first.
+- **There is no public sign-up.** `scripts/provision_admin.py` creates the first Campus Lead +
+  platform `super_admin` account; every other account is created by staff or roster import.
+- **The demonstration surface is a debug affordance.** `/api/v1/exams/demo/*` is mounted only when
+  `DEBUG=true`; a production app returns 404 for it and records nothing.
+- **Evidence frames expire** on an institution window (ADR-026); the retention service runs the
+  purge daily and the erased image never leaves an orphaned reference — the event keeps its
+  `evidence_purged_at` stamp.
+- **Development and production use two frontend images on purpose.** `frontend/Dockerfile.dev` runs
+  the Vite dev server for the development stack; `frontend/Dockerfile` compiles the SPA and serves
+  the static output from nginx. The production image has no Node runtime, so it can never be the
+  container that serves a development server (ADR-025).

@@ -200,7 +200,8 @@ All functional modules, Bedrock foundational components, domain workflows, secur
 - **Achievements:**
   - Resolved a critical, systemic frontend API interface mismatch where components received unwrapped Axios responses ({ data: ..., meta: ... }) instead of raw entity payloads, causing widespread Cannot read properties of undefined crashes.
   - Rewrote API client typings and return values across dmin, nalytics, ssignments, exams, 
-otifications, and question-banks feature modules to properly utilize the ApiResponse<T> wrapper and extract es.data.data.
+otifications, and question-banks feature modules to properly utilize the ApiResponse<T> wrapper and extract 
+es.data.data.
   - Performed live browser testing using Antigravity MCP navigating authentication, dashboards, and paginated user lists.
   - Documented findings and verification status in docs/qa-report.md.
 
@@ -439,3 +440,584 @@ closed the routes that had no gate at all, and added the tests that keep the pol
   cross-department staff reads/writes → 403, `hod.cse` offerings confined to CSE, faculty
   authoring still returns 5 `is_correct` keys and CSV export 200, student exam surface
   (Wave 0 contract) still 200.
+
+---
+
+### Phase 16 — Wave 2: Exam delivery, full-screen integrity & reliability
+
+An audit of the *running* stack (live HTTP + PostgreSQL + a real browser) found that the
+candidate assessment journey was broken in ways the green test suite could not see, and that
+earlier "verification" had been reading a stale server process. Full evidence, method and
+limitations are in [docs/audit-wave2-exam-delivery.md](docs/audit-wave2-exam-delivery.md).
+
+- **P0 — the assessment page did not compile.** `ExamDelivery.tsx` carried three syntax errors
+  (a section comment merged with the following statement, a stray `)}`, and a Python-style
+  `in {...}` membership test) plus a duplicate import and an unused binding in `ExamsList.tsx`.
+  `tsc -b` failed, so the surface could not render at all — this, not the button, was the
+  reported "Take Exam" failure. All repaired; build is clean.
+- **P0 — a lecturer could not (re)schedule an examination.** `PUT /exams/{id}` returned 500:
+  the audit trail received `datetime` windows that a `JSON` column cannot encode, and the exam
+  row was committed before the failing insert, so the edit applied while still reporting a
+  failure. Fixed centrally with `bedrock.audit.service.json_safe()` (one normaliser for the
+  whole platform) and by writing the change and its audit record in one transaction.
+- **P1 — abandoned attempts stayed `in_progress` forever.** New
+  `reconcile_expired_attempts()` closes attempts past their duration or window, invoked from
+  the candidate list, start/resume and the instructor attempt list; two stale seeded attempts
+  were closed automatically.
+- **P1 — the proctoring ingest trusted the client.** The recorded time is now always the
+  server's, the event kind must come from a disclosed server-owned vocabulary (422 otherwise),
+  and repeats inside a 3 s window no longer consume the candidate's allowance.
+- **P1 — violation counts were lost under concurrency** (`+= 1` across requests): reproduced as
+  5 event rows against a counter of 2. Now an atomic SQL increment; verified consistent
+  (8 rows = 8 counter) even under a concurrent burst.
+- **P1 — the candidate surface could not tell "begin" from "resume".** The candidate summary
+  now carries its own `latest_attempt_status` and `attempts_used`, so the list offers
+  Continue / Retake / View Results / Awaiting Instructor truthfully.
+- **P2 — full-screen and clipboard policy.** One full-screen effect; an accessible warning with
+  a deliberate "Return to full screen" action; copying question content is a best-effort
+  deterrent while pasting/editing inside answer fields is permitted and never flagged; a 400
+  from autosave hands the candidate to their results instead of an editor that cannot save.
+- **Reported, not changed (product decisions):** the scorecard shows the *latest* attempt
+  rather than the one just submitted; `window_blur` counts toward the auto-submit allowance
+  (a low-confidence signal); there is no uniqueness constraint on
+  `(exam_id, student_id, attempt_number)` (duplicate `attempt_number = 1` rows exist).
+- **Verification:** 32/32 `pytest`; `tsc -b && vite build` clean; `oxlint` 0 errors; live HTTP
+  matrix for start/resume/autosave/submit/results/guards and cross-role denials; browser
+  walkthrough of the full candidate journey including autosave persistence in PostgreSQL and
+  integrity signals landing server-side. Full-screen could not be exercised — the preview
+  browser reports `fullscreenEnabled` but never settles a `requestFullscreen()` call — so that
+  must be confirmed by hand in Chrome/Edge.
+
+---
+
+### Phase 17 — Wave 3/4: hierarchy, section assessment, identity, duplicate prevention, roster import
+
+The integrated plan for the requested hierarchy/section/roster/invigilation work is
+[docs/plan-hierarchy-roster-invigilation.md](plan-hierarchy-roster-invigilation.md) (10
+deliverables, with existing vs planned stated per item). Waves 3 and 4 of that plan are
+implemented; waves 5–9 (live invigilation, scoped department-head assignment UI, cleanup
+tooling, Playwright) remain **planned and are not claimed**.
+
+- **Structural finding:** a section already *is* a course offering
+  (`course_offerings.section`, ADR-018), so no Section entity or second scope kernel was added;
+  `domain/courses/access.py` remains the single answer to "whose section is this?".
+- **Campus Lead invariant (ADR-019):** new `domain/institution/leadership.py` with
+  `guard_campus_lead_removal`, wired into `update_user` (demotion *and* deactivation) and
+  `delete_user` **before** any mutation, serialised by `pg_advisory_xact_lock`. Last-lead
+  removal → 409. Recovery: `POST /admin/institution/campus-lead/recover`
+  (`super_admin` only, refuses when a lead exists, audited as `institution.campus_lead_recover`),
+  plus `GET /admin/institution/campus-leads`.
+- **Multi-section assessment (ADR-018):** `exams.series_id` groups the per-section exams;
+  `POST /exams/multi-section` validates every selected offering against the caller's teaching
+  scope in one transaction. A direct call substituting an unrelated section id is refused (403)
+  and leaves **no** partial paper.
+- **Identity + duplicate prevention (ADR-020):** `users.registration_number` (normalised on case
+  and whitespace, unique when present) and `admission_year`;
+  `uq_faculty_assignment_offering_faculty`; `uq_exam_attempt_student_number` (the wave-2
+  duplicate attempts were renumbered by `started_at` in the migration — no row deleted);
+  `create_user` now translates a constraint refusal into 409 instead of 500.
+- **Roster import (ADR-021):** new `domain/roster_import` module — staged preview with header
+  aliasing and explicit mapping override, row classification (valid / invalid / duplicate-in-file
+  / conflict / already-existing), `idempotency_key` for retried submits, one-transaction commit,
+  row-level CSV report sanitised against formula injection, CSV + real `.xlsx` parsing
+  (`read_only`/`data_only`), 5 MiB / 5000 row / 512 char limits. Section-scoped: a lecturer
+  cannot import into another lecturer's section. Imported accounts get a random temporary
+  credential and `must_change_password = True`; no credential appears in any report, log or
+  audit record.
+- **Explicitly refused:** registration numbers as initial passwords. They are a public
+  identifier; using them as the secret for every new account would make the roster import a
+  credential-disclosure vector, so onboarding goes through password reset instead.
+- **Verification:** `pytest` → **58 passed, 2 skipped (SQLite)** and **60 passed (PostgreSQL,
+  `campusflow_test`)** — the 2 skipped are exactly the concurrency criteria, which the
+  PostgreSQL run executes. `ruff check campusflow tests` clean. Both migrations applied to the
+  live dev database and the round trip (`downgrade -1` ×2 → `upgrade head`) verified; the live
+  `exam_attempts` duplicate group is now 0 and both unique constraints and all three new indexes
+  exist. New suites: `test_campus_lead_invariant.py`, `test_multi_section_assessment.py`,
+  `test_roster_import.py`, `test_duplicate_prevention.py`.
+- **Residual (not complete, do not claim):** `must_change_password` is recorded but not yet
+  enforced at login (no forced-change screen); no roster-import or Campus-Lead frontend yet
+  (APIs only); the live API server has not been restarted, so the running process still serves
+  pre-Wave-3 code; live camera invigilation (waves 6–7) is designed but not implemented.
+
+## Demo exam, camera truth & integrity UX (this wave)
+
+- **Demo examination** (`campusflow/domain/exams/demo.py`, `demo_router.py`): one-click
+  "Try the demo" from the login page and from the exams list. `POST /api/v1/exams/demo/prepare`
+  idempotently provisions a demo department/course/offering/bank/questions/exam (matched by
+  code/title/body, never duplicated) and `POST /api/v1/exams/demo/login` mints a real session
+  for the single fixed demo student (`demo.student@campusflow.dev`, random never-displayed
+  password). The demo paper covers MCQ / multi-select / true-false / numeric / fill-blank / code,
+  is always open, and allows 50 retakes. Both routes are in the audited public allowlist because
+  they can only ever touch purpose-built demo objects.
+- **Camera readiness truth** (`ExamDelivery.tsx`): "Camera ready" can no longer appear over a
+  black tile. Readiness now requires real rendered frames (polled `video.readyState >= 2`,
+  a real frame size and actual pixel content every 500 ms); "Begin assessment" unlocks on
+  frames, not on track state, and the connected-but-black state is named honestly.
+  **This bullet was wrong when first written** — see "Camera & session repair" below: the
+  predicate as shipped (`readyState >= 2 && videoWidth > 0`) was satisfied by the 2×2
+  placeholder of a *stopped* track, so the tile stayed black while the page said "ready".
+- **Obstruction & second-device signals**: a frozen frame for the four seconds the policy allows
+  is reported once as `camera_obstructed` (recovers silently when motion returns); a second
+  device in view can be reported as `second_device_detected`. Both are review evidence for the
+  lecturer — never an automatic cheating verdict (ADR-013 stance preserved).
+- **Five-second return grace**: leaving the paper starts a visible full-screen countdown.
+  Returning inside the grace records `quick_tab_return` (no penalty); the lapse records the
+  leave as a normal violation. Same leave can never produce both outcomes.
+- **Full-screen enforcement**: after losing full-screen the paper is greyed behind a
+  "Return to full screen" overlay until the candidate re-enters; leaving is still recorded.
+- **Scheduling ergonomics**: quick window presets (Right away / Tomorrow / Next week) that
+  auto-fill start and end (start + duration + 15 min grace); a live plain-words summary that
+  validates ordering; disabled-until-valid submit labelled with the Enter affordance.
+- **Verification:** `pytest` → 65 passed / 2 skipped (SQLite) and 67 passed (PostgreSQL);
+  `ruff` clean; `tsc -b && vite build` green; new suites `test_demo_exam_and_integrity_vocab.py`
+  (7 tests) covering idempotent prepare, repeatable demo login, full start→answer→submit→result
+  flow, quick_tab_return non-penalty, tab/resize/obstruction/second-device vocabulary.
+
+## Camera & session repair (black preview / Ctrl+R sign-out)
+
+- **Reported:** the camera-check tile was pure black while the page claimed "Camera ready — your
+  live picture is showing", and pressing Ctrl+R signed the user out.
+- **Black camera — root cause (deterministic, not environment-specific).** In `startCamera` the
+  "release a camera that arrives after we gave up" handler was registered on the
+  `getUserMedia` promise *before* `await Promise.race([request, timeout])`. The handler ran
+  first on the normal path — when `streamRef.current` was still `null` — so
+  `late.getTracks().forEach(t => t.stop())` **stopped the tracks of the camera we had just been
+  granted**. The page then stored the dead stream, the tile rendered black, and readiness
+  (`readyState >= 2 && videoWidth > 0`) was satisfied by Chrome's 2×2 placeholder frame on that
+  stopped track. Fix: the cleanup now runs only when the timeout actually fired (`gaveUp`), and
+  readiness additionally requires a live track, a real frame size (`≥ 64×48`), a progressing
+  playback clock, and a frame whose mean luminance is above a near-zero floor.
+- **Truthful states:** `pictureState` (`waiting` / `live` / `black`) is tracked separately from
+  the device state, so the panel now distinguishes *requesting*, *denied*, *unsupported*,
+  *connected but no picture yet*, *connected but sending a black picture* (with lens-shutter /
+  OS privacy / device-busy guidance) and *camera stopped* (device unplugged or taken over), each
+  with its own recovery control. "Camera ready" and the unlocked "Begin assessment" button are
+  reachable only from `pictureState === 'live'`.
+- **Ctrl+R sign-out — two causes, both fixed.** (1) `/auth/me` was excluded from the 401
+  refresh retry by a blanket `startsWith('/auth/')` test, so a page refresh with an expired
+  access token could never use the refresh cookie — the client then cleared the token and the
+  session died. The exclusion now covers only the endpoints that establish or end a session
+  (`login`, `refresh`, `logout`, `password/*`). (2) Any failure of `/auth/me` (including a
+  transient 500) deleted the stored token. `AuthProvider` now hydrates the last verified
+  profile for an instant, non-flashing reload, and clears the session only on a definitive
+  401/403; a refresh that fails for infrastructure reasons no longer signs the user out.
+- **Demo session durability:** `POST /exams/demo/login` minted a refresh-token *record* but
+  never set the httpOnly cookie, so a demo session could not outlive its 15-minute access
+  token. It now sets the cookie through the new shared
+  `campusflow.bedrock.auth.cookies.set_refresh_cookie` (used by `/auth/login` and `/auth/refresh`
+  too, so the attributes cannot drift), and the raw token is popped from the payload so it is
+  never exposed in JSON.
+- **Stored-email validation:** `UserResponse` inherited `email: EmailStr`, so a legacy row
+  whose address Pydantic rejects as a reserved TLD (the old demo account
+  `demo.student@campusflow.local`) turned **every** endpoint returning a user into a 500 —
+  including `/auth/me`, which is what signed the user out on reload. The demo identity is now
+  `demo.student@campusflow.dev` (documented here and in the API), and the remaining risk is
+  noted under limitations.
+- **Verification (real browser, `localhost:5173` + FastAPI on `:8000`):**
+  - live picture → track `live`, 640×480, playback clock advancing, mean luminance ≈ 124,
+    "Camera ready — your live picture is showing", Begin enabled;
+  - black feed (live track, luminance 0) → "Your camera is on but it is sending a black
+    picture…", Begin **disabled** — the reported contradiction is gone;
+  - track ended mid-check → "The camera stopped…" + "Turn camera back on", Begin disabled;
+  - permission denied → actionable browser-permission guidance, Begin disabled;
+  - the tile was unmirrored (`transform: none`) at the time of that round, matching the
+    on-screen claim — since superseded by the mirror repair below, which the user asked for
+    after seeing that a raised right hand read as a left hand.
+  The preview browser cannot grant camera permission, so the picture pipeline was exercised by
+  injecting `canvas.captureStream()` streams through `navigator.mediaDevices.getUserMedia` —
+  the same harness reproduces the original defect (ended track + black tile + "ready") as
+  evidence that the fix is what changed the outcome.
+- **Tests/build:** `pytest` → 65 passed / 2 skipped (SQLite; PG-only concurrency criteria
+  still skipped here because Docker/PostgreSQL is not running in this session);
+  `npm run build` (`tsc -b && vite build`) green; `oxlint` 0 errors.
+- **Residual / not verified:** a physical camera is not available to the agent browser, so the
+  final hand-raise orientation check on real hardware is still the user's to confirm; snapshot
+  frames reaching the lecturer's integrity log were verified by code path and existing
+  `test_proctoring_security.py`, not by watching a real 60-second capture; PostgreSQL-backed
+  runs of this wave's changes were not executed (Docker was down).
+
+## Camera orientation repair (mirrored self-view) & completion audit
+
+- **Reported:** the camera preview read backwards to the candidate — “I’m lifting my right hand,
+  but it was showing as if I’m lifting my left hand”. A raw, un-mirrored self-view is exactly
+  what a camera sees when it looks at a person: their right hand lands on the viewer’s left. The
+  previous wave had made that deliberate (`transform: 'none'`, copy: “exactly what your camera
+  sees — not mirrored”), which is faithful to the evidence but confusing as a self-view.
+- **Fix (one source of truth):** all three self-view previews (both camera-check tiles and the
+  in-exam PIP) now render through `SELF_VIEW_STYLE` = `scaleX(-1)`, so the picture moves the way
+  the candidate does — lift your right hand and the picture lifts the hand on your right. The
+  evidence frames are unchanged: `captureSnapshot` draws the video’s raw pixels with
+  `drawImage`, which CSS transforms never touch, so the lecturer still receives the camera’s true
+  orientation. The candidate copy now says exactly that (“a mirrored view… frames are saved to
+  your lecturer’s integrity log in the camera’s true orientation”).
+- **Verification (real browser, controlled asymmetric stream):** with a 320×240 source that is
+  **red on the left and blue on the right**, the rendered element reports
+  `transform: matrix(-1, 0, 0, 1, 0, 0)` (the browser is flipping the presentation) while
+  `drawImage` → `getImageData` still reads left = red, right = blue (the stored frame is not
+  flipped). The same run shows the liveness gate working end to end: with frames flowing,
+  `currentTime` advanced to 180.5 s, the panel showed “Camera ready — your live picture is
+  showing”, and “Resume attempt” became **enabled**.
+- **Completion audit:** [docs/completion-audit.md](completion-audit.md) turns the final-completion
+  brief into a checklist with an evidence column: what is verified, what is partial, what is
+  absent, plus the defect register, the dependency-ordered repair plan and the release-readiness
+  verdict. Recording it also surfaced one previously undocumented **high**-severity defect
+  (**D-1** in that file): the exam/attempt **staff** endpoints are gated by permission alone and
+  skip the offering-scope kernel in `domain/courses/access.py`, so a lecturer holding
+  `exams:grade` / `exams:proctor_view` can read another offering’s attempts, responses, integrity
+  timeline (including camera frames) and results CSV by supplying its id.
+- **Verification:** `pytest` → 65 passed / 2 skipped (SQLite); `npx tsc -b` clean; `oxlint` clean;
+  live browser run against `127.0.0.1:5173` + `127.0.0.1:8000` as `demo.student@campusflow.dev`.
+- **Residual:** the hardware hand-raise confirmation is the user’s (the agent browser has no
+  camera); D-1, the Python course (§2 of the brief) and the language matrix remain open.
+
+## Examination cohort boundary (D-1) closed
+
+- **Defect:** every attempt-level examination staff surface trusted the capability alone
+  (`exams:grade` / `exams:proctor_view` / `exams:create`) and never asked the offering-scope
+  kernel. Because those capabilities are institution-wide, any lecturer — and the examination
+  bureau — could read or alter another offering's attempt list (student names, emails, marks,
+  violation counts), the candidate's responses, the results CSV, and the integrity timeline
+  **including captured camera frames**, by supplying that offering's exam or attempt id.
+- **Fix:** `domain/exams/service.py` gained `_assert_can_manage_attempt` and an
+  `allow_exam_bureau` parameter on `_assert_can_manage_exam`; the kernel is now called by the
+  attempt list, the response queue, single-response grading, result publication, the results
+  CSV, the integrity timeline, the resumption path, exam update/delete, add/remove questions
+  (random-paper generation already had it). The results CSV and the attempt list share one
+  unauthorised read helper so the scope check cannot be bypassed through the exporter.
+- **Bureau split (ADR-022):** invigilation surfaces and the resumption path pass
+  `allow_exam_bureau=True`; the gradebook-on-paper surfaces (attempt list, responses, CSV,
+  grading, publication) pass `False`, so the bureau's institution-wide reach stops where
+  cohort marks begin — matching the existing rule that the bureau may roster but not grade.
+- **Tests:** new `tests/test_exam_cohort_scope.py` (4 tests) builds two fully populated
+  offerings and asserts, for the *same* actor, 200 on their own cohort and 403 on the other
+  across nine surfaces, plus candidate/anonymous denials, an administrator control, and the
+  bureau split. The suite was proven to bite: with the scope assertion temporarily neutralised,
+  two of the four tests fail (the cross-cohort ones) and pass again once restored.
+- **Live verification** (backend restarted on the current code, SQLite, real logins):
+  `faculty.cse` (owns CS201) → 200 on attempts / export-results / staff definition / responses /
+  proctoring timeline; `faculty.mech` (holds `exams:grade` + `exams:proctor_view`, teaches
+  nothing) → **403 on all of them**; `student1` → 403; `controller` (bureau) → 200 on the staff
+  definition and the integrity timeline, **403** on the attempt list and the results CSV.
+  Refusal bodies carry the scope message and no candidate identity. The demo candidate path is
+  unaffected (demo sign-in 200, candidate exam list 200), and the dev proxy still answers
+  `/api/health` with 200 on `127.0.0.1:5173`.
+- **Also verified this pass (no change needed):** the proctoring writer already refuses an
+  attempt that belongs to another student (`AuthorizationError`), rejects event names outside
+  the server-owned vocabulary (422), refuses oversized frames (422), stamps server time and
+  keeps a client timestamp only as context, and de-duplicates repeats inside a three-second
+  window. Copy of question content is blocked with an event,
+  paste and the context menu stay permitted inside answer fields (typing, assistive technology
+  and accommodations untouched), and full-screen exit is detected with a return overlay.
+- **Verification:** `pytest` → **69 passed / 2 skipped** (SQLite; the two PostgreSQL-only
+  concurrency criteria remain skipped with Docker down); `ruff check campusflow tests` clean;
+  `npx tsc -b` clean; `oxlint` 0 errors (12 advisory warnings).
+- **Residual (recorded, not changed):** the warning ladder in the new brief (warnings 1–5 with
+  review at 5) differs from the shipping policy (reaching the configured tolerance **removes**
+  the candidate until a lecturer reopens the attempt); the four-second obstruction threshold is
+  a client constant rather than a per-exam setting; and `camera_obstructed` currently consumes
+  the candidate's allowance even though it is an evidence signal. These are product decisions
+  tracked in `docs/completion-audit.md`; the first and third were decided on 2026-10-12 (Wave 4
+  below, ADR-023).
+
+## Wave 4 (2026-10-12) — The integrity tolerance is a per-exam policy (D-11, D-13, D-15)
+
+**Decision (product owner, this session).** Reaching the tolerance keeps today's behaviour by
+**default** (the candidate is removed until a lecturer reopens the attempt) and becomes an
+authored per-exam choice: `config.warning_policy` is `remove` or `review`. Under `review` the
+brief's ladder applies and the attempt is **flagged for faculty review** at the tolerance while
+the candidate keeps working. A covered lens (`camera_obstructed`) stays a charged warning.
+Recorded as **ADR-023**; D-11 and D-13 closed.
+
+- **Backend (`domain/exams/service.py`, `schemas.py`).** `_resolve_warning_policy` is the only
+  reader of the setting and defaults to `remove` when the key is absent or unrecognised, so an
+  exam authored before the setting existed keeps the policy its cohort was told about.
+  `_integrity_warning` produces the ladder for warned-but-below-tolerance events; crossing the
+  tolerance under `review` writes `flagged_for_review` + `review_flagged_at:<iso>` **once**,
+  audits `exam.attempt_flagged_for_review` **once**, and leaves the attempt `in_progress` so
+  answers keep saving and the paper stays resumable. Facet reopening clears both markers.
+  `validate_exam_config` rejects a misspelled policy (`invalid_warning_policy`) and an
+  out-of-range tolerance (`max_violations_out_of_range`, bounds 1–20) at authoring time (422)
+  instead of silently applying the harsher behaviour.
+- **Disclosure, not a hidden switch.** The resolved policy is stamped onto `ExamStudentConfig`
+  (candidate brief), `ExamDeliveryResponse` and every `ProctoringStatusResponse`, so the brief
+  and the live banner state the consequence the server will actually apply — and a mid-paper
+  change by faculty shows up on the next recorded event.
+- **Frontend.** `ExamsList` gains a "when the candidate reaches that limit" selector beside the
+  tolerance (with copy that changes with the choice); `ExamDelivery` renders the removal or the
+  review disclosure from the server's policy rather than hard-coding one.
+- **Found and fixed while adding the validation (D-15, latent platform-wide):** the 422 handler
+  (`bedrock/api/errors.py`) passed Pydantic error entries straight into `JSONResponse`, and a
+  validator that raises leaves that exception object in `ctx` — so any custom validator turned
+  its intended 422 into a 500 whose body itself failed to serialize. Every field is now encoded
+  individually, degrading to a string rather than taking the response down; the new validators
+  also raise `PydanticCustomError` for a stable error type and a readable message.
+- **Tests:** new `tests/test_warning_policy.py` (3 tests) — the review path (ladder messages,
+  flagged once, audit entry exactly once, still savable/resumable, faculty timeline intact), the
+  `remove` default for an exam that never chose (locked at tolerance, no review flag), and the
+  authoring refusals plus an accepted `review` exam. The candidate-projection canary in
+  `test_authorization_matrix.py` was **deliberately extended** with `warning_policy`: that
+  assertion is the allowlist of keys a candidate may receive, and the new key is disclosed
+  policy, not grading internals.
+- **Live verification** (backend restarted on the current code, SQLite, real seeded logins):
+  `faculty.cse` authoring with `warning_policy="lockout"` → **HTTP 422** with
+  "warning_policy must be 'remove' or 'review'; got 'lockout'" (previously a 500); a real
+  `review` exam authored → candidate brief returns `warning_policy: review`; four distinct
+  events from `student1` → 1/3 reminder, 2/3 reminder with recovery guidance, **3/3 flagged for
+  review** (`locked=False`, `status=in_progress`), 4/3 still working; answers saved after the
+  flag (**200**), `POST /start` resumes `in_progress`, faculty timeline shows all four events,
+  and the attempt row reads `in_progress` with 4 violations. The probe assessments were deleted
+  afterwards, so the demo data is unchanged.
+- **Browser verification** (Vite on `127.0.0.1:5173` + the restarted API, real logins):
+  - as `student1`, the brief for a `review` exam renders *"Reaching this assessment's disclosed
+    limit marks your attempt for your lecturer's review. You are not removed and you may keep
+    working — an automated signal is never a verdict on its own."*; flipping the same exam to
+    `remove` via `PUT /exams/{id}` and reloading renders *"Reaching the limit removes you from
+    the examination — only your lecturer can reopen it."* — so both branches come from the
+    server value rather than a hard-coded string.
+  - as `faculty.cse`, the schedule form's **Integrity configuration** section renders the new
+    "When the candidate reaches that limit" selector (`Remove them until I reopen the attempt` /
+    `Flag the attempt for my review; they keep working`, defaulting to removal), the tolerance
+    field is bounded 1–20, and the helper copy follows the selection.
+  - **An exam authored through that form** (`review` selected) was then read back from the API:
+    stored config `{'proctoring_enabled': True, 'max_violations': 5, 'warning_policy': 'review',
+    ...}` — the frontend genuinely sends the choice, it is not only an API-level capability.
+    The probe assessments were deleted afterwards; the seeded exams are untouched.
+  - **Limitation of this pass:** `preview_screenshot` returned stale or un-composited frames in
+    this session, so the UI evidence above is the accessibility tree and DOM state (which is what
+    the assertions read), not a rendered image. The camera tiles could not be exercised by the
+    agent browser, which cannot grant camera permission.
+- **Verification:** `pytest` → **72 passed / 2 skipped** (the two PostgreSQL-only concurrency
+  criteria, Docker down); `ruff check campusflow tests` clean; `npx tsc -b` clean; `oxlint`
+  0 errors (12 advisory warnings). No migration is required: the setting lives in the existing
+  `exams.config` JSON column.
+- **Still open:** D-12 (obstruction threshold as a per-exam setting), D-2 (camera evidence
+  retention), D-3 (Python course), D-4/D-5 (language matrix, SQL, memory ceiling), D-6 (E2E/CI).
+
+## Wave 4b (2026-10-12) — The review flag becomes actionable (closing the ADR-023 loop)
+
+Flagging a candidate is only half a policy: an attempt the lecturer cannot *find* is not
+reviewed. The staff attempt list now derives the review state server-side and can be narrowed to
+the queue.
+
+- **API:** `GET /exams/{id}/attempts` gained `flagged_for_review` and `review_flagged_at`,
+  derived by `review_flag_state` — a single reader for the screen and the filter, so both agree
+  on what "flagged" means instead of re-parsing the flag prefix. `?flagged_only=true` narrows
+  the list to the queue; the filter runs after the read because the flags are a JSON array and
+  PostgreSQL and SQLite query JSON differently (an exam's cohort is small enough that portability
+  is worth more than an index). The endpoint keeps its `exams:grade` gate **and** its offering
+  scope check through `_assert_can_manage_exam`.
+- **Faculty screen (`ExamDetail.tsx`):** an "N awaiting review" badge, a **Review queue only**
+  toggle (server-side filter, `aria-pressed`), a "Flagged for review" chip carrying the time it was
+  raised, and the Reopen action extended to flagged attempts so a completed review clears the
+  flag (the unlock path already strips it).
+- **Tests (`tests/test_warning_policy.py`):** after the tolerance, the staff row reports
+  `flagged_for_review: True` with a timestamp while still `in_progress`; `flagged_only=true`
+  returns exactly that attempt; a candidate gets **403** from the same endpoint; and reopening
+  the attempt empties the queue. The `remove`-policy test now also asserts a locked attempt is
+  *not* a queue entry (one event, one reminder — not two parallel ones).
+- **Live verification:** a real `review` exam driven with `student2` → staff list
+  `flagged=True at=2026-10-12T11:04:51Z`, `?flagged_only=true` → that candidate only, student
+  → **403**, `unlock` → 200 and the queue returns `[]`.
+- **Browser verification:** on the exam's **Submissions & Grading** tab the heading shows
+  "1 awaiting review", the chip reads *"Flagged for review on 10/12/2026, 4:35:04 PM"*, and
+  toggling **Review queue only** issues a real
+  `GET /api/v1/exams/{id}/attempts?flagged_only=true` (200) that returns the flagged row —
+  observed in the network log, with no console errors.
+- **Verification:** `pytest` → **72 passed / 2 skipped**; `ruff` clean; `npx tsc -b` clean;
+  `oxlint` 0 errors. Probe assessments deleted; the seeded exams are untouched.
+
+## Wave 5 (2026-10-12) — Prohibited-device detection, built and measured (D-16, ADR-024)
+
+The last absent item in the mission's Priority 1 area (`docs/completion-audit.md` D-16) was
+device detection: nothing analysed camera pixels, so `second_device_detected` was a name in the
+vocabulary that no client could ever emit. It now exists, on the terms D-16 asked for — decided
+explicitly, disclosed, and **measured** rather than asserted.
+
+- **Client detector (`frontend/src/features/exams/device-detection.ts`):** COCO-SSD
+  (`ssdlite_mobilenet_v2`) localises a `cell phone`; MobileNet v2 (alpha 0.5) classifies the frame
+  for the ImageNet electronics classes COCO has no category for (`earphone`, `digital watch`).
+  Both run in the candidate's browser over a 480px frame drawn from the existing preview element
+  into a private canvas — no stream, and no frame leaves the machine for analysis. The
+  `DeviceConfirmationTracker` requires three consecutive agreeing scans before anything is
+  reported and each category reports at most once per 120 s. Models load lazily (only when an
+  exam enables detection) and a blocked CDN leaves the scan `unavailable` rather than failing the
+  paper.
+- **Server semantics (`domain/exams/service.py`, `schemas.py`):** `second_device_detected` is in
+  `DEVICE_OBSERVATION_EVENT_TYPES`, so it records the event with its evidence snapshot, raises
+  the faculty review flag (audited `exam.attempt_flagged_device_observation`) and returns the
+  neutral reminder — **no allowance consumed, no state change, no verdict**. `device_detection_enabled`
+  is validated as a boolean (422 otherwise) and defaults to `False`, so existing assessments keep
+  the behaviour their cohort was told about; the candidate brief and the live badge disclose it
+  ("This assessment checks the camera picture for prohibited devices **on your own device**").
+- **Measurement tooling:** `backend/scripts/fetch_device_detection_sample.py` builds a labelled
+  sample from COCO val2017 ground truth and `frontend/scripts/measure-device-detection.js` scores
+  the **shipped** detector over it in the browser (procedure in `docs/development.md`). The
+  sample is every COCO phone image down to 0.5% of the frame, bucketed by size, plus evenly
+  spread person-only negatives — 91 + 100 — because a "largest twenty" sample had already
+  produced a flattering 1.000/0.950.
+- **Measured result (shipped thresholds 0.60 / box ≥2%):** precision **0.973**, recall **0.396**
+  (36/1/55/99). Recall by phone size: **9/10 above 20%**, **11/11 at 10–20%**, **7/8 at 5–10%**,
+  **7/17 at 2–5%**, **1/16 at 1–2%**, **1/29 at 0.5–1%**. Sweep sensitivity: score 0.30 with no
+  area filter → precision 0.979, recall 0.516, so the shipped values cost recall without buying
+  precision on this sample; they stay conservative because 100 negatives cannot resolve small
+  precision differences. The single false positive is a person-only frame with an 8%-of-frame
+  "phone" box at 0.66. **Wearables are unmeasured** (no COCO ground truth; mapped classes never
+  cleared 0.50), so no wearable accuracy is claimed. Cost: 88–430 ms per frame for both models,
+  2.6–6.8 s of lazy loading on the first scan.
+- **Live end-to-end (synthetic phone in the camera feed, real student session):** the app
+  reported `second_device_detected` on its own — `mobile_phone`, `coco-ssd`, confidence 0.983,
+  `confirmations: 3`, bbox `[95, 46, 212, 370]`, analysed frame 374×480, with a 20.5 KB evidence
+  snapshot stored on the attempt. The attempt stayed `in_progress` with its violation count
+  unchanged (the only two events that charged it were `camera_obstructed` from the deliberately
+  near-static stub feed), and `flagged_for_review` became true — so the review queue is raised by
+  a device observation while the candidate keeps working.
+- **Honest limits recorded, not hidden:** a phone under the desk, in a pocket, off-frame or held
+  by someone else is invisible to a single webcam; recall collapses below ~5% of frame area; the
+  numbers come from stills rather than exam footage; and the D-2 retention gap applies to device
+  evidence frames.
+- **Verification:** `pytest` → **73 passed / 2 skipped**; `ruff check` clean; `ruff format` clean;
+  `npm run build` (`tsc -b && vite build`) green; `oxlint` 0 errors. The probe assessment and its
+  attempt were deleted afterwards; the seeded exams are untouched.
+
+---
+
+## Wave 6 (2026-10-12) — Deployment readiness, evidence retention and the last tractable audit items
+
+This wave turned "runs on the developer's machine" into "an institution can install it", and closed
+the two remaining *tractable* defects from the completion audit (D-2, D-12); D-5 and D-6 closed with
+verification rather than code. D-3 (the Python learning course), D-4 (the C/C++/Java/SQL language
+matrix) and D-17 (live invigilator tiles) remain open and are scope-sized, not polish.
+
+### Deployable stack (ADR-025)
+
+| Artifact | What it does |
+| :--- | :--- |
+| `docker-compose.prod.yml` | Production project `campusflow-prod`: PostgreSQL, Redis, Piston + runtime install, API, static SPA, Caddy, backup loop, evidence-retention loop |
+| `backend/Dockerfile` | Two-stage: dependencies installed in the builder, copied into a slim runtime; no compiler toolchain shipped |
+| `frontend/Dockerfile` + `frontend/nginx.conf` | `npm ci && npm run build` → `dist/` on nginx with SPA fallback, hashed-asset caching and `index.html` never cached |
+| `deploy/Caddyfile` | The only public service: `/api/*` → API, rest → SPA, security headers, 10 MB body cap, automatic TLS once a hostname replaces `:80` |
+| `deploy/backup.sh` | Nightly `pg_dump -Fc` to a volume, `.tmp` rename on success, age-based prune, retries regardless of failures |
+| `.env.production.example` | Every setting, with the two required secrets and the retention window documented |
+| `backend/scripts/provision_admin.py` | Creates/repairs the first Campus Lead + super-admin in a fresh database (there is no public sign-up); idempotent, password floor 12, audited |
+| `.github/workflows/ci.yml` | Backend ruff + full pytest against **PostgreSQL**, frontend lint + build, and an assertion that the device-detection sample never reaches `dist/` |
+
+Verified on this host with Docker: `compose config` valid; `up --build` healthy; SPA and API served
+through Caddy on `:80`; unauthenticated `GET /api/v1/users` → 401; a real login through the proxy
+returned a token; `pg_dump -Fc` produced a 115 KB dump with 299 restorable entries; a 512 MB
+allocation under a 128 MB sandbox ceiling was killed (`SIGKILL`) while normal runs still completed.
+
+### D-12 — obstruction threshold is authored per exam
+
+`config.obstruction_threshold_seconds` (default 4, bounded 2–30) is validated at authoring time,
+resolved server-side, sent with the exam brief and the delivery payload, enforced by the client poll
+and named in the authoring form. A candidate is told the grace they actually have instead of the
+client's old hard-coded four seconds.
+
+### D-2 — camera evidence expires (ADR-026)
+
+- `PROCTORING_EVIDENCE_RETENTION_DAYS` (default 90, `0` = keep) in settings, both env templates and
+  the production stack.
+- `purge_proctoring_evidence()` erases the image from expired `camera_snapshot` events, stamps
+  `evidence_purged_at`, keeps the event, audits `proctoring.evidence_purge`, and is idempotent.
+- `backend/scripts/purge_proctoring_evidence.py` runs it once; the `evidence-retention` service runs
+  it daily in production.
+- The window is disclosed to candidates (`ExamStudentConfig.evidence_retention_days` and the
+  delivery response) and the brief explains that pictures are deleted while the log entry remains.
+- `tests/test_proctoring_security.py` pins: expired frame erased, recent frame kept, non-evidence
+  event untouched, second run no-op, `0` no-op.
+
+### D-5 — memory ceiling enforced where the sandbox can enforce it
+
+The production stack sets `CODE_RUN_MEMORY_LIMIT_KB=131072` and Piston runs privileged, so the
+cgroup limit is real: a 512 MB allocation was killed under a 128 MB ceiling, while ordinary runs
+completed. The setting remains opt-in (`0` disables) because on a host where the sandbox cannot
+enforce a cgroup cap, requesting one kills work instead of limiting it.
+
+### D-6 — CI exists
+
+`.github/workflows/ci.yml` runs the backend suite against a PostgreSQL service container and the
+frontend lint/build gate on every push and pull request. The two PostgreSQL-only concurrency tests
+that were skipped locally run there.
+
+### Found while verifying: the anonymous demo surface was mounted in production
+
+The demo endpoints (`POST /api/v1/exams/demo/prepare`, `…/demo/login`) were mounted unconditionally,
+so a production instance would accept an anonymous request that creates demo accounts, a course, an
+exam and a session. The objects are purpose-built demo rows, so no institutional data was reachable
+— but an unauthenticated write surface and a demo sign-in have no place on a live campus site. The
+router is now mounted only when `DEBUG=true` (dev stack and test suite keep it), so those paths
+answer 404 in production; `tests/test_route_policy.py` pins both directions.
+
+### Verification this wave
+
+```
+backend:  ruff check .                    → clean
+backend:  pytest -q                       → 81 passed, 2 skipped (PostgreSQL-only)
+frontend: npm run lint                    → 0 errors (14 pre-existing warnings)
+frontend: npm run build                   → success, dist/ has no dev-measure assets
+compose:  config / up --build             → valid; every service up, healthchecks healthy
+live:     proxy :80, SPA, /api/health     → served through Caddy
+live:     unauthenticated GET /api/v1/users → 401
+live:     alembic current (PostgreSQL)    → d4e5f6a7b8c9 (head)
+live:     provision_admin.py in container  → created registrar@example.edu
+live:     login through the proxy          → 200, roles [super_admin, admin]
+live:     /auth/me and /users with token   → 200
+live:     demo endpoints in production     → 404 (debug-only)
+live:     purge script in the container    → window=90d examined=0 erased=0
+live:     pg_dump -Fc + pg_restore --list  → 299 entries
+live:     memory ceiling                   → SIGKILL at 128 MB, normal run OK
+```
+
+---
+
+### Phase 18 — Portfolio packaging: licence, README, screenshots, and a broken quickstart found by using it
+
+The repository is also the project's portfolio artefact (ADR-027), so this phase treated its
+first screen as a deliverable rather than an afterthought.
+
+- **Licensing was contradictory and is now explicit.** The tree shipped with no `LICENSE` file while
+  the README ended in "Proprietary. All rights reserved." Added the MIT `LICENSE` (© 2026 Sumanth
+  Mamidi), declared `MIT` in `backend/pyproject.toml` and `frontend/package.json`, and replaced the
+  README's licence section with a link to the file.
+- **The README was rewritten for a reader who has five minutes.** Structure: badges → hero screenshot →
+  what the product is and why it exists → grouped feature highlights → a screenshot gallery → run
+  instructions (production in three commands, one-click launcher, compose, direct services) → a Mermaid
+  architecture diagram with the enforced Bedrock/Domain layering → the authorization and privacy model
+  as a table of rules and their enforcement → tech stack with rationale → measured verification →
+  deployment topology → repository layout → documentation index → selected ADRs → known limitations →
+  licence. Every number quoted in it comes from the verification run below.
+- **Screenshots are evidence from the running product.** Eight images in `docs/images/`, captured at
+  1440x900 with `puppeteer-core` driving the installed Chrome against a **freshly seeded** database
+  (`campusflow_shots`) — the first attempt against the working development database was discarded
+  because manual QA leftovers (`DDS`, `G!`, `Wave2 Fresh Exam`) photographed as unfinished work. The
+  capture recipe is now in `docs/development.md` §5 so the images can be regenerated rather than
+  hand-edited.
+- **Found while doing exactly what the README tells a reviewer to do: `docker compose up` was broken.**
+  The development `frontend` service built `frontend/Dockerfile` — the *production* image, which ends
+  on `nginx:alpine` and has no Node runtime — and then ran `npm run dev` in it. The container died on
+  startup, so the documented cross-platform quickstart did not work at all. Fixed with
+  `frontend/Dockerfile.dev` (node:20-alpine, `npm ci`, Vite on `0.0.0.0:5173`) plus `VITE_PROXY_TARGET`
+  (Vite's proxy target is `http://backend:8000` in compose and `http://localhost:8000` on the host,
+  because the dev server's network namespace is not the host's). Production still builds `Dockerfile`.
+  This is the same class of defect as the earlier stale-process findings: the suite was green, the
+  documented path was not.
+- **Supporting docs synchronised:** ADR-027 (licence, "deployable stack instead of a public demo",
+  screenshots as evidence, claims bounded by measurement), the frontend-image note in
+  `docs/architecture.md`, the recipe in `docs/development.md` §5, and three durable notes in
+  `docs/memory.md` (the image mismatch, the capture traps, and the obligation to update README numbers
+  in the same commit that moves them).
+
+#### Verification this phase
+
+```
+backend:  ruff check .                                    → clean
+backend:  pytest -q (SQLite)                              →  81 passed, 2 skipped in 63s
+backend:  pytest -q (TEST_DATABASE_URL, PostgreSQL)       →  83 passed in 122s
+frontend: npm run lint                                    →   0 errors, 14 warnings (130 ms, 85 files)
+frontend: npm run build                                   →  success (tsc -b + vite, 18.3s)
+compose:  up -d --build backend frontend (dev)            →  both services up, image rebuilt
+live:     GET /api/health                                 →  200
+live:     POST /auth/login through the Vite proxy         →  200 (the proxy fix, end to end)
+live:     candidate demo journey, browser                 →  assessment brief rendered; harness captured
+images:   docs/images/*.png                               →  eight 1440x900 captures, all resolvable
+docs:     every README link target and image path         →  resolves

@@ -76,8 +76,10 @@ alembic/versions/__pycache__/
 startup/.backend.pid
 startup/.frontend.pid
 
-# Local scratch logs and SQLite fallback database
+# Local scratch logs and SQLite fallback databases (bootstrap --sqlite writes
+# one into the repository root as well as into backend/)
 scratch/
+*.db
 backend/*.db
 
 # Python caches
