@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # requesting one makes the runner kill the process instead of executing it.
     code_run_memory_limit_kb: int = 0
 
+    # Camera evidence frames are personal data (a downscaled still of the
+    # candidate). The institution sets how long they are kept; older frames are
+    # erased from the integrity trail by the retention job, while the event row
+    # itself (what happened, when, how severe) is kept for review. 0 retains
+    # frames indefinitely and is reported as such rather than purging everything.
+    proctoring_evidence_retention_days: int = 90
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
@@ -65,7 +72,7 @@ class Settings(BaseSettings):
         if not self.debug and self.jwt_secret_key == DEFAULT_JWT_SECRET:
             raise ValueError(
                 "JWT_SECRET_KEY must be set to a strong, unique value when DEBUG is false. "
-                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+                'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
             )
         return self
 

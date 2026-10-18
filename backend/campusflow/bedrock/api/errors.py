@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -54,6 +55,30 @@ def _format_error_response(
     }
 
 
+def _json_safe(value: Any) -> Any:
+    """Render one validation-error field as something JSON can carry.
+
+    Pydantic error entries may hold arbitrary Python objects — ``ctx`` carries
+    the exception a custom validator raised, and ``input`` can be any parsed
+    value. Passing those straight to ``JSONResponse`` raised a TypeError inside
+    the error handler itself, so a validator that rejected a request turned the
+    intended 422 into an opaque 500. Every field is now encoded, and anything
+    that still cannot be encoded degrades to its string form instead of taking
+    the response down with it.
+    """
+    try:
+        return jsonable_encoder(value)
+    except Exception:
+        return str(value)
+
+
+def _validation_error_details(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """Validation errors as JSON-safe dictionaries, keys preserved."""
+    return [
+        {key: _json_safe(value) for key, value in error.items()} for error in exc.errors()
+    ]
+
+
 def register_exception_handlers(app: FastAPI):
     @app.exception_handler(AppException)
     async def app_exception_handler(request: Request, exc: AppException):
@@ -67,7 +92,10 @@ def register_exception_handlers(app: FastAPI):
         return JSONResponse(
             status_code=422,
             content=_format_error_response(
-                request, "UNPROCESSABLE_ENTITY", "Validation Error", exc.errors()
+                request,
+                "UNPROCESSABLE_ENTITY",
+                "Validation Error",
+                _validation_error_details(exc),
             ),
         )
 

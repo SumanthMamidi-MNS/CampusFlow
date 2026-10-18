@@ -10,6 +10,8 @@ class UserBase(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     phone: str | None = Field(None, max_length=32)
     status: str = Field("active", pattern="^(pending|active|inactive)$")
+    registration_number: str | None = Field(None, max_length=64)
+    admission_year: int | None = Field(None, ge=1900, le=2200)
 
 
 class UserCreate(UserBase):
@@ -24,6 +26,8 @@ class UserUpdate(BaseModel):
     status: str | None = Field(None, pattern="^(pending|active|inactive)$")
     password: str | None = Field(None, min_length=8)
     roles: list[str] | None = None
+    registration_number: str | None = Field(None, max_length=64)
+    admission_year: int | None = Field(None, ge=1900, le=2200)
 
 
 class UserResponse(UserBase):

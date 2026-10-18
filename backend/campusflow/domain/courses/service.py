@@ -1,6 +1,7 @@
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -181,7 +182,13 @@ async def assign_faculty(
         role=role,
     )
     db.add(fa)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # A concurrent request created the same assignment first. The unique
+        # constraint is the authority; assigning twice is an idempotent no-op,
+        # not an error the caller has to handle.
+        await db.rollback()
 
 
 async def unassign_faculty(db: AsyncSession, offering_id: uuid.UUID, faculty_id: uuid.UUID) -> None:

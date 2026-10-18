@@ -18,13 +18,16 @@ from campusflow.domain.assignments.router import router as assignments_router
 from campusflow.domain.courses.router import router as courses_router
 from campusflow.domain.departments.router import router as departments_router
 from campusflow.domain.enrollments.router import router as enrollments_router
+from campusflow.domain.exams.demo_router import router as demo_router
 from campusflow.domain.exams.router import router as exams_router
+from campusflow.domain.institution.leadership_router import router as leadership_router
 from campusflow.domain.institution.router import router as institution_router
 from campusflow.domain.institution.service import get_or_create_default_institution
 from campusflow.domain.materials.router import router as materials_router
 from campusflow.domain.notifications.router import router as notifications_router
 from campusflow.domain.programming.router import router as programming_router
 from campusflow.domain.question_banks.router import router as question_banks_router
+from campusflow.domain.roster_import.router import router as roster_import_router
 from campusflow.domain.users.auth_router import router as auth_router
 from campusflow.domain.users.router import router as users_router
 
@@ -89,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(users_router, prefix="/api/v1")
     app.include_router(audit_router, prefix="/api/v1")
     app.include_router(institution_router, prefix="/api/v1")
+    app.include_router(leadership_router, prefix="/api/v1")
     app.include_router(departments_router, prefix="/api/v1")
     app.include_router(courses_router, prefix="/api/v1")
     app.include_router(enrollments_router, prefix="/api/v1")
@@ -98,7 +102,16 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router, prefix="/api/v1")
     app.include_router(question_banks_router, prefix="/api/v1")
     app.include_router(exams_router, prefix="/api/v1")
+    # The demo surface creates demo accounts, courses and an exam, and mints a
+    # session — anonymously, by design. That is a demonstration affordance, not
+    # a production one: a live institution must not let an unauthenticated caller
+    # write demo rows into its database or start a session from a public URL.
+    # Debug builds (the dev stack and the test suite) keep it; a deployment with
+    # DEBUG=false does not mount it at all, so the paths answer 404.
+    if settings.debug:
+        app.include_router(demo_router, prefix="/api/v1")
     app.include_router(programming_router, prefix="/api/v1")
+    app.include_router(roster_import_router, prefix="/api/v1")
     app.include_router(analytics_router, prefix="/api/v1")
 
     return app

@@ -12,8 +12,10 @@ from campusflow.domain.exams.schemas import (
     ExamAttemptSummary,
     ExamCreate,
     ExamQuestionBatchAdd,
+    ExamQuestionGenerate,
     ExamUpdate,
     GradeSingleResponseRequest,
+    MultiSectionExamCreate,
     ProctoringEventCreate,
     StartAttemptRequest,
     UnlockAttemptRequest,
@@ -21,8 +23,10 @@ from campusflow.domain.exams.schemas import (
 from campusflow.domain.exams.service import (
     add_questions_to_exam,
     create_exam,
+    create_exam_for_offerings,
     delete_exam,
     export_exam_results_csv,
+    generate_exam_questions,
     get_exam,
     get_exam_brief,
     get_exam_for_staff,
@@ -37,6 +41,7 @@ from campusflow.domain.exams.service import (
     publish_exam_results,
     record_proctoring_event,
     remove_question_from_exam,
+    review_flag_state,
     save_answers_batch,
     start_or_resume_attempt,
     submit_attempt,
@@ -59,6 +64,22 @@ async def create_exam_endpoint(
     exam = await create_exam(db, payload=payload, current_user=current_user)
     resp = await get_exam(db, exam.id)
     return success_response(resp.model_dump(mode="json"))
+
+
+@router.post("/exams/multi-section")
+async def create_multi_section_exam_endpoint(
+    payload: MultiSectionExamCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:create")),
+):
+    """Create one assessment for one or several sections the caller manages.
+
+    Each section id is validated server-side against the caller's teaching scope;
+    an unrelated section is refused and nothing is created.
+    """
+    exams = await create_exam_for_offerings(db, payload=payload, current_user=current_user)
+    responses = [await get_exam(db, exam.id) for exam in exams]
+    return success_response([r.model_dump(mode="json") for r in responses])
 
 
 @router.get("/exams")
@@ -97,7 +118,12 @@ async def get_exam_brief_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Candidate-safe examination brief (metadata only, never question content)."""
+    """Candidate-safe examination brief (metadata only, never question content).
+
+    Includes the candidate's own latest attempt status when an attempt exists, so
+    the assessment-taking surface can decide whether to begin a new attempt or
+    resume an existing one.
+    """
     brief = await get_exam_brief(db, exam_id=exam_id, current_user=current_user)
     return success_response(brief.model_dump(mode="json"))
 
@@ -146,6 +172,25 @@ async def add_questions_to_exam_endpoint(
 ):
     await add_questions_to_exam(db, exam_id=exam_id, payload=payload, current_user=current_user)
     exam = await get_exam(db, exam_id=exam_id)
+    return success_response(exam.model_dump(mode="json"))
+
+
+@router.post("/exams/{exam_id}/generate-questions")
+async def generate_exam_questions_endpoint(
+    exam_id: uuid.UUID,
+    payload: ExamQuestionGenerate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:create")),
+):
+    """Build a random paper from the selected syllabus scope for this exam.
+
+    Scope (offering ownership) is enforced inside the service alongside the
+    ``exams:create`` permission, matching the manual add-questions path.
+    """
+    await generate_exam_questions(
+        db, exam_id=exam_id, payload=payload, current_user=current_user
+    )
+    exam = await get_exam(db, exam_id)
     return success_response(exam.model_dump(mode="json"))
 
 
@@ -229,14 +274,20 @@ async def submit_exam_endpoint(
 @router.get("/exams/{exam_id}/attempts")
 async def list_exam_attempts_endpoint(
     exam_id: uuid.UUID,
+    flagged_only: bool = Query(
+        False, description="Only attempts awaiting integrity review"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("exams:grade")),
 ):
-    attempts = await list_attempts_for_exam(db, exam_id=exam_id)
+    attempts = await list_attempts_for_exam(
+        db, exam_id=exam_id, current_user=current_user, only_flagged=flagged_only
+    )
     summaries = []
     for att in attempts:
         name = f"{att.student.first_name} {att.student.last_name}" if att.student else None
         email = att.student.email if att.student else None
+        is_flagged, flagged_at = review_flag_state(att)
         summaries.append(
             ExamAttemptSummary(
                 id=att.id,
@@ -251,6 +302,8 @@ async def list_exam_attempts_endpoint(
                 total_score=att.total_score,
                 percentage=att.percentage,
                 proctor_violations_count=att.proctor_violations_count,
+                flagged_for_review=is_flagged,
+                review_flagged_at=flagged_at,
             ).model_dump(mode="json")
         )
     return success_response(summaries)
@@ -308,7 +361,7 @@ async def list_attempt_responses_endpoint(
     current_user: User = Depends(require_permission("exams:grade")),
 ):
     """Every response for an attempt, including subjective items awaiting manual grading."""
-    responses = await list_attempt_responses(db, attempt_id=attempt_id)
+    responses = await list_attempt_responses(db, attempt_id=attempt_id, current_user=current_user)
     return success_response([r.model_dump(mode="json") for r in responses])
 
 
@@ -334,7 +387,9 @@ async def get_proctoring_timeline_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("exams:proctor_view")),
 ):
-    events = await get_proctoring_timeline(db=db, attempt_id=attempt_id)
+    events = await get_proctoring_timeline(
+        db=db, attempt_id=attempt_id, current_user=current_user
+    )
     return success_response([e.model_dump(mode="json") for e in events])
 
 
@@ -344,7 +399,9 @@ async def export_exam_results_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("exams:grade")),
 ):
-    csv_content, filename = await export_exam_results_csv(db, exam_id=exam_id)
+    csv_content, filename = await export_exam_results_csv(
+        db, exam_id=exam_id, current_user=current_user
+    )
     return Response(
         content=csv_content,
         media_type="text/csv",

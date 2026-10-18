@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from campusflow.bedrock.api.errors import AuthenticationError
 from campusflow.bedrock.api.responses import success_response
 from campusflow.bedrock.audit.service import record_audit_event
+from campusflow.bedrock.auth.cookies import clear_refresh_cookie, set_refresh_cookie
 from campusflow.bedrock.auth.dependencies import get_current_active_user
 from campusflow.bedrock.auth.jwt import create_access_token, decode_access_token
 from campusflow.bedrock.auth.pwd import get_password_hash
@@ -43,14 +44,7 @@ async def login(
     refresh_token = await create_refresh_token_record(db, user_id=user.id)
 
     # Set httpOnly cookie for refresh token
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=not settings.debug,
-        samesite="strict",
-        max_age=settings.refresh_token_expire_days * 86400,
-    )
+    set_refresh_cookie(response, refresh_token)
 
     roles = await get_user_roles(db, user.id)
     user_res = UserResponse(
@@ -60,6 +54,8 @@ async def login(
         last_name=user.last_name,
         phone=user.phone,
         status=user.status,
+        registration_number=user.registration_number,
+        admission_year=user.admission_year,
         roles=roles,
         created_at=user.created_at,
         updated_at=user.updated_at,
@@ -98,14 +94,7 @@ async def refresh_tokens(
     access_token, new_refresh_token, user = await rotate_refresh_token(db, refresh_token)
     settings = get_settings()
 
-    response.set_cookie(
-        key="refresh_token",
-        value=new_refresh_token,
-        httponly=True,
-        secure=not settings.debug,
-        samesite="strict",
-        max_age=settings.refresh_token_expire_days * 86400,
-    )
+    set_refresh_cookie(response, new_refresh_token)
 
     return success_response(
         {
@@ -125,7 +114,7 @@ async def logout(
     if refresh_token:
         await revoke_refresh_token(db, refresh_token)
 
-    response.delete_cookie(key="refresh_token")
+    clear_refresh_cookie(response)
     return success_response({"message": "Successfully logged out."})
 
 
@@ -144,6 +133,8 @@ async def get_me(
         last_name=current_user.last_name,
         phone=current_user.phone,
         status=current_user.status,
+        registration_number=current_user.registration_number,
+        admission_year=current_user.admission_year,
         roles=roles,
         created_at=current_user.created_at,
         updated_at=current_user.updated_at,

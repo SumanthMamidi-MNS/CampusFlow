@@ -9,7 +9,8 @@ from campusflow.domain.academic_terms.models import AcademicTerm
 from campusflow.domain.courses.models import Course, CourseOffering
 from campusflow.domain.departments.models import Department
 from campusflow.domain.enrollments.models import Enrollment
-from campusflow.domain.exams.models import Exam, ExamQuestion
+from campusflow.domain.exams.models import Exam, ExamAttempt, ExamQuestion, ProctoringEvent
+from campusflow.domain.exams.service import purge_proctoring_evidence
 from campusflow.domain.question_banks.models import Question, QuestionBank, QuestionOption
 from campusflow.domain.users.models import User
 
@@ -51,18 +52,27 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     db_session.add_all([dept, term])
     await db_session.flush()
 
-    course = Course(department_id=dept.id, code="CS601-P6", title="Network & Web Security", credits=3)
+    course = Course(
+        department_id=dept.id, code="CS601-P6", title="Network & Web Security", credits=3
+    )
     db_session.add(course)
     await db_session.flush()
 
-    offering = CourseOffering(course_id=course.id, academic_term_id=term.id, section="Sec-A", status="active")
+    offering = CourseOffering(
+        course_id=course.id, academic_term_id=term.id, section="Sec-A", status="active"
+    )
     db_session.add(offering)
     await db_session.flush()
 
-    db_session.add(Enrollment(course_offering_id=offering.id, student_id=student.id, status="enrolled"))
+    db_session.add(
+        Enrollment(course_offering_id=offering.id, student_id=student.id, status="enrolled")
+    )
 
     bank = QuestionBank(
-        department_id=dept.id, course_id=course.id, title="Security Exam Bank", created_by_id=faculty.id
+        department_id=dept.id,
+        course_id=course.id,
+        title="Security Exam Bank",
+        created_by_id=faculty.id,
     )
     db_session.add(bank)
     await db_session.flush()
@@ -77,10 +87,16 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     )
     db_session.add(q1)
     await db_session.flush()
-    db_session.add_all([
-        QuestionOption(question_id=q1.id, label="A", body="TLS / SSL", is_correct=True, sort_order=0),
-        QuestionOption(question_id=q1.id, label="B", body="FTP", is_correct=False, sort_order=1),
-    ])
+    db_session.add_all(
+        [
+            QuestionOption(
+                question_id=q1.id, label="A", body="TLS / SSL", is_correct=True, sort_order=0
+            ),
+            QuestionOption(
+                question_id=q1.id, label="B", body="FTP", is_correct=False, sort_order=1
+            ),
+        ]
+    )
     await db_session.commit()
 
     # 3. Create Exam with max_violations = 3 threshold
@@ -136,7 +152,7 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     assert status2["violations_count"] == 2
     assert status2["auto_submitted"] is False
 
-    # 7. Event 3: fullscreen exit reaches the configured tolerance -> auto-submit
+    # 7. Event 3: fullscreen exit reaches the configured tolerance -> lockout
     ev3 = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=student_headers,
@@ -145,12 +161,20 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     assert ev3.status_code == 200
     status3 = ev3.json()["data"]
     assert status3["violations_count"] == 3
-    assert status3["auto_submitted"] is True
-    assert status3["is_locked"] is False
-    # The attempt is concluded. Because this exam contains only objectively
-    # gradable questions, auto-grading completes it immediately.
-    assert status3["status"] in {"auto_submitted", "graded"}
-    assert "tolerance" in status3["warning"].lower()
+    assert status3["auto_submitted"] is False
+    assert status3["is_locked"] is True
+    # The candidate is thrown out with their answers preserved; only faculty
+    # authorisation brings them back (ADR-015).
+    assert status3["status"] == "locked_violation"
+    assert "removed from this examination" in status3["warning"].lower()
+
+    # A locked candidate cannot restart or resume the paper on their own.
+    locked_start = await client.post(
+        f"/api/v1/exams/{exam.id}/start",
+        headers=student_headers,
+        json={},
+    )
+    assert locked_start.status_code == 423, locked_start.text
 
     # 8. Faculty integrity timeline
     timeline_resp = await client.get(
@@ -197,3 +221,174 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     status4 = ev4.json()["data"]
     assert status4["violations_count"] == 1
     assert status4["auto_submitted"] is False
+
+    # 11. A captured camera frame is evidence, never a violation: the counter
+    # must not move and the candidate's tolerance must not be consumed.
+    snap = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=student_headers,
+        json={
+            "event_type": "camera_snapshot",
+            "severity": "low",
+            "details": {"snapshot": "data:image/jpeg;base64,AAAA", "interval_seconds": 60},
+        },
+    )
+    assert snap.status_code == 200, snap.text
+    snap_status = snap.json()["data"]
+    assert snap_status["violations_count"] == 1
+    assert snap_status["warning"] is None
+    assert snap_status["is_locked"] is False
+    assert snap_status["status"] == "in_progress"
+
+    # 12. Turning the required camera off mid-attempt is a genuine violation.
+    cam_off = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=student_headers,
+        json={"event_type": "camera_off", "severity": "high", "details": {"reason": "track_ended"}},
+    )
+    assert cam_off.status_code == 200, cam_off.text
+    cam_status = cam_off.json()["data"]
+    assert cam_status["violations_count"] == 2
+    assert cam_status["auto_submitted"] is False
+    assert cam_status["is_locked"] is False
+
+    # 13. Oversized frames are refused instead of being stored.
+    huge = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=student_headers,
+        json={
+            "event_type": "camera_snapshot",
+            "severity": "low",
+            "details": {"snapshot": "x" * 400_001},
+        },
+    )
+    assert huge.status_code == 422
+
+    # 14. The instructor's trail now carries the camera evidence too.
+    final_timeline = await client.get(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=faculty_headers,
+    )
+    assert final_timeline.status_code == 200
+    final_types = [e["event_type"] for e in final_timeline.json()["data"]]
+    assert "camera_snapshot" in final_types
+    assert "camera_off" in final_types
+
+
+@pytest.mark.asyncio
+async def test_camera_evidence_is_erased_after_its_retention_window(db_session):
+    """D-2: an expired evidence frame is erased; the event itself survives.
+
+    Erasure is deliberately narrow: only the stored image goes. A reviewer must
+    still see that a frame was captured and when it was erased, and a recent
+    frame, an older non-evidence event, and a retention of 0 must all be left
+    alone.
+    """
+    now = datetime.now(UTC)
+
+    faculty = User(
+        email="faculty.retention@campusflow.edu",
+        hashed_password=get_password_hash("FacultyPass123!"),
+        first_name="Grace",
+        last_name="Hopper",
+        status="active",
+    )
+    student = User(
+        email="student.retention@campusflow.edu",
+        hashed_password=get_password_hash("StudentPass123!"),
+        first_name="Alan",
+        last_name="Turing",
+        status="active",
+    )
+    db_session.add_all([faculty, student])
+    await db_session.flush()
+
+    dept = Department(name="Retention Studies", code="RTS-P2")
+    term = AcademicTerm(
+        name="Fall 2026 Retention",
+        start_date=(now - timedelta(days=200)).date(),
+        end_date=(now - timedelta(days=100)).date(),
+    )
+    db_session.add_all([dept, term])
+    await db_session.flush()
+
+    course = Course(department_id=dept.id, code="RT101", title="Evidence Retention", credits=3)
+    db_session.add(course)
+    await db_session.flush()
+
+    offering = CourseOffering(
+        course_id=course.id, academic_term_id=term.id, section="Sec-A", status="active"
+    )
+    db_session.add(offering)
+    await db_session.flush()
+
+    exam = Exam(
+        course_offering_id=offering.id,
+        title="Retention Assessment",
+        exam_type="midterm",
+        total_marks=5.0,
+        duration_minutes=30,
+        start_window=now - timedelta(days=200),
+        end_window=now - timedelta(days=199),
+        config={"proctoring_enabled": True},
+        status="completed",
+        created_by_id=faculty.id,
+    )
+    db_session.add(exam)
+    await db_session.flush()
+
+    attempt = ExamAttempt(
+        exam_id=exam.id,
+        student_id=student.id,
+        started_at=now - timedelta(days=200),
+        submitted_at=now - timedelta(days=200) + timedelta(minutes=30),
+        status="submitted",
+    )
+    db_session.add(attempt)
+    await db_session.flush()
+
+    expired = ProctoringEvent(
+        attempt_id=attempt.id,
+        event_type="camera_snapshot",
+        timestamp=now - timedelta(days=120),
+        severity="low",
+        details={"snapshot": "data:image/jpeg;base64,AAAA", "width": 320},
+    )
+    recent = ProctoringEvent(
+        attempt_id=attempt.id,
+        event_type="camera_snapshot",
+        timestamp=now - timedelta(days=5),
+        severity="low",
+        details={"snapshot": "data:image/jpeg;base64,BBBB", "width": 320},
+    )
+    other = ProctoringEvent(
+        attempt_id=attempt.id,
+        event_type="tab_switch",
+        timestamp=now - timedelta(days=120),
+        severity="medium",
+        details={"action": "switch"},
+    )
+    db_session.add_all([expired, recent, other])
+    await db_session.commit()
+
+    first = await purge_proctoring_evidence(db_session, 90)
+    assert first["frames_erased"] == 1
+
+    await db_session.refresh(expired)
+    await db_session.refresh(recent)
+    await db_session.refresh(other)
+    assert "snapshot" not in expired.details
+    assert "evidence_purged_at" in expired.details
+    assert expired.details["width"] == 320
+    assert recent.details["snapshot"].startswith("data:image/jpeg")
+    assert other.details == {"action": "switch"}
+
+    # Running again erases nothing: the frame is already gone.
+    second = await purge_proctoring_evidence(db_session, 90)
+    assert second["frames_erased"] == 0
+
+    # 0 means "keep evidence", never "delete everything before today".
+    disabled = await purge_proctoring_evidence(db_session, 0)
+    assert disabled["frames_erased"] == 0
+    await db_session.refresh(recent)
+    assert recent.details["snapshot"].startswith("data:image/jpeg")

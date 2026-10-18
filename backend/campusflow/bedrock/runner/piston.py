@@ -20,6 +20,7 @@ from campusflow.bedrock.runner.interface import (
     STATUS_RUNTIME_ERROR,
     STATUS_SUCCESS,
     STATUS_TIMEOUT,
+    ExecutionLimits,
     ExecutionRequest,
     ExecutionResult,
 )
@@ -59,6 +60,33 @@ def _server_limit(message: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _wall_time_ms(run_stage: dict) -> float:
+    """Wall time of the run in milliseconds, or infinity when not reported."""
+    value = run_stage.get("wall_time")
+    return float(value) if isinstance(value, (int, float)) else float("inf")
+
+
+def _killed_by_memory(
+    signal: str | None,
+    run_stage: dict,
+    limits: ExecutionLimits,
+    run_timeout_ms: int,
+) -> bool:
+    """Whether a signal death was the memory ceiling rather than the clock.
+
+    ``isolate`` reports both an OOM kill and a timeout kill as ``SIGKILL``, so the
+    signal alone cannot tell a candidate which ceiling they hit. A memory kill
+    happens long before the time budget is spent (measured: 512 MB under a 128 MB
+    cap died after 68 ms of a 10 000 ms budget), while a real timeout consumes the
+    budget. ``SIGSEGV`` is isolate's allocator death and is unambiguous.
+    """
+    if signal == "SIGSEGV":
+        return True
+    if signal != "SIGKILL" or limits.memory_kb <= 0:
+        return False
+    return _wall_time_ms(run_stage) < run_timeout_ms * 0.9
+
+
 class PistonRunner:
     """HTTP client for a self-hosted Piston execution engine."""
 
@@ -80,7 +108,9 @@ class PistonRunner:
         except httpx.HTTPError:
             return False
 
-    def _payload(self, request: ExecutionRequest, *, run_timeout: int, compile_timeout: int) -> dict:
+    def _payload(
+        self, request: ExecutionRequest, *, run_timeout: int, compile_timeout: int
+    ) -> dict:
         filename = request.filename or _default_filename(request.language)
         payload = {
             "language": request.language,
@@ -171,15 +201,16 @@ class PistonRunner:
         # Isolate reports a killed process via a signal. Distinguish a timeout
         # (no output, killed) from a genuine runtime error where possible.
         if signal in {"SIGKILL", "SIGXCPU", "SIGSEGV"} and not stderr:
+            memory_killed = _killed_by_memory(signal, run_stage, limits, run_timeout)
             return ExecutionResult(
-                status=STATUS_MEMORY_EXCEEDED if signal == "SIGSEGV" else STATUS_TIMEOUT,
+                status=STATUS_MEMORY_EXCEEDED if memory_killed else STATUS_TIMEOUT,
                 stdout=stdout,
                 stderr=stderr,
                 exit_code=code,
-                timed_out=True,
-                message="Execution exceeded the configured time limit."
-                if signal != "SIGSEGV"
-                else "Execution exceeded the configured memory limit.",
+                timed_out=not memory_killed,
+                message="Execution exceeded the configured memory limit."
+                if memory_killed
+                else "Execution exceeded the configured time limit.",
             )
 
         return ExecutionResult(

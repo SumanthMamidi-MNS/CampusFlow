@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +38,11 @@ class Exam(BaseModel):
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # One assessment may be sat by several authorised sections. Each section
+    # keeps its own Exam row (so every existing offering-scope check keeps
+    # working unchanged) and the rows that belong to one assessment share a
+    # ``series_id``. A single-section assessment leaves this NULL.
+    series_id: Mapped[uuid.UUID | None] = mapped_column(index=True, nullable=True)
 
     course_offering: Mapped["CourseOffering"] = relationship("CourseOffering", lazy="joined")  # noqa: F821
     created_by: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="joined")  # noqa: F821
@@ -111,6 +117,20 @@ class ExamAttempt(BaseModel):
     browser_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
     proctor_flags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     proctor_violations_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # A candidate has at most one row per attempt number. Duplicate rows were
+    # possible before this constraint (Wave 2 reported `attempt_number = 1`
+    # twice for one candidate); the migration reconciles existing duplicates by
+    # renumbering them in `started_at` order, and the database now refuses a new
+    # duplicate even if two start requests race.
+    __table_args__ = (
+        UniqueConstraint(
+            "exam_id",
+            "student_id",
+            "attempt_number",
+            name="uq_exam_attempt_student_number",
+        ),
+    )
 
     exam: Mapped["Exam"] = relationship("Exam", back_populates="attempts")
     student: Mapped["User"] = relationship("User", foreign_keys=[student_id], lazy="joined")  # noqa: F821

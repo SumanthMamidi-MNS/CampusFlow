@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from campusflow.bedrock.db.base import BaseModel
@@ -56,6 +56,18 @@ class FacultyAssignment(BaseModel):
         ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
     role: Mapped[str] = mapped_column(String(32), default="primary", nullable=False)
+
+    # A lecturer is assigned to a section at most once. The application already
+    # checked before inserting, but only the database can hold this under
+    # concurrency; a double-click or a retried request must not create a second
+    # assignment row (which would double-count teaching scope).
+    __table_args__ = (
+        UniqueConstraint(
+            "course_offering_id",
+            "faculty_id",
+            name="uq_faculty_assignment_offering_faculty",
+        ),
+    )
 
     offering: Mapped["CourseOffering"] = relationship(
         "CourseOffering", back_populates="faculty_assignments"

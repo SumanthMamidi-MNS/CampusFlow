@@ -1,10 +1,36 @@
 import uuid
+from datetime import date, datetime, time
+from enum import Enum
 from typing import Any
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from campusflow.bedrock.audit.models import AuditLog
+
+
+def json_safe(value: Any) -> Any:
+    """Coerce a value into something a JSON column can actually store.
+
+    Callers hand the audit trail whatever changed — often ORM values such as
+    ``datetime`` windows, UUID identifiers, or enums. JSON has no encoding for
+    those, and a serialisation failure aborts the *whole* request, so the trail
+    (the thing that must never break) is normalised here, once, rather than
+    being left to every call site to remember.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, Enum):
+        return json_safe(value.value)
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [json_safe(item) for item in value]
+    return str(value)
 
 
 async def record_audit_event(
@@ -19,7 +45,12 @@ async def record_audit_event(
     changes: dict[str, Any] | None = None,
     extra_data: dict[str, Any] | None = None,
 ) -> AuditLog:
-    """Record an append-only audit trail event."""
+    """Record an append-only audit trail event.
+
+    ``changes`` and ``extra_data`` are normalised to JSON-safe primitives, so a
+    caller that forgets to convert a ``datetime`` or a ``UUID`` degrades the
+    detail of one audit row instead of failing the request it was describing.
+    """
     log_entry = AuditLog(
         action=action,
         resource_type=resource_type,
@@ -28,8 +59,8 @@ async def record_audit_event(
         user_email=user_email,
         ip_address=ip_address,
         request_id=request_id,
-        changes=changes,
-        extra_data=extra_data,
+        changes=json_safe(changes) if changes is not None else None,
+        extra_data=json_safe(extra_data) if extra_data is not None else None,
     )
     db.add(log_entry)
     await db.flush()

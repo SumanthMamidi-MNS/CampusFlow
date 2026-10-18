@@ -25,6 +25,11 @@ PUBLIC_PATHS = frozenset(
         "/api/v1/auth/refresh",
         "/api/v1/auth/password/reset",
         "/api/v1/auth/password/reset-request",
+        # Demo surface: provisions/uses only purpose-built demo objects and
+        # issues a session for exactly one dedicated demo account, so it can
+        # never reach institutional data.
+        "/api/v1/exams/demo/prepare",
+        "/api/v1/exams/demo/login",
     }
 )
 
@@ -114,9 +119,11 @@ def test_public_allowlist_contains_only_deliberately_public_routes():
     # complement check above proves this, this asserts the allowlist itself is
     # still exactly the health/authentication surface.
     assert all(
-        path.startswith("/api/health") or path.startswith("/api/v1/auth/")
+        path.startswith("/api/health")
+        or path.startswith("/api/v1/auth/")
+        or path.startswith("/api/v1/exams/demo/")
         for path in PUBLIC_PATHS
-    ), "the public allowlist may only contain health and authentication routes"
+    ), "the public allowlist may only contain health, authentication and demo routes"
 
 
 def test_answer_material_routes_require_a_permission_gate():
@@ -132,3 +139,39 @@ def test_answer_material_routes_require_a_permission_gate():
         "answer-material routes reachable with mere authentication "
         f"(require a permission such as questions:manage): {offenders}"
     )
+
+
+def test_demo_surface_is_mounted_only_in_debug_builds(monkeypatch):
+    """The anonymous demo endpoints must not exist on a production app.
+
+    They create demo accounts, a course and an exam, and mint a session without
+    credentials. That is fine for a demonstration and wrong for a live
+    institution, whose database would accept anonymous writes and whose login
+    page would advertise a demo nobody asked for. Gating the router at mount time
+    is deliberate: an absent route returns 404 rather than relying on a handler
+    to remember to refuse.
+    """
+    import campusflow.main as main
+
+    def _app_for(debug: bool):
+        # Only the attributes `create_app` reads before/around router mounting.
+        settings = type(
+            "Settings",
+            (),
+            {
+                "debug": debug,
+                "auth_rate_limit_requests": 20,
+                "auth_rate_limit_window_seconds": 60,
+                "cors_origins": ["http://localhost"],
+            },
+        )()
+        monkeypatch.setattr(main, "get_settings", lambda: settings)
+        return main.create_app()
+
+    production_paths = {path for path, _ in _iter_routes(_app_for(debug=False))}
+    assert "/api/v1/exams/demo/login" not in production_paths
+    assert "/api/v1/exams/demo/prepare" not in production_paths
+
+    debug_paths = {path for path, _ in _iter_routes(_app_for(debug=True))}
+    assert "/api/v1/exams/demo/login" in debug_paths
+    assert "/api/v1/exams/demo/prepare" in debug_paths

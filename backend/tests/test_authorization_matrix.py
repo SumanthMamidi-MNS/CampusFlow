@@ -72,16 +72,66 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     now = datetime.now(UTC)
 
     # ── 1. People ───────────────────────────────────────────────────────────
-    admin = User(email="admin.w0@campusflow.edu", hashed_password=get_password_hash("AdminPass123!"), first_name="A", last_name="Dmin", status="active")
-    controller = User(email="controller.w0@campusflow.edu", hashed_password=get_password_hash("CtrlPass123!"), first_name="E", last_name="Vance", status="active")
-    hod_a = User(email="hod.a.w0@campusflow.edu", hashed_password=get_password_hash("HodPass123!"), first_name="M", last_name="Sterling", status="active")
-    faculty_a = User(email="faculty.a.w0@campusflow.edu", hashed_password=get_password_hash("FacPass123!"), first_name="S", last_name="Chen", status="active")
-    faculty_b = User(email="faculty.b.w0@campusflow.edu", hashed_password=get_password_hash("FacPass123!"), first_name="R", last_name="Davies", status="active")
-    student_a = User(email="student.a.w0@campusflow.edu", hashed_password=get_password_hash("StuPass123!"), first_name="Alex", last_name="Rivera", status="active")
-    student_b = User(email="student.b.w0@campusflow.edu", hashed_password=get_password_hash("StuPass123!"), first_name="Bri", last_name="Patel", status="active")
-    outsider = User(email="student.out.w0@campusflow.edu", hashed_password=get_password_hash("StuPass123!"), first_name="Out", last_name="Sider", status="active")
+    admin = User(
+        email="admin.w0@campusflow.edu",
+        hashed_password=get_password_hash("AdminPass123!"),
+        first_name="A",
+        last_name="Dmin",
+        status="active",
+    )
+    controller = User(
+        email="controller.w0@campusflow.edu",
+        hashed_password=get_password_hash("CtrlPass123!"),
+        first_name="E",
+        last_name="Vance",
+        status="active",
+    )
+    hod_a = User(
+        email="hod.a.w0@campusflow.edu",
+        hashed_password=get_password_hash("HodPass123!"),
+        first_name="M",
+        last_name="Sterling",
+        status="active",
+    )
+    faculty_a = User(
+        email="faculty.a.w0@campusflow.edu",
+        hashed_password=get_password_hash("FacPass123!"),
+        first_name="S",
+        last_name="Chen",
+        status="active",
+    )
+    faculty_b = User(
+        email="faculty.b.w0@campusflow.edu",
+        hashed_password=get_password_hash("FacPass123!"),
+        first_name="R",
+        last_name="Davies",
+        status="active",
+    )
+    student_a = User(
+        email="student.a.w0@campusflow.edu",
+        hashed_password=get_password_hash("StuPass123!"),
+        first_name="Alex",
+        last_name="Rivera",
+        status="active",
+    )
+    student_b = User(
+        email="student.b.w0@campusflow.edu",
+        hashed_password=get_password_hash("StuPass123!"),
+        first_name="Bri",
+        last_name="Patel",
+        status="active",
+    )
+    outsider = User(
+        email="student.out.w0@campusflow.edu",
+        hashed_password=get_password_hash("StuPass123!"),
+        first_name="Out",
+        last_name="Sider",
+        status="active",
+    )
 
-    db_session.add_all([admin, controller, hod_a, faculty_a, faculty_b, student_a, student_b, outsider])
+    db_session.add_all(
+        [admin, controller, hod_a, faculty_a, faculty_b, student_a, student_b, outsider]
+    )
     await db_session.flush()
 
     for user, role in (
@@ -108,27 +158,45 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     db_session.add_all([dept_a, dept_b, term])
     await db_session.flush()
 
-    course_a = Course(code="CS201-W0", title="Data Structures W0", department_id=dept_a.id, credits=4)
-    course_b = Course(code="ME101-W0", title="Thermodynamics W0", department_id=dept_b.id, credits=4)
+    course_a = Course(
+        code="CS201-W0", title="Data Structures W0", department_id=dept_a.id, credits=4
+    )
+    course_b = Course(
+        code="ME101-W0", title="Thermodynamics W0", department_id=dept_b.id, credits=4
+    )
     db_session.add_all([course_a, course_b])
     await db_session.flush()
 
-    offering_a = CourseOffering(course_id=course_a.id, academic_term_id=term.id, section="A", status="active")
-    offering_b = CourseOffering(course_id=course_b.id, academic_term_id=term.id, section="B", status="active")
+    offering_a = CourseOffering(
+        course_id=course_a.id, academic_term_id=term.id, section="A", status="active"
+    )
+    offering_b = CourseOffering(
+        course_id=course_b.id, academic_term_id=term.id, section="B", status="active"
+    )
     db_session.add_all([offering_a, offering_b])
     await db_session.flush()
 
     db_session.add_all(
         [
-            FacultyAssignment(course_offering_id=offering_a.id, faculty_id=faculty_a.id, role="primary"),
-            FacultyAssignment(course_offering_id=offering_b.id, faculty_id=faculty_b.id, role="primary"),
-            Enrollment(course_offering_id=offering_a.id, student_id=student_a.id, status="enrolled"),
-            Enrollment(course_offering_id=offering_a.id, student_id=student_b.id, status="enrolled"),
+            FacultyAssignment(
+                course_offering_id=offering_a.id, faculty_id=faculty_a.id, role="primary"
+            ),
+            FacultyAssignment(
+                course_offering_id=offering_b.id, faculty_id=faculty_b.id, role="primary"
+            ),
+            Enrollment(
+                course_offering_id=offering_a.id, student_id=student_a.id, status="enrolled"
+            ),
+            Enrollment(
+                course_offering_id=offering_a.id, student_id=student_b.id, status="enrolled"
+            ),
         ]
     )
 
     # ── 3. Examinations: one gradable, one still in draft, one in dept B ────
-    bank = QuestionBank(department_id=dept_a.id, course_id=course_a.id, title="W0 Bank", created_by_id=faculty_a.id)
+    bank = QuestionBank(
+        department_id=dept_a.id, course_id=course_a.id, title="W0 Bank", created_by_id=faculty_a.id
+    )
     db_session.add(bank)
     await db_session.flush()
 
@@ -145,8 +213,16 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     await db_session.flush()
     db_session.add_all(
         [
-            QuestionOption(question_id=question.id, label="A", body="Hash table", is_correct=True, sort_order=1),
-            QuestionOption(question_id=question.id, label="B", body="Linked list", is_correct=False, sort_order=2),
+            QuestionOption(
+                question_id=question.id, label="A", body="Hash table", is_correct=True, sort_order=1
+            ),
+            QuestionOption(
+                question_id=question.id,
+                label="B",
+                body="Linked list",
+                is_correct=False,
+                sort_order=2,
+            ),
         ]
     )
 
@@ -189,7 +265,9 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     db_session.add_all([exam_a, exam_draft, exam_b])
     await db_session.flush()
     for exam in (exam_a, exam_draft, exam_b):
-        db_session.add(ExamQuestion(exam_id=exam.id, question_id=question.id, sort_order=1, marks_override=5.0))
+        db_session.add(
+            ExamQuestion(exam_id=exam.id, question_id=question.id, sort_order=1, marks_override=5.0)
+        )
 
     # ── 4. An assignment, a graded submission, real cohort numbers ─────────
     assignment = Assignment(
@@ -240,7 +318,24 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     assert str(exam_draft.id) not in listed_ids, "draft exams must be invisible to candidates"
     assert str(exam_b.id) not in listed_ids, "other-department exams must be invisible"
     assert "questions" not in listed[0], "candidate list must not embed question bodies"
-    assert set(listed[0]["config"].keys()) == {"proctoring_enabled", "max_attempts"}
+    # The candidate config projection is intentionally narrow: this exact set is
+    # the allowlist, so a new key on the projection has to be added here
+    # deliberately. Alongside the two switches the delivery screen needs, it now
+    # carries the three disclosures the candidate is entitled to before starting:
+    # `warning_policy` (removal or review — ADR-023), `device_detection_enabled`
+    # (whether their camera picture is analysed on their own device — ADR-024),
+    # `obstruction_threshold_seconds` (the grace they actually have before
+    # stillness is reported — D-12) and `evidence_retention_days` (when the
+    # stills of them are erased — D-2). None of these reveal grading internals.
+    assert set(listed[0]["config"].keys()) == {
+        "proctoring_enabled",
+        "max_attempts",
+        "show_results_immediately",
+        "warning_policy",
+        "device_detection_enabled",
+        "obstruction_threshold_seconds",
+        "evidence_retention_days",
+    }
 
     brief_res = await client.get(f"/api/v1/exams/{exam_a.id}/public", headers=student_a_h)
     assert brief_res.status_code == 200, brief_res.text
@@ -252,8 +347,12 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     assert staff_def_res.status_code == 403, staff_def_res.text
 
     # Non-visible exams are indistinguishable from missing ones (no enumeration).
-    assert (await client.get(f"/api/v1/exams/{exam_draft.id}/public", headers=student_a_h)).status_code == 404
-    assert (await client.get(f"/api/v1/exams/{exam_b.id}/public", headers=student_a_h)).status_code == 404
+    assert (
+        await client.get(f"/api/v1/exams/{exam_draft.id}/public", headers=student_a_h)
+    ).status_code == 404
+    assert (
+        await client.get(f"/api/v1/exams/{exam_b.id}/public", headers=student_a_h)
+    ).status_code == 404
 
     # ── 6. Staff still get the full definition, scoped to their offering ────
     own_def = await client.get(f"/api/v1/exams/{exam_a.id}", headers=faculty_a_h)
@@ -268,31 +367,69 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     faculty_list = await client.get("/api/v1/exams", headers=faculty_a_h)
     assert faculty_list.status_code == 200
     faculty_ids = {e["id"] for e in faculty_list.json()["data"]}
-    assert {str(exam_a.id), str(exam_draft.id)} <= faculty_ids, "own drafts must remain visible to their author"
+    assert {str(exam_a.id), str(exam_draft.id)} <= faculty_ids, (
+        "own drafts must remain visible to their author"
+    )
     assert str(exam_b.id) not in faculty_ids
 
     # ── 7. Cohort data requires teaching or administrative scope ───────────
-    assert (await client.get(f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=student_a_h)).status_code == 403
-    assert (await client.get(f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=faculty_b_h)).status_code == 403
-    gradebook_res = await client.get(f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=faculty_a_h)
+    assert (
+        await client.get(f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=student_a_h)
+    ).status_code == 403
+    assert (
+        await client.get(f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=faculty_b_h)
+    ).status_code == 403
+    gradebook_res = await client.get(
+        f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=faculty_a_h
+    )
     assert gradebook_res.status_code == 200, gradebook_res.text
     emails = {s["student_email"] for s in gradebook_res.json()["data"]["students"]}
     assert "student.a.w0@campusflow.edu" in emails, "own-student grades must be present"
 
-    assert (await client.get(f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=student_a_h)).status_code == 403
-    assert (await client.get(f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=faculty_b_h)).status_code == 403
-    assert (await client.get(f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=faculty_a_h)).status_code == 200
+    assert (
+        await client.get(
+            f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=student_a_h
+        )
+    ).status_code == 403
+    assert (
+        await client.get(
+            f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=faculty_b_h
+        )
+    ).status_code == 403
+    assert (
+        await client.get(
+            f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=faculty_a_h
+        )
+    ).status_code == 200
     # A department head reaches their own department's roster, not another's.
-    assert (await client.get(f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=hod_h)).status_code == 200
-    assert (await client.get(f"/api/v1/course-offerings/{offering_b.id}/enrollments", headers=hod_h)).status_code == 403
+    assert (
+        await client.get(f"/api/v1/course-offerings/{offering_a.id}/enrollments", headers=hod_h)
+    ).status_code == 200
+    assert (
+        await client.get(f"/api/v1/course-offerings/{offering_b.id}/enrollments", headers=hod_h)
+    ).status_code == 403
     # The examination bureau may roster institution-wide but does not grade.
-    assert (await client.get(f"/api/v1/course-offerings/{offering_b.id}/enrollments", headers=controller_h)).status_code == 200
-    assert (await client.get(f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=controller_h)).status_code == 403
+    assert (
+        await client.get(
+            f"/api/v1/course-offerings/{offering_b.id}/enrollments", headers=controller_h
+        )
+    ).status_code == 200
+    assert (
+        await client.get(
+            f"/api/v1/course-offerings/{offering_a.id}/gradebook", headers=controller_h
+        )
+    ).status_code == 403
 
     # Cohort analytics is scoped exactly like the gradebook.
-    assert (await client.get(f"/api/v1/analytics/courses/{offering_a.id}", headers=student_a_h)).status_code == 403
-    assert (await client.get(f"/api/v1/analytics/courses/{offering_a.id}", headers=faculty_b_h)).status_code == 403
-    assert (await client.get(f"/api/v1/analytics/courses/{offering_a.id}", headers=faculty_a_h)).status_code == 200
+    assert (
+        await client.get(f"/api/v1/analytics/courses/{offering_a.id}", headers=student_a_h)
+    ).status_code == 403
+    assert (
+        await client.get(f"/api/v1/analytics/courses/{offering_a.id}", headers=faculty_b_h)
+    ).status_code == 403
+    assert (
+        await client.get(f"/api/v1/analytics/courses/{offering_a.id}", headers=faculty_a_h)
+    ).status_code == 200
 
     # ── 8. A candidate always keeps their own marks, and only theirs ───────
     my_grades_res = await client.get(
@@ -311,11 +448,19 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     assert (await client.get("/api/v1/analytics/overview", headers=admin_h)).status_code == 200
     assert (await client.get("/api/v1/analytics/overview", headers=faculty_a_h)).status_code == 403
     assert (await client.get("/api/v1/analytics/overview", headers=student_a_h)).status_code == 403
-    assert (await client.get("/api/v1/analytics/student/me", headers=student_a_h)).status_code == 200
+    assert (
+        await client.get("/api/v1/analytics/student/me", headers=student_a_h)
+    ).status_code == 200
 
     # ── 10. Assessment-taking guards that must not regress ─────────────────
-    assert (await client.get(f"/api/v1/exams/{exam_a.id}/attempts", headers=student_a_h)).status_code == 403
-    unenrolled_start = await client.post(f"/api/v1/exams/{exam_a.id}/start", headers=outsider_h, json={})
+    assert (
+        await client.get(f"/api/v1/exams/{exam_a.id}/attempts", headers=student_a_h)
+    ).status_code == 403
+    unenrolled_start = await client.post(
+        f"/api/v1/exams/{exam_a.id}/start", headers=outsider_h, json={}
+    )
     assert unenrolled_start.status_code == 403, unenrolled_start.text
-    draft_start = await client.post(f"/api/v1/exams/{exam_draft.id}/start", headers=student_a_h, json={})
+    draft_start = await client.post(
+        f"/api/v1/exams/{exam_draft.id}/start", headers=student_a_h, json={}
+    )
     assert draft_start.status_code == 404, draft_start.text

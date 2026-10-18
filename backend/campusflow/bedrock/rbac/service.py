@@ -27,6 +27,11 @@ DEFAULT_PERMISSIONS = [
         "description": "Manage student course enrollments",
         "module": "enrollments",
     },
+    {
+        "code": "roster:import",
+        "description": "Import section rosters from a spreadsheet",
+        "module": "enrollments",
+    },
     # Materials & Assignments
     {
         "code": "materials:manage",
@@ -101,6 +106,7 @@ ROLE_PERMISSION_MAPPINGS = {
         "courses:read",
         "courses:update",
         "enrollments:manage",
+        "roster:import",
         "materials:manage",
         "materials:read",
         "assignments:create",
@@ -122,6 +128,7 @@ ROLE_PERMISSION_MAPPINGS = {
         "courses:read",
         "courses:update",
         "enrollments:manage",
+        "roster:import",
         "materials:manage",
         "materials:read",
         "programming:manage",
@@ -145,6 +152,7 @@ ROLE_PERMISSION_MAPPINGS = {
         "users:read",
         "courses:read",
         "courses:update",
+        "roster:import",
         "materials:manage",
         "materials:read",
         "assignments:create",
