@@ -4,9 +4,199 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f8fafc" />
     <title>CampusFlow — Academic & Examination Portal</title>
+    <!--
+      The boot screen. It is the first paint, so it ships inline: no font, bundle
+      or network request is needed for the brand to appear. React replaces it
+      with the same design (SplashScreen.tsx) once the session check resolves, so
+      keep the two in step.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #f8fafc;
+      }
+
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: #f8fafc;
+        font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        text-align: center;
+        transition: opacity 0.28s ease;
+      }
+
+      #boot::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 560px;
+        height: 560px;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(199, 210, 254, 0.45), rgba(199, 210, 254, 0) 70%);
+        pointer-events: none;
+      }
+
+      #boot::after {
+        content: '';
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(79, 70, 229, 0.7), transparent);
+      }
+
+      #boot .mark {
+        position: relative;
+        width: 78px;
+        height: 78px;
+        filter: drop-shadow(0 14px 28px rgba(23, 20, 64, 0.28));
+      }
+
+      #boot .word {
+        margin-top: 26px;
+        font-size: 27px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        color: #0f172a;
+      }
+
+      #boot .word span {
+        color: #4338ca;
+      }
+
+      #boot .tag {
+        margin: 8px 0 0;
+        font-size: 13px;
+        font-weight: 500;
+        color: #64748b;
+      }
+
+      #boot .roles {
+        margin: 20px 0 0;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+
+      #boot .bar {
+        position: relative;
+        margin-top: 40px;
+        width: 240px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e2e8f0;
+      }
+
+      #boot .bar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 33%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #818cf8, #4f46e5, #818cf8);
+        animation: boot-sweep 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      #boot .caption {
+        margin: 12px 0 0;
+        font-size: 11px;
+        font-weight: 500;
+        color: #94a3b8;
+      }
+
+      #boot .foot {
+        position: absolute;
+        bottom: 28px;
+        margin: 0;
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: rgba(148, 163, 184, 0.8);
+      }
+
+      @keyframes boot-sweep {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(330%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot .bar i {
+          width: 100%;
+          opacity: 0.45;
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot" role="status" aria-live="polite" aria-label="Loading CampusFlow">
+      <svg class="mark" viewBox="6 6 84 84" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="boot-core" x1="48" y1="6" x2="48" y2="90" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#1D2358" />
+            <stop offset="58%" stop-color="#161C44" />
+            <stop offset="100%" stop-color="#0C1130" />
+          </linearGradient>
+          <linearGradient id="boot-edge" x1="10" y1="10" x2="86" y2="86" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#C7D2FE" />
+            <stop offset="42%" stop-color="#818CF8" />
+            <stop offset="100%" stop-color="#4338CA" />
+          </linearGradient>
+          <linearGradient id="boot-plate" x1="26" y1="26" x2="70" y2="52" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#FFFFFF" />
+            <stop offset="100%" stop-color="#C7D2FE" />
+          </linearGradient>
+          <linearGradient id="boot-head" x1="48" y1="46" x2="48" y2="69" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#DDE3FF" />
+            <stop offset="100%" stop-color="#98A2F0" />
+          </linearGradient>
+        </defs>
+        <rect x="6" y="6" width="84" height="84" rx="21" fill="url(#boot-core)" />
+        <rect x="6" y="6" width="84" height="84" rx="21" fill="none" stroke="url(#boot-edge)" stroke-width="3.2" />
+        <rect x="9.2" y="9.2" width="77.6" height="77.6" rx="18.4" fill="none" stroke="#FFFFFF" stroke-opacity="0.1" />
+        <path d="M6 27 A21 21 0 0 1 27 6 H69 A21 21 0 0 1 90 27 V40 H6 Z" fill="#FFFFFF" fill-opacity="0.035" />
+        <path d="M48 26.5 L78 39.5 L48 52.5 L18 39.5 Z" fill="#070B22" opacity="0.5" transform="translate(0 3)" />
+        <path
+          d="M48 26.5 L78 39.5 L48 52.5 L18 39.5 Z"
+          fill="url(#boot-plate)"
+          stroke="url(#boot-plate)"
+          stroke-width="3"
+          stroke-linejoin="round"
+        />
+        <path
+          d="M34.5 47.5 V59 C34.5 63.7 40.5 67.3 48 67.3 C55.5 67.3 61.5 63.7 61.5 59 V47.5 L48 53.6 Z"
+          fill="url(#boot-head)"
+        />
+        <path d="M78 39.5 C78.6 47.4 75.2 53.6 72.9 58.6" stroke="#A5B4FC" stroke-width="2.5" stroke-linecap="round" />
+        <circle cx="71.9" cy="62.6" r="3.4" fill="#E0E7FF" />
+      </svg>
+
+      <div class="word">Campus<span>Flow</span></div>
+      <p class="tag">College LMS &amp; secure examination platform</p>
+      <p class="roles">Campus leads &middot; Faculty &middot; Exam controllers &middot; Students</p>
+
+      <div class="bar"><i></i></div>
+      <p class="caption">Preparing your workspace&hellip;</p>
+      <p class="foot">Single-institution deployment &middot; no public sign-up</p>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

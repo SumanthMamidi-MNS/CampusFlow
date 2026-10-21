@@ -54,14 +54,20 @@ This document contains permanent instructions for software engineering agents an
      existing `type(scope): summary` style.
 
 9. **Brand Assets**
-   - Product branding lives in `docs/assets/` and follows one design system: `campusflow-banner.svg`
-     (logo lockup on a dark panel, displayed at `height="106"` so the lockup renders at the
-     house-standard 88px), `campusflow-logo.svg` (transparent lockup, 88px) and
-     `docs/assets/badges/*.svg` (32px pill, `#161B22` fill, accent stroke, gradient value chip,
-     displayed at `height="30"`).
-   - Readme presentation follows the house pattern: centered banner, centered `<h3>` with a
-     `<small>` tagline, a centered badge row, then centered prose. Do not introduce shields.io
-     stack badges, emoji headings, or a different palette.
+   - Product branding lives in `docs/assets/` and follows one design system: `campusflow-logo.svg`
+     (the lockup — indigo square with the graduate's cap, then the wordmark — transparent, no
+     panel behind it, displayed at the house-standard `height="88"`, with light and dark theme
+     fills), `campusflow-mark.svg` (the square alone, mirrored by
+     `frontend/src/core/components/brand/BrandMark.tsx` and `frontend/public/favicon.svg`),
+     `divider.svg` (hairline, `width="100%" height="1"`) and `docs/assets/badges/*.svg` (32px
+     pill, `#161B22` fill, accent stroke, gradient value chip, displayed at `height="30"`).
+   - Readme presentation follows the house pattern: centered lockup, centered `<h3>` with a
+     `<small>` tagline, a centered badge row, then centered prose. Never wrap the lockup in a
+     background panel. Do not introduce shields.io stack badges, emoji headings, or a different
+     palette.
+   - The app's loading screen (`frontend/index.html` boot markup and
+     `SplashScreen.tsx`) is part of the brand surface: keep the two implementations visually
+     identical, light-themed, and reduced-motion aware.
 
 10. **Verification and Automated Continuation**
    - Test and verify changes before marking any milestone or phase complete. Run automated test suites and ensure builds pass.

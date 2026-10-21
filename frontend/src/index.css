@@ -68,3 +68,80 @@
     @apply bg-slate-400;
   }
 }
+
+/*
+ * Loading-screen motion. Kept as plain CSS rather than arbitrary Tailwind
+ * values so the keyframes, delays and the reduced-motion opt-out live in one
+ * readable place. `index.html` mirrors these names and timings for the static
+ * first paint; change both together.
+ */
+@keyframes cf-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes cf-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
+
+@keyframes cf-sweep {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(330%);
+  }
+}
+
+.cf-rise {
+  animation: cf-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.cf-delay-1 {
+  animation-delay: 0.06s;
+}
+
+.cf-delay-2 {
+  animation-delay: 0.12s;
+}
+
+.cf-delay-3 {
+  animation-delay: 0.18s;
+}
+
+.cf-delay-4 {
+  animation-delay: 0.24s;
+}
+
+.cf-mark {
+  animation: cf-breathe 6s ease-in-out infinite;
+}
+
+.cf-sweep {
+  animation: cf-sweep 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-rise,
+  .cf-mark,
+  .cf-sweep {
+    animation: none;
+  }
+
+  .cf-sweep {
+    width: 100%;
+    opacity: 0.45;
+  }
+}

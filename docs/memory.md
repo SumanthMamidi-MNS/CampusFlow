@@ -469,3 +469,19 @@ This document preserves durable technical context, implementation constraints, a
 - **A coding tool's workspace directory is ignored locally, not in `.gitignore`.** It is listed in
   `.git/info/exclude` (see that file) so the tracked ignore list carries no tool-specific names while
   `git status` stays clean. Add future tool state the same way.
+- **A README logo that assumes a dark page is a bug, not a style.** GitHub renders images inside the
+  page's own theme, so a transparent SVG with white text disappears on the light theme — the reason
+  the first CampusFlow lockup was wrapped in a dark panel, and why the panel had to go once the
+  portfolio settled on a transparent lockup. Put both palettes inside the SVG (`@media
+  (prefers-color-scheme: dark)` on the wordmark classes) and never rely on a background rectangle.
+- **The lockup's wordmark is text, not paths.** It uses the system font stack the other repositories
+  use, so its width differs by platform. Keep a right margin of at least 20 viewBox units and verify
+  with `getBBox()` in a real browser (headless Chrome with `--dump-dom` and a small measuring script
+  is enough) rather than assuming the font metrics.
+- **The loading screen exists twice, deliberately.** `frontend/index.html` carries the static boot
+  markup and CSS so the first paint is branded before the bundle parses; `SplashScreen.tsx` is the
+  React version used while `/auth/me` resolves. They must stay visually identical — change them in
+  the same commit, and keep both reduced-motion aware.
+- **A branch that adds nothing is still a branch.** Both `fix/*` branches were fully contained in
+  `main` before removal; verify with `git log --oneline main..<branch>` (empty means contained)
+  before deleting, and delete on the remote as well or the repository keeps advertising them.

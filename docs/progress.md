@@ -1061,3 +1061,51 @@ links:    every badge target and image path                   → resolves
 history:  git log --format=%B | grep -ci 'co-authored-by'    → 0 matches
 history:  git log --format='%an <%ae> | %cn <%ce>' | sort -u  → Sumanth Mamidi only
 ```
+
+---
+
+### Phase 20 — The first screen: single-branch repository, a new lockup, a product-first README, and a loading page
+
+The repository's first screen is now the product pitch, and the app has a first screen of its own.
+
+- **One branch.** The repository was re-created clean, and `main` is the only branch on it: the two
+  `fix/*` branches were already contained in `main` (no unique commits), so they were deleted locally
+  and on the remote rather than kept as duplicate refs of the same history.
+- **The lockup no longer sits on a panel.** `docs/assets/campusflow-logo.svg` is now the house
+  composition the rest of the portfolio uses — an indigo square with the graduate's cap beside the
+  "CampusFlow" wordmark, transparent, no enclosing rectangle, displayed at `height="88"`. The square
+  is the same mark everywhere: `docs/assets/campusflow-mark.svg` for the app icon,
+  `frontend/public/favicon.svg` (which replaced the framework's stock bolt), and
+  `BrandMark.tsx`, which the sidebar now uses in place of a generic shield glyph.
+- **The lockup is theme-aware.** The old asset drew a white wordmark, which is invisible on GitHub's
+  light theme — the reason it had been wrapped in a dark panel. The wordmark now carries fills for
+  both themes inside the SVG (`#0F172A` / `#4338CA` on light, `#FFFFFF` / `#A5B4FC` on dark), so it
+  reads without a background of its own.
+- **The README is the product, in the order a reviewer reads it.** Logo, positioning line, badge row,
+  a two-sentence pitch, a full-width dashboard, then a collapsed table of contents. It leads with
+  **The problem**, **Who uses it** (a role hierarchy diagram plus what each role owns and where they
+  work), **The examination journey** (author → assemble → schedule → sit → grade → publish, with the
+  integrity trail running underneath), a captioned screen grid, the security model as a table, the
+  stack, the three-command install, measured verification numbers and honest limits. The separate
+  *Documentation* index and *Selected Engineering Decisions* sections were removed: they are
+  maintainer material, and they pushed the product below the fold. Deep links point into `docs/`
+  from the two places where a reader actually wants them.
+- **The app has a loading page.** `index.html` ships a static, self-contained boot screen (mark,
+  wordmark, one-line product description, the four audiences it serves, an indeterminate bar) so the
+  brand paints before the bundle is parsed; React then fades it out and `SplashScreen` takes over
+  while the session is resolved, so the wait is branded end to end. Both honour
+  `prefers-reduced-motion`.
+
+#### Verification this phase
+
+```
+branches:  git ls-remote origin                                → refs/heads/main only
+lockup:    wordmark and tile optical centres (rendered)         → 146 / 146 px (light), 147 / 145 (dark)
+lockup:    text right edge inside the viewBox                   → 512.8 of 536 (no clipping)
+lockup:    wordmark bbox on both themes                          → present, centred, no panel
+readme:    both mermaid diagrams parsed with mermaid 11          → ok, ok
+readme:    referenced image paths                                → all present
+splash:    frontend/dist/index.html rendered headless            → mark, tagline, roles, bar, caption centred
+frontend:  npm run lint                                          → 0 errors (14 pre-existing warnings)
+frontend:  npm run build                                         → success
+```

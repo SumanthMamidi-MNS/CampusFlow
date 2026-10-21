@@ -12,10 +12,10 @@ import {
   Building2,
   GraduationCap,
   ChevronLeft,
-  ChevronRight,
-  Shield
+  ChevronRight
 } from 'lucide-react';
 import { useAuth } from '@/core/auth/hooks';
+import { BrandMark } from '@/core/components/brand/BrandMark';
 
 interface NavItem {
   label: string;
@@ -71,9 +71,7 @@ export function Sidebar() {
       {/* Logo Area */}
       <div className="flex h-16 items-center border-b border-slate-200 px-4 shrink-0 overflow-hidden">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-white shadow-sm">
-            <Shield className="h-4 w-4" />
-          </div>
+          <BrandMark className="h-8 w-8 shrink-0 rounded-lg shadow-sm" />
           {!collapsed && (
             <div className="flex flex-col whitespace-nowrap">
               <span className="text-sm font-semibold text-slate-900 tracking-tight leading-none">
