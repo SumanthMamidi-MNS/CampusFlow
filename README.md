@@ -241,6 +241,10 @@ frontend  npm run lint                                    →   0 errors
 frontend  npm run build                                   →  success
 ```
 
+Live status of that suite on `main`:
+
+[![CI](https://github.com/SumanthMamidi-MNS/CampusFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/SumanthMamidi-MNS/CampusFlow/actions/workflows/ci.yml)
+
 The two SQLite skips are PostgreSQL-only concurrency tests and run in CI. Beyond the suite, the last
 wave was verified against a **running** stack: the production Compose project through its proxy,
 migrations at head, a provisioned Campus Lead signing in, unauthenticated requests refused, the
