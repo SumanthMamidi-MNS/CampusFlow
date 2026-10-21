@@ -60,7 +60,8 @@ This document contains permanent instructions for software engineering agents an
      fills), `campusflow-mark.svg` (the square alone, mirrored by
      `frontend/src/core/components/brand/BrandMark.tsx` and `frontend/public/favicon.svg`),
      `divider.svg` (hairline, `width="100%" height="1"`) and `docs/assets/badges/*.svg` (32px
-     pill, `#161B22` fill, accent stroke, gradient value chip, displayed at `height="30"`).
+     canvas, displayed at `height="30"`: accent rail, icon, label, gradient value chip; the card
+     and label follow the page's colour scheme).
    - Readme presentation follows the house pattern: centered lockup, centered `<h3>` with a
      `<small>` tagline, a centered badge row, then centered prose. Never wrap the lockup in a
      background panel. Do not introduce shields.io stack badges, emoji headings, or a different
@@ -68,6 +69,9 @@ This document contains permanent instructions for software engineering agents an
    - The app's loading screen (`frontend/index.html` boot markup and
      `SplashScreen.tsx`) is part of the brand surface: keep the two implementations visually
      identical, light-themed, and reduced-motion aware.
+   - The landing page (`frontend/src/app/routes/landing/`) is the public face of the product and
+     the only screen a signed-out visitor may reach. Keep it light and institutional, indigo on
+     slate, led by the mark, and honest: every claim on it must be one the repository can back.
 
 10. **Verification and Automated Continuation**
    - Test and verify changes before marking any milestone or phase complete. Run automated test suites and ensure builds pass.

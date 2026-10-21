@@ -34,7 +34,7 @@ export function SplashScreen() {
         </div>
 
         <h1 className="cf-rise cf-delay-1 mt-7 text-[27px] font-semibold tracking-[-0.02em] text-slate-900">
-          Campus<span className="text-indigo-700">Flow</span>
+          Campus<span className="text-indigo-600">Flow</span>
         </h1>
         <p className="cf-rise cf-delay-2 mt-2 text-[13px] font-medium text-slate-500">
           College LMS &amp; secure examination platform

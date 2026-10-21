@@ -1,83 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 536 100" width="536" height="100" fill="none" role="img" aria-label="CampusFlow">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 476 116" width="476" height="116" fill="none" role="img" aria-label="CampusFlow">
   <defs>
-    <!-- Tile: deep indigo core, lit from the top -->
-    <linearGradient id="cf-core" x1="48" y1="6" x2="48" y2="90" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1D2358"/>
-      <stop offset="58%" stop-color="#161C44"/>
-      <stop offset="100%" stop-color="#0C1130"/>
+    <linearGradient id="c-border" x1="6" y1="6" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A5B4FC"/>
+      <stop offset="50%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#312E81"/>
     </linearGradient>
-
-    <!-- Tile border: radiant indigo, brightest at the top-left -->
-    <linearGradient id="cf-edge" x1="10" y1="10" x2="86" y2="86" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#C7D2FE"/>
-      <stop offset="42%" stop-color="#818CF8"/>
-      <stop offset="100%" stop-color="#4338CA"/>
+    <linearGradient id="c-bg" x1="48" y1="6" x2="48" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#111533"/>
+      <stop offset="100%" stop-color="#0A0C22"/>
     </linearGradient>
-
-    <!-- Mortarboard plate -->
-    <linearGradient id="cf-plate" x1="26" y1="26" x2="70" y2="52" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="100%" stop-color="#C7D2FE"/>
+    <linearGradient id="c-cap" x1="24" y1="28" x2="72" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E0E7FF"/>
+      <stop offset="100%" stop-color="#818CF8"/>
     </linearGradient>
-
-    <!-- Cap head, one step darker so the plate reads in front -->
-    <linearGradient id="cf-head" x1="48" y1="46" x2="48" y2="69" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#DDE3FF"/>
-      <stop offset="100%" stop-color="#98A2F0"/>
-    </linearGradient>
-
-    <!-- Ambient halo behind the tile -->
-    <radialGradient id="cf-aura" cx="50%" cy="50%" r="50%">
-      <stop offset="40%" stop-color="#6366F1" stop-opacity="0.5"/>
-      <stop offset="100%" stop-color="#6366F1" stop-opacity="0"/>
-    </radialGradient>
   </defs>
 
+  <!--
+    The house mark: the square, the graduate's cap, the wordmark. Tile, cap and
+    type geometry are taken verbatim from the project's original banner so the
+    mark is identical across the portfolio. Only the wordmark fills adapt to the
+    page's theme, so the lockup needs no panel behind it.
+  -->
   <style>
-    @keyframes cf-breathe {
-      0%, 100% { opacity: 0.5; }
-      50%      { opacity: 0.95; }
-    }
-    .cf-aura {
-      animation: cf-breathe 6s ease-in-out infinite;
-      transform-origin: 48px 48px;
-      opacity: 0.12;
-    }
-    .cf-wordmark {
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      font-size: 70px;
-      font-weight: 600;
-      letter-spacing: -1.6px;
-      fill: #0F172A;
-    }
-    .cf-wordmark-accent { fill: #4338CA; }
-
-    /* READMEs render on both GitHub themes; the lockup follows the page. */
+    .cf-name { fill: #0F172A; }
+    .cf-flow { fill: #4F46E5; }
     @media (prefers-color-scheme: dark) {
-      .cf-wordmark { fill: #FFFFFF; }
-      .cf-wordmark-accent { fill: #A5B4FC; }
-      .cf-aura { opacity: 0.55; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .cf-aura { animation: none; }
+      .cf-name { fill: #FFFFFF; }
+      .cf-flow { fill: #818CF8; }
     }
   </style>
 
-  <!-- One square: the product's mark -->
-  <ellipse class="cf-aura" cx="48" cy="48" rx="50" ry="50" fill="url(#cf-aura)"/>
-  <rect x="6" y="6" width="84" height="84" rx="21" fill="url(#cf-core)"/>
-  <rect x="6" y="6" width="84" height="84" rx="21" fill="none" stroke="url(#cf-edge)" stroke-width="3.2"/>
-  <rect x="9.2" y="9.2" width="77.6" height="77.6" rx="18.4" fill="none" stroke="#FFFFFF" stroke-opacity="0.10"/>
-  <path d="M6 27 A21 21 0 0 1 27 6 H69 A21 21 0 0 1 90 27 V40 H6 Z" fill="#FFFFFF" fill-opacity="0.035"/>
-
-  <!-- The graduate's cap -->
-  <path d="M48 26.5 L78 39.5 L48 52.5 L18 39.5 Z" fill="#070B22" opacity="0.5" transform="translate(0 3)"/>
-  <path d="M48 26.5 L78 39.5 L48 52.5 L18 39.5 Z" fill="url(#cf-plate)" stroke="url(#cf-plate)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M34.5 47.5 V59 C34.5 63.7 40.5 67.3 48 67.3 C55.5 67.3 61.5 63.7 61.5 59 V47.5 L48 53.6 Z" fill="url(#cf-head)"/>
-
-  <!-- Tassel: a cord that falls into a flowing curve, then the charm -->
-  <path d="M78 39.5 C78.6 47.4 75.2 53.6 72.9 58.6" stroke="#A5B4FC" stroke-width="2.5" stroke-linecap="round"/>
-  <circle cx="71.9" cy="62.6" r="3.4" fill="#E0E7FF"/>
-
-  <text class="cf-wordmark" x="124" y="73">Campus<tspan class="cf-wordmark-accent">Flow</tspan></text>
+  <rect x="6" y="10" width="84" height="84" rx="20" fill="url(#c-bg)" stroke="url(#c-border)" stroke-width="3"/>
+  <!-- graduation cap -->
+  <path d="M48 28 L76 42 L48 56 L20 42 Z" fill="url(#c-cap)"/>
+  <path d="M32 50 V62 C32 66 40 70 48 70 C56 70 64 66 64 62 V50 L48 58 Z" fill="url(#c-cap)" opacity="0.85"/>
+  <path d="M76 42 V58" stroke="#818CF8" stroke-width="3" stroke-linecap="round"/>
+  <text class="cf-name" x="112" y="76" font-family="'Segoe UI','Inter','Helvetica Neue',Arial,sans-serif" font-size="58" font-weight="700" letter-spacing="-1">Campus<tspan class="cf-flow">Flow</tspan></text>
 </svg>

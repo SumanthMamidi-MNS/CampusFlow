@@ -20,6 +20,8 @@ import { ExamResultPage } from './routes/exams/results';
 import { useAuth } from '@/core/auth/hooks';
 import { InstitutionalAnalytics } from '@/features/analytics/components/InstitutionalAnalytics';
 import { StudentDashboard } from '@/features/analytics/components/StudentDashboard';
+import { LandingPage } from './routes/landing';
+import { SplashScreen } from '@/core/components/brand/SplashScreen';
 
 /** "super_admin" -> "Super Admin" — roles are stored snake_case in the API. */
 function formatRole(role?: string | null): string {
@@ -84,7 +86,30 @@ function DashboardPage() {
 }
 
 
+/**
+ * `/` adapts to the visitor: the product's landing page when signed out, the
+ * institutional dashboard when signed in. No data is fetched here that the API
+ * has not already authorised — the session is what decides which side is shown.
+ */
+function HomePage() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) return <SplashScreen />;
+
+  return isAuthenticated ? (
+    <RootLayout>
+      <DashboardPage />
+    </RootLayout>
+  ) : (
+    <LandingPage />
+  );
+}
+
 export const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <HomePage />,
+  },
   {
     path: '/auth/login',
     element: <LoginPage />,
@@ -99,10 +124,6 @@ export const router = createBrowserRouter([
       {
         element: <RootLayout />,
         children: [
-          {
-            path: '/',
-            element: <DashboardPage />,
-          },
           {
             path: '/courses',
             element: <CoursesListPage />,

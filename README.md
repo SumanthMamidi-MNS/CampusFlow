@@ -222,7 +222,8 @@ seeded database; a production deployment starts empty apart from the Campus Lead
 > **Why there is no public demo link.** A live instance would be a writable, multi-tenant
 > examination platform with a privileged code sandbox and real proctoring data — not something to
 > leave on a public URL. The stack above *is* the demo: five minutes to a complete product,
-> screenshots included.
+> screenshots included. An instance opens on a product landing page — the one screen a signed-out
+> visitor can reach; every other route waits for a session.
 
 ## Verification
 

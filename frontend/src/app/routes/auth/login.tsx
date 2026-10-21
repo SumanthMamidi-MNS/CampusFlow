@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Landmark, Lock, Mail, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Lock, Mail, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/core/auth/hooks';
+import { BrandMark } from '@/core/components/brand/BrandMark';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -33,10 +34,10 @@ export function LoginPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-white shadow-sm mb-4">
-          <Landmark className="h-7 w-7" aria-hidden="true" />
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">CampusFlow</h1>
+        <Link to="/" aria-label="Back to the CampusFlow home page" className="mx-auto block w-fit">
+          <BrandMark className="h-14 w-14" />
+        </Link>
+        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">Campus<span className="text-indigo-600">Flow</span></h1>
         <p className="mt-1 text-sm text-slate-500 font-medium">Unified Academic & Examination Portal</p>
       </div>
 
@@ -127,6 +128,12 @@ export function LoginPage() {
             Authorized access only. Your activity and assessment attempts are recorded for audit
             purposes. Contact your institution administrator if you need account access.
           </p>
+          <Link
+            to="/"
+            className="inline-block text-xs font-medium text-slate-500 transition-colors hover:text-slate-800"
+          >
+            ← Back to the CampusFlow home page
+          </Link>
         </div>
       </div>
     </div>

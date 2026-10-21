@@ -1109,3 +1109,49 @@ splash:    frontend/dist/index.html rendered headless            → mark, tagli
 frontend:  npm run lint                                          → 0 errors (14 pre-existing warnings)
 frontend:  npm run build                                         → success
 ```
+
+---
+
+### Phase 21 — The mark back to its original form, new badges, and the landing page the product needed
+
+Three corrections to the first screen: the mark is the one the project started with, the badges were
+redesigned rather than preserved, and the app now has a real landing page instead of only a loading
+screen.
+
+- **The mark is original again, exactly.** `docs/assets/campusflow-logo.svg`, `campusflow-mark.svg`,
+  `frontend/public/favicon.svg`, `BrandMark.tsx` and the boot screen in `index.html` all carry the
+  project's first geometry and palette: the `rx=20` tile with the `#111533 → #0A0C22` fill and the
+  `#A5B4FC → #6366F1 → #312E81` border, the `M48 28 L76 42 L48 56 L20 42 Z` plate, the head at
+  `opacity 0.85`, the straight `#818CF8` tassel, and the 58px/700 wordmark. The earlier redraw
+  (wider plate, thicker stroke, S-curve tassel, halo) is gone; the only thing kept from it is the
+  theme-aware wordmark, which is what allows the lockup to sit on a light page with no panel behind
+  it. The viewBox is cropped to the artwork (476×116) so a centred image has no dead space.
+- **The badges were redesigned.** Each is now a theme-aware card — `#F6F8FA` on a light page,
+  `#161B22` on a dark one — with a clipped accent rail on the left, the existing icon, the label,
+  and the gradient value chip on the right. Text is never centred by guesswork: the widths come from
+  a real measurement of the badge font in Chrome, and a check asserts the label clears the chip and
+  the value sits inside it in both themes. The tests badge keeps its pulse, now with a
+  reduced-motion opt-out.
+- **The product has a landing page.** `/` is now public: signed-out visitors get
+  `frontend/src/app/routes/landing/` — hero, why-it-exists pillars, the five roles, a dark security
+  band, and the three-command install — and signed-in visitors get the same dashboard they had,
+  inside the same shell (`RootLayout` now accepts children so `/` reuses the sidebar and topbar).
+  Protected routes still bounce to `/auth/login`, which now wears the real mark and links back to
+  the landing page. Nothing on the landing page calls the API; it is a static, cheap first paint,
+  and its claims are the repository's verified ones.
+- **The landing page's screenshots are served, not referenced.** `frontend/public/shots/` carries
+  three of the captures that also live in `docs/images/`: the README uses the originals, the SPA
+  needs files its own bundle can serve.
+
+#### Verification this phase
+
+```
+lockup:   rendered wordmark right edge            → 449.2 of 476 (no clipping), centres aligned
+badges:   label / value bboxes in both themes      → 9 of 9 clear the chip and fit the card
+badges:   card fill by page scheme                 → #F6F8FA light, #161B22 dark
+landing:  DOM audit of the built bundle            → hero, product, roles, security, run present
+landing:  /shots/*.png                              → 200, 3 served, 2 brand marks, no dashboard leak
+routes:   /courses, /admin/users signed out        → login, brand mark, back link
+frontend: npm run lint                              → 0 errors (15 warnings, 14 pre-existing)
+frontend: npm run build                             → success
+```

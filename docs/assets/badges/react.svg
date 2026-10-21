@@ -1,30 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 32" width="112" height="32" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 114.7 32" width="114.7" height="32" fill="none" role="img" aria-label="React: 19">
   <defs>
-    <linearGradient id="react-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="react-accent" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#67E8F9"/>
       <stop offset="50%" stop-color="#0891B2"/>
       <stop offset="100%" stop-color="#155E75"/>
     </linearGradient>
-    <linearGradient id="react-gloss" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
-    </linearGradient>
+    <clipPath id="react-clip">
+      <rect x="0.5" y="0.5" width="113.7" height="31" rx="8"/>
+    </clipPath>
   </defs>
   <style>
-    .badge-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11.5px; font-weight: 600; fill: #FFFFFF; }
-    .badge-value { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11.5px; font-weight: 700; fill: #FFFFFF; }
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11.5px; }
+    .card { fill: #F6F8FA; }
+    .edge { stroke: #D1D9E0; }
+    .lbl { font-weight: 600; fill: #1F2328; }
+    .val { font-weight: 700; fill: #FFFFFF; }
+    @media (prefers-color-scheme: dark) {
+      .card { fill: #161B22; }
+      .edge { stroke: #30363D; }
+      .lbl { fill: #E6EDF3; }
+    }
   </style>
   <g>
-  <rect x="0.5" y="0.5" width="111" height="31" rx="6" fill="#161B22" stroke="rgba(97, 218, 251, 0.45)" stroke-width="1"/>
-  <g transform="translate(8, 7)" fill="none" stroke="#61DAFB" stroke-width="1.3">
-      <ellipse cx="8.5" cy="8.5" rx="8" ry="3.2"/>
-      <ellipse cx="8.5" cy="8.5" rx="8" ry="3.2" transform="rotate(60 8.5 8.5)"/>
-      <ellipse cx="8.5" cy="8.5" rx="8" ry="3.2" transform="rotate(120 8.5 8.5)"/>
-      <circle cx="8.5" cy="8.5" r="1.5" fill="#61DAFB" stroke="none"/>
+    <rect class="card" x="0.5" y="0.5" width="113.7" height="31" rx="8"/>
+    <g clip-path="url(#react-clip)">
+      <rect x="0.5" y="0.5" width="5" height="31" fill="url(#react-accent)"/>
     </g>
-  <text x="32" y="20" class="badge-label">React</text>
-  <rect x="74" y="3.5" width="37" height="25" rx="4.5" fill="url(#react-grad)" stroke="rgba(255,255,255,0.25)" stroke-width="0.8"/>
-  <rect x="74" y="3.5" width="37" height="12.5" rx="4.5" fill="url(#react-gloss)"/>
-  <text x="92.5" y="20" text-anchor="middle" class="badge-value">19</text>
+    <g transform="translate(13, 7)"><g fill="none" stroke="#0891B2" stroke-width="1.3"><ellipse cx="8.5" cy="8.5" rx="8" ry="3.2"/><ellipse cx="8.5" cy="8.5" rx="8" ry="3.2" transform="rotate(60 8.5 8.5)"/><ellipse cx="8.5" cy="8.5" rx="8" ry="3.2" transform="rotate(120 8.5 8.5)"/><circle cx="8.5" cy="8.5" r="1.5" fill="#0891B2" stroke="none"/></g></g>
+    <text class="lbl" x="38" y="20.4">React</text>
+    <rect class="chip" x="78.5" y="3.5" width="31.2" height="25" rx="6.5" fill="url(#react-accent)"/>
+    <text class="val" x="94.1" y="20.4" text-anchor="middle">19</text>
+    <rect class="edge" x="0.5" y="0.5" width="113.7" height="31" rx="8" fill="none"/>
   </g>
 </svg>

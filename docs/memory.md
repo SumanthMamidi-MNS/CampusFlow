@@ -485,3 +485,20 @@ This document preserves durable technical context, implementation constraints, a
 - **A branch that adds nothing is still a branch.** Both `fix/*` branches were fully contained in
   `main` before removal; verify with `git log --oneline main..<branch>` (empty means contained)
   before deleting, and delete on the remote as well or the repository keeps advertising them.
+- **An SVG loaded in an `<img>` and an SVG pasted inline follow different theme signals.** In an
+  `<img>` (how GitHub renders README images), `@media (prefers-color-scheme)` resolves against the
+  embedder's `color-scheme`, so a page that sets `color-scheme: light` gets the light fills. Inline
+  in the DOM, the same media query follows the operating system and ignores the page's
+  `color-scheme`. Verify badge and lockup previews through `<img>`, or the preview will lie.
+- **Badge geometry is measured, not guessed.** The nine `docs/assets/badges/*.svg` files are sized
+  from a Chrome measurement of the badge font (`600 11.5px` for the label, `700 11.5px` for the
+  value); when a label or value changes, re-measure before editing the viewBox, and check that the
+  label still clears the value chip by a few units. Displayed at `height="30"` from a 32px canvas.
+- **The landing page mirrors three screenshots.** `frontend/public/shots/{dashboard, exam-workspace,
+  programming}.png` are copies of `docs/images/02-dashboard.png`, `06-exam-workspace.png` and
+  `10-programming-editor.png`, because the SPA cannot serve files from `docs/`. Recapture both
+  copies together — a stale second copy photographs as an older product.
+- **`/` is conditional, and that is the only public screen.** `HomePage` in `frontend/src/app/router.tsx`
+  shows the landing page when signed out and the dashboard (inside `RootLayout`) when signed in;
+  every other protected path still redirects to `/auth/login`. Do not add API calls to the landing
+  page: it must paint without a session.
