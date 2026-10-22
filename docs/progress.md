@@ -1155,3 +1155,51 @@ routes:   /courses, /admin/users signed out        → login, brand mark, back l
 frontend: npm run lint                              → 0 errors (15 warnings, 14 pre-existing)
 frontend: npm run build                             → success
 ```
+
+---
+
+### Phase 22 — The landing page as the product's public documentation
+
+The landing page was a five-section flyer: hero, three pillars, five role cards, a security table and
+the install commands. It described the product's *shape* without ever showing how a college works
+inside it. A signed-out visitor now gets the whole product, in the order somebody would learn it.
+
+- **The page is one artefact, split for readability.** `frontend/src/app/routes/landing/index.tsx`
+  holds the structure and its small components; `landing/content.ts` holds the copy and data as
+  typed modules (`Module`, `Track`, `Role`, `Rule`, `Shot`, `EnvVar`). Claims are taken from the
+  repository — the permission catalogue, the exam policy vocabulary, the runbook and the counts in
+  this file — rather than invented for the page.
+- **The hero states the thesis in a card, not a slogan.** Beside the headline sits the one row
+  everything hangs off (`course_offering · CSE-301 · Section A`) with the roster, materials,
+  assignments, examinations, integrity events and marks that reference it, and the sentence that
+  makes the point: one scope kernel answers who may see it.
+- **A platform explorer covers the nine modules.** Academic structure, course workspace,
+  assignments and grades, question banks, examinations, integrity monitoring, the code sandbox,
+  analytics, and identity and audit. It is an ARIA `tablist` — `aria-selected`, roving `tabindex`,
+  ↑↓←→/Home/End — and each panel carries the capabilities, the roles that use it, and a real screen
+  where one exists. The rail scrolls horizontally on mobile instead of collapsing into a select.
+- **The rest of the operational detail is on the page.** A 28-item capability ledger; four
+  workflow tracks (institution → course → examination → candidate) with 24 numbered steps that
+  match the actual operating sequence; the six-stage examination journey; the five roles with an
+  explicit *cannot* column; the eight enforced security rules with the four measured integrity
+  facts; a six-screen gallery; the four-layer architecture and stack table; deploy (three commands,
+  the seven settings that matter, what happens at boot); verification with commands and the
+  live-stack evidence; five honest limits; and eight first-question FAQs.
+- **Screenshots are served, not referenced.** `frontend/public/shots/` now carries eight captures —
+  the three it had plus `course-workspace`, `examinations`, `question-banks`, `assessment` and
+  `student-dashboard` — all copies of `docs/images/` at 1440×900.
+- **Mobile navigation is an anchor strip, not a menu.** Below `md` the five section anchors scroll
+  in a row under the header, so no section needs JavaScript to reach and the header stays 105px tall
+  (64 + 41); sections carry `scroll-mt-28` so a jump clears it.
+
+#### Verification this phase
+
+```
+explorer: 9 tabs via aria-selected                          → roving tabindex, panel + shot swap (Code sandbox → programming.png)
+layout:   1440 / 500 / 390 scrollWidth vs clientWidth       → equal at all three (no page-level overflow)
+layout:   390px computed h1 / stat grid                     → 34px, two columns (base breakpoint applies)
+images:   /shots/*.png in the built bundle                   → 8 served, all naturalWidth > 0
+anchors:  section scroll-mt                                 → clears the 64px (105px mobile) sticky header
+frontend: npm run lint                                      → 0 errors (15 warnings, pre-existing, none in landing)
+frontend: npm run build                                      → success
+```

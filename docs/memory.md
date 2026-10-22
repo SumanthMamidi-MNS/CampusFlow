@@ -494,11 +494,23 @@ This document preserves durable technical context, implementation constraints, a
   from a Chrome measurement of the badge font (`600 11.5px` for the label, `700 11.5px` for the
   value); when a label or value changes, re-measure before editing the viewBox, and check that the
   label still clears the value chip by a few units. Displayed at `height="30"` from a 32px canvas.
-- **The landing page mirrors three screenshots.** `frontend/public/shots/{dashboard, exam-workspace,
-  programming}.png` are copies of `docs/images/02-dashboard.png`, `06-exam-workspace.png` and
-  `10-programming-editor.png`, because the SPA cannot serve files from `docs/`. Recapture both
-  copies together — a stale second copy photographs as an older product.
+- **The landing page mirrors eight screenshots.** `frontend/public/shots/*.png` are copies of
+  `docs/images/` (`dashboard`, `exam-workspace`, `programming`, `course-workspace`, `examinations`,
+  `question-banks`, `assessment`, `student-dashboard`), because the SPA cannot serve files from
+  `docs/`. Recapture both copies together — a stale second copy photographs as an older product.
 - **`/` is conditional, and that is the only public screen.** `HomePage` in `frontend/src/app/router.tsx`
   shows the landing page when signed out and the dashboard (inside `RootLayout`) when signed in;
   every other protected path still redirects to `/auth/login`. Do not add API calls to the landing
   page: it must paint without a session.
+- **A lazy `<img>` without intrinsic dimensions has zero height until it decodes.** Measuring section
+  offsets on a page that has not been scrolled reports collapsed heights for every section below the
+  fold (the landing gallery read 687px instead of 1707px). Scroll to the bottom first, wait for the
+  images, then measure — or the crops taken from a full-page capture will land on the wrong sections.
+- **Headless Chrome clamps its window width near 500px.** `--window-size=390,...` does not produce a
+  390px layout viewport, so a mobile screenshot comes out clipped on the right while the page is
+  actually fine. Verify small breakpoints with DOM metrics (`scrollWidth === clientWidth`, computed
+  font sizes, grid column counts) or `Emulation.setDeviceMetricsOverride`; treat a narrow
+  `--screenshot` as unreliable rather than a layout bug.
+- **A sticky header needs `scroll-mt` on every anchor target.** The landing header is 64px on
+  desktop and 105px on mobile (the anchor strip adds a row), so sections carry `scroll-mt-28`;
+  without it every in-page jump lands with the heading under the header.
