@@ -1203,3 +1203,498 @@ anchors:  section scroll-mt                                 → clears the 64px 
 frontend: npm run lint                                      → 0 errors (15 warnings, pre-existing, none in landing)
 frontend: npm run build                                      → success
 ```
+
+---
+
+### Phase 23 — One mark, one lockup, and a landing page built as a scroll story
+
+The mark had been cropped by its own canvas: an 84-wide viewBox around artwork whose 3px border was
+drawn outside the rect, so every surface rendered a thinner, clipped tile. The landing page carried
+that mark in five places and still read as a long flyer — correct, carefully written, and flat.
+
+- **The mark is drawn inside a full 96×96 canvas.** The tile is a 93×93 rounded rect at 1.5, radius
+  23, with its 3px stroke inside the canvas, so nothing is clipped at any size (16px favicon, 32px
+  sidebar, 88px README lockup). The cap is rebuilt as one object: a 62-wide board split down the
+  middle so its far half reads darker, a bowl whose top edge follows the board's lower edges, and a
+  tassel with a knot. A clipped sheen across the top third keeps it from looking like a flat icon.
+- **One artwork, five surfaces.** `docs/assets/campusflow-mark.svg`, `docs/assets/campusflow-logo.svg`,
+  `frontend/public/favicon.svg`, the boot markup in `frontend/index.html` and `BrandMark.tsx` now
+  carry the same geometry. `BrandMark` derives a per-instance id from `useId()` for its gradients,
+  because the mark appears several times per page and global ids let a second copy re-point the
+  first one's fills.
+- **The lockup is the same mark plus the wordmark on 492×112.** Mark at 8,8 (centre y=56, the optical
+  centre of the 58px wordmark), wordmark from x=124; the rendered right edge is 457.6, leaving 34
+  units clear of the canvas edge. The wordmark still follows the page theme, and the tile still sits
+  on no panel.
+- **The hero is a lit object rather than a screenshot.** The record card sits on a dark stage with
+  orbital rings, a slow conic beam and a floor glow; the gradebook sheet, the record and the two
+  chips occupy different Z planes and separate under the pointer tilt. The whole stage is scrubbed
+  by scroll (`useScrollScrub` writes `--cf-dive` on the section), so it straightens as the reader
+  moves away, and the copy lifts and fades on the same value. Reduced motion holds the finished
+  frame.
+- **Type arrives word by word.** `Words` splits a headline into masked inline boxes and staggers
+  them, which keeps wrapping and `text-balance` working while making the line assemble itself. Every
+  section heading uses it, with a hairline that draws across the eyebrow as the block reveals.
+- **The examination is pinned.** On `lg` and up the section holds still for 330vh and the six stages
+  advance with the scroll: a large stage, then what it hands to the next one, a six-segment track
+  and a labelled rail. Scroll position alone decides the stage, so stopping anywhere leaves a
+  complete frame; below `lg` the static six-card sequence renders instead. This exposed a real bug:
+  the section's `overflow-hidden` made the sticky child scroll away, so the container now has none.
+- **The gallery is a coverflow deck.** Seven screens sit in one perspective stage, the chosen one
+  flat and lit, its neighbours pushed back on Z and rotated away. Offsets wrap, so the first screen
+  has a neighbour on both sides, and the deck's window masks at the edges instead of cutting a card
+  at the viewport. Arrow keys, the two controls and the thumbnail strip all move it.
+- **Navigation and hover are part of the composition.** A chapter rail on the right tracks the
+  section under the reader and shows its label on hover; `.cf-spot` surfaces pick up a pointer
+  spotlight from one delegated listener for the whole page, and the platform panel carries the
+  module's own icon as a watermark instead of a clipped numeral.
+
+#### Verification this phase
+
+```
+lockup:   rendered wordmark bbox in Chrome                     → x 124 → 457.6 of 492 (34 units clear)
+lockup:   mark bbox                                            → 93×93 at 1.5, fully inside the 96 canvas
+brand:    mark artwork across 5 surfaces                       → identical paths and gradients
+landing:  pinned journey at 4 scroll positions                 → stages 02, 04, 06 advance, no blank frames
+landing:  deck at 1440 and 390                                 → wrapped offsets, masked edges, no hard cut
+layout:   1440 / 1280×800 / 390                                → no page-level overflow; hero holds at all three
+frontend: npx tsc -b --noEmit                                  → clean
+frontend: npm run lint                                         → 0 errors (15 warnings, pre-existing)
+frontend: npm run build                                        → success
+```
+
+---
+
+#### Phase — Integrity pipeline: is the candidate still looking at their own paper?
+
+The pipeline could prove the camera was alive, the tab was focused and whether a phone was in
+view. It could not see the cheat those signals miss: turning to a neighbour's screen or a sheet
+beside the desk, with the camera running and the tab focused. ADR-028 records the decision; this
+is what shipped.
+
+- **New module `frontend/src/features/exams/face-monitoring.ts`.** Two layers that are deliberately
+  separate, because only one of them can be tested without a webcam. `estimateHeadPose` is pure
+  geometry — nose tip versus eye midpoint, normalised by the eye span, inverted to a yaw through
+  one documented constant — and is invariant to frame resolution and camera distance.
+  `FaceMonitor` is the decision layer: away time accumulates across a brief return, a condition is
+  reported once its dwell is reached, a persisting condition is re-reported every twenty seconds,
+  and only a return held for the recovery window ends the episode.
+- **Flickering back no longer resets the clock.** A contiguous-dwell detector is beaten by turning
+  for 1.9 s, glancing back for a single frame, and turning again: every glance restarts the timer.
+  Away time is now accumulated, and one good frame is not a return — the episode ends only after
+  1.6 s of actually facing the paper (two scans at 700 ms). A capped sample delta means a
+  throttled or suspended tab cannot manufacture minutes of away time in one leap either.
+- **BlazeFace rather than the 468-point mesh.** The rule needs three landmarks and a face count;
+  the mesh costs about six times the download and several times the inference for precision the
+  rule cannot use, on a scan that has to run every 700 ms on the candidate's own laptop. The model
+  loads lazily after the attempt starts, and `Face check: unavailable` is shown honestly when it
+  cannot load.
+- **Three new server-validated signals.** `looking_away` (medium, with direction, measured angle
+  and dwell), `face_not_visible` and `multiple_faces_detected` (both high). Unlike a modelled
+  *device* observation, these measure the candidate's own presence, so they consume the disclosed
+  allowance; the measurements travel with the event so a reviewer weighs an angle, not a label.
+- **The cover is dwell-confirmed, not frame-triggered.** Camera off, a black picture, or a
+  confirmed no-face / second-face / sustained-turn condition covers the question area with a gate
+  that names it and repeats the `n / m` count. A single dropped frame never hides the question, and
+  the cover is not dismissed by a glance: it lifts only after the return has held. Answers stay
+  saved and the timer keeps running.
+- **Hiding got expensive.** A camera outage used to be one event per outage — switch the camera
+  off once and work unobserved for the rest of the hour. Both camera loss and the new face
+  conditions are now re-reported on a twenty-second escalation cadence, so a long absence is
+  counted as what it is.
+- **The allowance is disclosed before the first event.** `config.max_violations` now travels in
+  the candidate brief, and the delivery payload carries `violations_count` beside it, so a
+  resumed attempt shows the true `n / m` from its first frame. The header chip and the gate show
+  that same number; the exact-key candidate allowlist in `tests/test_authorization_matrix.py` was
+  extended deliberately for the new field.
+- **The boot screen holds for three seconds.** `main.tsx` releases the static splash when React has
+  painted *and* three seconds have elapsed since the splash's own first paint (the First
+  Contentful Paint entry), so the wait is three *visible* seconds rather than three seconds from
+  navigation start, part of which can be a blank tab waiting for the bundle. A slow bundle still
+  wins: the overlay never fades onto an empty `#root`.
+
+##### Verification this phase
+
+```
+face-monitoring: node frontend/scripts/check-face-monitoring.ts → 47 checks passed
+                 ├ geometry: 0° frontal, 62° turn reads 62° ±1, direction both ways
+                 ├ invariance: same angle at 320 px and 1280 px frames
+                 ├ dwell: silent at 1 999 ms, one event at 2 000 ms, silent at +5 s
+                 ├ escalation: re-reported at +20 s
+                 ├ flicker: a one-frame return does not reset; a held return does
+                 ├ cover: none below dwell, set at dwell, held through a glance, lifts after return
+                 ├ absence/company: 3 s no-face, 1.5 s second face
+                 └ safety: 60 s of unmeasurable frames records nothing and covers nothing
+backend:  pytest tests/test_demo_exam_and_integrity_vocab.py → 10 passed (3 new)
+backend:  pytest                                             → 84 passed, 2 skipped
+frontend: npx tsc -b --noEmit                                → clean
+frontend: npm run lint                                       → 0 errors (15 pre-existing warnings)
+frontend: npm run build                                      → success
+boot:     headless Chrome, four cold navigations              → up at 1.5 s and 2.9 s, removed 3.4–4.4 s after first paint
+```
+---
+
+#### Phase — Landing consolidation: ten chapters, with the gallery restored
+
+The landing page had grown to thirteen anchored chapters and roughly 17,400 px at 1440: a pinned
+examination stage, a seven-screen coverflow gallery, a full capability ledger, and separate stack,
+deploy, verification and limits sections. Every claim was backed by the repository, but the length
+worked against the page — the decisive ones were spread across a scroll most readers never finish.
+
+- **The capability ledger folded into Platform.** The 28-item list is now a closed `<details>`
+  under the module explorer, which already shows a screenshot and working bullets for each area.
+  The same claims are one click away instead of another screen of scroll.
+- **The gallery is its own chapter again.** Cutting the deck saved scroll, but the real screens are
+  the strongest thing a reviewer can look at, so `03 · Screens` restores it: seven screens in the
+  coverflow deck, arrow keys, two controls, a thumbnail strip and a live caption. The module
+  explorer keeps its per-module shot; the deck is the full tour.
+- **Stack and Deploy became "Run it".** Four architecture cards, the deploy terminal, the boot
+  sequence and the runbook link now share one section. The stack table and environment-variable
+  list moved to the README and runbook, where they are maintained.
+- **Verification and Limits became "Proof & limits".** The command table and the omissions sit
+  side by side: what is proven, and what is not, read together.
+- **The examination journey is static.** The 330vh pinned stage is gone; the six stages render as
+  the card sequence narrow screens already used. The section drops from 3,422 px to 800 px and no
+  longer captures the scroll wheel.
+- **The top navigation adds Screens.** Platform, Screens, Workflow, Integrity, Run it, Proof. The
+  repository link now hides below `lg`, because six links plus it overflowed the 768 px header by
+  15 px; at 1024 and above it is back. The chapter rail tracks all ten chapters, in the original
+  order.
+
+Result: 10 anchored chapters (from 13) and 12,595 px at 1440 (from ~17,400), with no horizontal
+overflow at 1440, 1024, 768 or 390, every in-page anchor resolving, the capability drawer opening
+to three columns without overflow, and the deck switching by keyboard, controls and thumbnails.
+
+##### Verification this phase
+
+```
+landing: main > section ids                       → 10 (why, platform, screens, workflow, journey,
+                                                    roles, integrity, run, proof, faq)
+landing: page height at 1440                      → 12,595 px (was ~17,400)
+landing: 1440 / 1024 / 768 / 390                  → scrollWidth === clientWidth, no overflow
+landing: in-page anchors                          → 0 broken, 0 duplicate ids
+landing: deck at 1440                             → 1000 × 625 px, 7 cards, all images loaded
+landing: deck keyboard                            → ArrowRight → 02, End → 07, caption follows
+landing: capability drawer                        → 3 × 371 px columns, 563 px tall, no overflow
+frontend: npx tsc -b --noEmit                     → clean
+frontend: npm run lint                            → 0 errors (15 pre-existing warnings)
+frontend: npm run build                           → success
+```
+
+---
+
+#### Phase — Landing chapter 03: a role-by-role tour instead of a coverflow deck
+
+The seven-screen coverflow answered "what does it look like?" but not "what is it like to be a
+student here?", and the deck itself was the weakest thing on the page: a card that slipped behind
+its neighbour, arrows you had to scroll down to reach, and a 28 px rounded frame around square-cornered
+screenshots.
+
+- **Six portals, 56 real screens.** Student, faculty, department head, exam controller, campus lead and
+  super admin, each captured from the seeded database as a sequence: dashboard → courses → course
+  workspace → coursework → the editor → run output → examinations → the brief → a live paper → the
+  scorecard, and the staff equivalents (gradebook, roster, banks, papers, grading queue, analytics,
+  accounts, structure, branding).
+- **A portal picker.** The chapter opens with the six roles and the number of screens each has, plus the
+  seeded person the captures belong to, so a reader chooses the vantage point instead of scrolling one.
+- **The window sits beside a scrolling rail.** The steps are a rail next to the image: it follows the
+  tour, auto-scrolls to the active step and never moves the page. Clicking a step, the arrow keys,
+  Home/End or the two controls all drive it.
+- **It advances on its own** while it is on screen and nobody is interacting with it; hovering,
+  focusing, the pause control and `prefers-reduced-motion` all stop the clock, and the active step
+  carries a progress line. The next two screens are prefetched, the rest of the tour is not.
+- **A "Full size" link** opens the current capture as served, which is how a reader on a phone gets
+  the detail the scaled window cannot show.
+- **The deck is gone** with its coverflow transforms, its clipped scene radius and the stacking bug
+  where a neighbour card could paint over the active one.
+- **The header lockup is larger** — 36 px mark, 16.5 px wordmark — without changing the 64 px bar.
+- **A signed-out visitor can reach the landing page again.** `GET /auth/me` answers 401 to a visitor
+  with no session; the API client's interceptor treated that as a dead session and forwarded to
+  `/auth/login`, so the public page was unreachable without a live backend quirk. Only a caller that
+  carried an access token is signed out now.
+- **A Campus Lead demo account** (`lead@campusflow.edu`, the `admin` role) joins the seed, so the fifth
+  portal is a real session rather than the super admin wearing a different label.
+
+Result: chapter 03 is 56 screens across six portals, 2.6 MB of WebP on disk with one portal's step
+loaded at a time, no horizontal overflow from 390 px to 1440 px, and every step's caption checked
+against the screen it describes.
+
+##### Verification this phase
+
+```
+tour: captures                                    → 56 webp, 2.6 MB, all 200 from the dev server
+tour: portals                                     → 6 (student 13, faculty 11, hod 10, controller 7,
+                                                     campus lead 9, super admin 6)
+tour: auto-advance                                → 01 → 02 after the dwell, pauses while hovered
+tour: prefers-reduced-motion                      → clock held at 01 / 13 over one dwell
+tour: pause control                               → 01 held for 6.8 s with the clock stopped
+tour: keyboard                                    → ArrowRight 01 → 02, End → 13 / 13
+tour: portal switch                               → campus lead resets to 01 / 09 with its own capture
+tour: overflow at 390 / 768 / 1024 / 1440         → scrollWidth === clientWidth
+landing: main > section ids                       → 10 (why … screens … faq)
+landing: chapter rail                             → 10 entries, 0 broken anchors
+header: 390 / 768 / 1024 / 1440                   → no wrap, no overlap (Repository hidden < 1024)
+frontend: npx tsc -b --noEmit                     → clean
+frontend: npm run lint                            → 0 errors (15 pre-existing warnings)
+frontend: npm run build                           → success
+```
+
+---
+
+#### Phase — Presentation framing: the hero's second plane, a working tour clock, and an honest sign-in
+
+Four defects reported against the rebuilt page, fixed together because three of them were the same
+failure — the page said it was a product, then showed itself as a repository demo.
+
+- **The gradebook sheet was behind the card, not beside it.** It sat at `-top-20 -right-10` on a
+  `-60px` plane, so only its header cleared the record and the sheet read as a dark slab behind a
+  window. It now sits at the top-right of the scene at 300 px wide, with the same 16 px corner
+  radius as every other box on the page, four weighted-progress rows and its "62 students" chip
+  fully inside the frame. Measured 298 × 114 px at (1045, 139) at 1440, nothing clipped.
+- **The permissions chip was a pill.** It was `rounded-full` where every neighbouring surface is a
+  cornered box. It is now `rounded-2xl` (16 px), matching the integrity chip and the sheet; the
+  radius is asserted in the hero check rather than eyeballed.
+- **Pause could not be undone.** The tour stopped when the stage was focused or hovered and set one
+  boolean that nothing cleared, so pressing Play left the clock held by the button's own focus and
+  the pointer resting over the controls. Engagement is now recomputed from `document.activeElement`
+  (`body` during blur reads as disengaged), controls are excluded by `data-tour-controls`, and
+  operating play/pause explicitly clears it — pressing the button is the reader saying "go".
+  Verified: pause holds, Play advances, Play resumes with the pointer still on the controls,
+  hovering the content still holds.
+- **No sign-in goes anywhere, and the page now says so.** Every sign-in CTA — header, hero and
+  closing — dispatches one `campusflow:deploy-notice` event instead of linking to a portal that does
+  not exist, and a single notice renders as a bottom-anchored card: "This is a presentation —
+  CampusFlow is not deployed yet", dismissible, auto-hiding after 10 s. `/auth/login` is still
+  reachable by URL and carries the same statement in an amber status panel above the form. When the
+  instance is deployed the CTAs become links and the notice comes out in one change.
+- **The copy is a product presentation, not an open-source pitch.** The footer's Documentation and
+  Repository columns (source, CI badge, MIT licence) are gone; in their place is a Status column
+  stating presented-not-deployed, no public sign-up and one institution per deployment. The run
+  chapter keeps the Compose runbook — that is how the product is deployed, not an invitation to
+  clone — and the two FAQ answers that addressed a reader running it themselves now address a
+  reader evaluating it.
+
+##### Verification this phase
+
+```
+hero: back sheet at 1440                          → 298 × 114 px, 16 px radius, unclipped
+hero: permissions chip                            → 16 px radius (was a pill)
+tour: pause control                               → 01 held
+tour: Play                                        → 02 → 03, advances with the pointer on it
+tour: hover a step                                → clock holds
+tour: keyboard / End / portal switch              → ArrowRight 01 → 02, End 13 / 13, lead 01 / 09
+landing: notice at 1440 / 390                     → bottom-anchored, inside the viewport, no
+                                                    headline overlap, dismiss + 10 s auto-hide
+landing: sign-in CTAs                             → 3, all dispatch the notice, none navigate
+landing: sections / anchors / overflow            → 10 sections, 0 broken, 0 duplicate ids,
+                                                    scrollWidth === clientWidth at 390–1440
+frontend: npx tsc -b --noEmit                     → clean
+frontend: npm run lint                            → 0 errors (15 pre-existing warnings)
+frontend: npm run build                           → success
+```
+
+---
+
+#### Phase — Per-exam integrity profile, hand/voice cues, and the presentation pass
+
+Two asks landed together: make the product presentation honest and complete for a reader who is
+evaluating it, and take the examination-integrity engine to the level the rest of the system is
+held to. The second was the larger piece.
+
+**Integrity: a per-exam profile, and an observation tier for the weak cues (ADR-029).** Every
+camera dwell was a constant compiled into the client, so a closed-book final and a first-year quiz
+ran at identical sensitivity, and a paper could not opt out of a cue. Research into how commercial
+proctoring actually works (ProctorU, Proctorio, Respondus, Honorlock, and the published accuracy
+literature) produced one governing asymmetry: browser events are near-deterministic, while a webcam
+inference is a flag for a human — and a generic audio alarm is explicitly not evidence. A 2022 study
+of an AI auto-proctor recorded 74 incorrect decisions across 244 attempts.
+
+* **Three sensitivity tiers, authored per exam and disclosed as values.** `relaxed`, `standard`
+  and `strict` set the dwell for every cue; `standard` is exactly what every earlier paper already
+  ran at, so an upgrade cannot tighten a cohort's paper mid-term. The server sends the milliseconds
+  with the brief and the delivery, and the client enforces those rather than its own constants. An
+  unknown tier is a 422 at authoring time, never a silent downgrade.
+* **Each camera cue is an independent per-exam switch.** Face monitoring defaults on (it is the
+  baseline presence check); hand and audio default off, because each analyses more of the
+  candidate's own room. All of it is disclosed before the paper starts, in seconds.
+* **Two new signals, both observation tier.** `hand_near_face` — a hand at or over the face for the
+  tier's dwell, which is the geometry of reading from something in the hand — and `voice_detected`
+  — a sustained second voice. Both are recorded as evidence, raise the faculty review flag and show
+  the candidate a neutral reminder; neither consumes the allowance, locks the attempt or
+  auto-submits. The benign causes (a scratch, glasses, a cough, a fan, a housemate, an accessibility
+  need) are why.
+* **The voice cue records nothing.** Frames are tested for amplitude, band concentration and
+  syllabic modulation, then discarded: no clip, no transcript, no stream. The event carries a level
+  band and a duration. A steady loud hum is explicitly rejected for lack of modulation — the false
+  positive that would make a generic sound alarm worthless.
+* **The detectors share measurements rather than guessing separately.** Hand geometry scales the
+  face loop's landmarks onto its own frame; voice reuses the call element's existing stream instead
+  of prompting for a second capture. Both report `unavailable` when their model or permission is
+  missing rather than rendering a protection that is not running.
+
+**Presentation pass.** The sign-in notice now reads "Not deployed yet — the hosted instance is
+coming soon" and says plainly that the deployment is being prepared, on the page and on
+`/auth/login`; the footer status says the same. A "How it works" explainer answers a recruiter's
+first question in one paragraph — college structure created once, every record hanging off its
+section, one authorization kernel deciding who sees what — above the four role tracks. The
+invitation to run it locally (`start.bat`, `docker compose up --build`, and the FAQ entry
+"Can I run it myself?") is gone; the deployment chapter is framed as what the college operates, and
+the FAQ now answers how it is deployed and who runs it. The integrity chapter gained a two-column
+split of the signals that can consume an allowance against those that are only ever evidence, plus
+the new sensitivity fact. The proof figures were corrected to the suite's real size (94 collected,
+92 pass on SQLite).
+
+##### Verification this phase
+
+```
+backend: pytest -q                                → 92 passed, 2 skipped (94 collected)
+backend: tests/test_integrity_profile.py          → 8 passed (tiers, disclosure, both cues)
+backend: hand cues x10 at tolerance 2             → 0 allowance consumed, attempt in_progress
+backend: leak canary extended on purpose          → 13 disclosed keys, no grading internals
+frontend: node scripts/check-hand-voice-monitoring.ts  → 42/42 checks passed
+frontend: node scripts/check-face-monitoring.ts   → all checks passed
+frontend: npx tsc -b --noEmit                     → clean
+frontend: npm run lint                            → 0 errors (15 pre-existing warnings)
+frontend: npm run build                           → success
+landing:  56 captures across 6 portals            → every image 1440x900, 0 broken, 0 empty captions
+landing:  reduced motion                          → 0 animations with duration, reveals opacity 1,
+                                                    counters already at final values
+landing:  sections / anchors / overflow           → 10 sections, 0 broken, 0 duplicate ids,
+                                                    no horizontal overflow at 390-1440
+landing:  mobile grid min-content fix             → run/proof/faq verified at 390 (was ~530 px wide)
+```
+
+Found and fixed along the way: the deployment terminal's longest command line set a min-content
+width that widened the whole page on a phone. `min-w-0` on the grid children is the fix, and the
+two headless-measurement traps that hid it are recorded in `docs/memory.md`.
+
+#### Landing page — the guided tour as a cinematic player
+
+The "One portal at a time" chapter is a player now, not a slideshow. Three things changed.
+
+**Autoplay was latched off by its own hover guard.** The clock stopped on `mouseenter` of the
+screenshot panel itself. That panel is the size of a carousel, so the pointer is over it after any
+scroll — which is exactly the situation the tour exists for. Hover-pause now applies only to the
+step list and the caption, where reading actually happens; the window itself never holds the
+clock. The auto-advance also stops in a background tab (`visibilitychange`), restarts from zero on
+each new screen rather than on each pause, and the chrome carries a live dot plus a two-pixel
+hairline that drains over the dwell time, so "is it running?" is answerable at a glance.
+
+**The cut is a camera move, not a swap.** The outgoing frame stays mounted for 720 ms beside the
+incoming one: the arriving screen slides in from the edge the reader came from, 4% oversized and
+slightly rotated on the Z axis, while the departing frame drifts the opposite way, settles back and
+blurs out. Both directions are mirrored, and a band of light crosses the frame once per cut. Under
+`prefers-reduced-motion` nothing is layered at all — the state simply changes.
+
+**The arrows sit on the frame.** Two glass chevrons on the viewport's edges replace a pair of small
+circles in the control bar: 46 px (38 px on phones), visible at 62% at rest so a viewer who never
+moves the pointer still sees that the tour can be steered, fully opaque on approach, indigo glow and
+a 3 px glide of the glyph on hover. The control bar keeps Pause and Full size; a thirteen-segment
+strip under the window shows position without adding a second set of controls.
+
+##### Verification this phase
+
+```
+frontend: npx tsc -b --noEmit            → clean
+frontend: npx oxlint src/app/routes/landing → 0 warnings, 0 errors
+frontend: npm run build                  → success
+live:     autoplay, no input             → 01/13 → 02/13 in ~6.2 s, timer running
+live:     forward cut                    → exit-left + enter-next both mounted, retired at 770 ms
+live:     backward cut                   → exit-right + enter-prev
+live:     arrows at rest                 → opacity 0.62, 46 px, one per edge
+live:     phone (390)                    → chrome single row, arrows 38 px, 0 horizontal overflow
+live:     console                        → 0 errors, all requests 200/304
+```
+
+#### Landing page — scroll performance, and an image-by-image audit of the tour
+
+**The 2-second, blurry feel was two separate problems.** First, `usePageProgress` and
+`useScrollScrub` were called in `LandingPage`, the page root: each scroll frame set React state and
+re-rendered every section, card and step button on the page. Both values only ever reach CSS as a
+custom property, so they are now written by `useScrollVar` straight onto the element with
+`setProperty` — one rAF-throttled write, quantised to three decimals, and zero renders. Second,
+`.cf-reveal` animated `filter: blur(7px)` with 0.8–0.95 s transitions, so blocks arrived soft and
+slow; the blur is gone and the durations are 0.42 s / 0.52 s. The tour's arrows lost their
+`backdrop-filter` (it re-samples the page behind the button every scroll frame), the screenshot
+layers lost a permanent `will-change`, and the arriving frame no longer blurs — only the departing
+one does.
+
+Measured on the same 219-frame top-to-bottom scroll, before → after:
+
+```
+p50 frame      22.3 ms → 7.9 ms
+p90 frame      32.4 ms → 12.6 ms
+frames > 33 ms      22 → 2
+long tasks  12 / 667 ms → 0 / 0 ms
+```
+
+All 62 reveals still fire, and `--cf-page` / `--cf-dive` still track the scroll (0 → 0.207 at
+2600 px, hero dive 0 → 1), so the header hairline and the hero's camera move are intact.
+
+**Every one of the portal images was then read and compared to its heading.** 52 of 55 matched on
+first inspection. Three did not:
+
+| Frame | Was showing | Caption promised |
+| --- | --- | --- |
+| `controller-04-grading` | "No attempts recorded" | every attempt, its score and integrity events |
+| `lead-09-results` | "Results Unavailable" | the released paper, candidate by candidate |
+| `super-06-results` | "Results Unavailable" | the published paper's results with its integrity trail |
+
+The two staff frames were captured on `/exams/{id}/results`, which is the *student's* scorecard;
+both were re-shot through the exam page's **Submissions & Grading** tab, under the lead's and the
+super admin's own accounts, so the candidate table with status, score and integrity events is
+actually on screen.
+
+The controller frame could not be fixed by re-shooting: `GET /exams/{id}/attempts` requires
+`exams:grade` and the service enforces offering scope, which the exam bureau deliberately does not
+hold — the bureau has no grading queue. The step was removed rather than photographed empty, the
+paper step's body now states that boundary ("the bureau reads the paper and its results; grading and
+attempt review stay with the section they belong to"), the remaining controller images were
+renumbered, and the orphan file was deleted. Six accurate screens beat seven with one that
+misrepresents the product. The tour is now 55 captures across six portals.
+
+##### Verification this phase
+
+```
+frontend: npx tsc -b --noEmit          → clean
+frontend: npx oxlint src/app/routes/landing → 0 warnings, 0 errors
+frontend: npm run build                → success
+tour:     referenced images            → 55, 0 missing, 0 orphan files
+tour:     images decode                → every frame 1440x900
+live:     portal chips                 → 13 / 11 / 10 / 6 / 9 / 6
+live:     autoplay after the perf work → 01/13 → 02/13, timer running
+```
+
+#### Landing page — a shorter boot hold, a designed handover, a larger wordmark
+
+**The splash held for three seconds of visible time.** `BOOT_MIN_VISIBLE_MS` is now 1.8 s, still
+measured from the First Contentful Paint entry rather than from navigation start, so it is time the
+reader spent seeing the brand. Measured from a fresh browser with the probe installed before
+`main.tsx` runs: FCP at 84 ms, `is-leaving` at 1902 ms (hold **1818 ms**), element removed at
+2397 ms (**fade 496 ms**). End to end the page is interactive in ~2.4 s where it used to be ~3.3 s.
+
+**The handover is CSS, not an inline opacity flip.** `dismissBoot` now adds `#boot.is-leaving`, and
+`index.html` owns the exit: the overlay fades over 0.42 s on `cubic-bezier(0.4, 0, 0.2, 1)` while
+the mark, the wordmark and the copy lift 6 px and shrink to 0.99, so one surface is taken away
+instead of a rectangle switching off. The landing page has been painted underneath for the whole
+hold, so the fade reveals a settled page rather than animating a second entrance behind a
+dissolving curtain. `transitionend` still removes the node only when the event target is `#boot`
+itself, with a timer as the guarantee (background tabs never animate), and reduced motion collapses
+the handover to 0.01 s instead of a dissolve.
+
+**The header lockup was undersized.** The landing header's wordmark goes from 16.5 px to 19 px with
+the mark from 36 px to 40 px and the gap widened to match, so the name reads at the same weight as
+the nav beside it. Checked at 1440 and 390: header 65 px, lockup 168 px on a phone, nav still fits,
+no horizontal overflow.
+
+##### Verification this phase
+
+```
+frontend: npx tsc -b --noEmit                 → clean
+frontend: npx oxlint src/main.tsx src/app/routes/landing → 0 warnings, 0 errors
+frontend: npm run build                        → exit 0, dist/index.html carries #boot.is-leaving
+boot:     measured with a pre-load CDP probe   → hold 1818 ms, fade 496 ms, removed at 2397 ms
+boot:     mid-fade screenshot                  → landing already painted underneath, no blank frame
+header:   1440                                 → mark 40x40, wordmark 19 px, nav fits
+header:   390                                  → lockup 168 px, 58 px to Sign in, 0 overflow
+```

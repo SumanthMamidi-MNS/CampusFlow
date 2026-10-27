@@ -514,3 +514,142 @@ This document preserves durable technical context, implementation constraints, a
 - **A sticky header needs `scroll-mt` on every anchor target.** The landing header is 64px on
   desktop and 105px on mobile (the anchor strip adds a row), so sections carry `scroll-mt-28`;
   without it every in-page jump lands with the heading under the header.
+- **`position: sticky` dies inside an `overflow: hidden` ancestor.** The examination section was
+  `overflow-hidden` for its radial gradients, and its pinned stage simply scrolled away — no error,
+  no warning, just a blank screen where the sequence should hold. Any ancestor with `overflow`
+  other than `visible` becomes the sticky element's scroll container, and a page-level scroller is
+  no longer the one it sticks to. Check every ancestor, not just the immediate parent, and move the
+  decorative clipping to a sibling layer if a section needs both.
+- **Headless Chrome can resolve `prefers-color-scheme` to dark.** A first screenshot of the lockup
+  showed only "Flow" on a white page: the wordmark's `.cf-name` had correctly switched to `#FFFFFF`
+  for dark mode while the screenshot background stayed white. That is not a broken asset. When
+  checking a theme-aware SVG, force the scheme you mean (`preview_set_color_scheme`) or strip the
+  media query into a temporary copy, and judge the geometry — not the missing fill.
+- **A contiguous-dwell detector is defeated by one good frame.** `FaceMonitor` must accumulate
+  away time across a brief return, not reset its `since` whenever the condition changes, or a
+  candidate can turn for 1.9 s, glance back, and turn again forever without ever reaching the
+  dwell. The recovery window (1.6 s, two 700 ms scans) is what makes a return real; the cost is
+  that the cover lingers for that window after the candidate faces the paper, which is the
+  correct trade. A capped sample delta is equally important: timers in a background tab can fire
+  minutes apart and would otherwise add the whole gap as away time.
+- **Vercel is a frontend-only target for this repository.** The SPA is a static Vite build and can
+  be served there, but `/api` must be rewritten to the Compose backend origin; the API needs
+  long-lived FastAPI, PostgreSQL, Redis and Piston processes plus a connection pool that
+  serverless functions do not provide. The client's relative `/api/v1` base URL and the
+  `SameSite=Strict` refresh cookie assume one origin, so a same-origin rewrite is the simple
+  split; moving the API to a second origin means revisiting cookie and CORS configuration.
+- **The candidate exam `config` projection is an exact-key allowlist.**
+  `tests/test_authorization_matrix.py` asserts the full set of keys returned by `GET /exams`, so
+  adding a disclosure (`max_violations`) fails the leak test until the set is extended on purpose.
+  That is the intended behaviour: never delete the assertion to make a new field pass, and never
+  expose an authoring or grading switch there. Delivery counters (`violations_count`) belong on
+  `ExamDeliveryResponse`, not in `ExamStudentConfig`.
+
+### The landing page must be reachable without a session
+
+`GET /auth/me` answers 401 to a visitor who has never signed in — that is correct, and it is also
+the first request the SPA makes. The API client's response interceptor originally treated any 401
+whose refresh also failed as a dead session and navigated to `/auth/login`, which made `/` (the
+only public route) unreachable on a real backend; it only "worked" while the dev proxy pointed at a
+server that answered 404 instead of 401. **Only a request that carried an access token can be signed
+out.** When touching that interceptor, keep the distinction between "the session I had is gone" and
+"there was never a session", and test the signed-out landing page against a running API, not a mock.
+
+### The boot screen holds, and captures must wait for it
+
+`main.tsx` keeps `#boot` on screen for a minimum of 1.8 *visible* seconds (`BOOT_MIN_VISIBLE_MS`,
+measured from the first-contentful-paint entry, so it is time the reader saw the splash rather than
+time since navigation) and then hands over in `0.42 s`. A headless capture taken at a fixed moment
+photographs the splash, which looks like a broken app rather than a slow one. Poll for `#boot`
+disappearing before taking any screenshot of the product — and when a script drives the SPA, seed
+`access_token` and `campusflow_user` in `localStorage` first, then navigate, so the app hydrates the
+intended role instead of showing sign-in.
+
+The handover itself lives in `index.html` (`#boot.is-leaving`), not in an inline style set from JS:
+the overlay fades while the mark and the copy lift ~6 px and shrink 1%, so the page behind is
+revealed rather than switched on. `BOOT_EXIT_MS` in `main.tsx` must stay in step with that CSS
+transition, and the removal is still guaranteed by a timer because `transitionend` never fires in a
+background tab.
+
+### Engagement for the tour is derived, never latched
+
+The landing page's screen tour stops its clock while the reader is looking closer — hover, focus,
+the pause control. The first implementation set one `engaged` boolean from pointer and focus
+events, and it could not be undone: pressing **Play** puts focus on the button and leaves the
+pointer over it, so the very act of resuming re-engaged the pause, and the tour looked frozen.
+Focus also fires on the way *out* as well as in, so a naive `setEngaged(true)` on `focusin` latches
+on the blur that follows.
+
+Derive engagement from `document.activeElement` instead of toggling it per event, treat `body`
+(what Chrome reports during blur) as "nowhere", exclude the transport controls by a data attribute
+so resting the pointer on Pause is not "reading", and clear the derived state when the play/pause
+button is actually operated — pressing it is the reader stating intent, which outranks focus. Any
+new control added to that cluster needs the same exclusion or it will freeze the tour.
+
+### Sign-in is one seam, and it is currently closed
+
+There is no deployed instance, so every sign-in entry point — header, hero, closing CTA, and the
+`/auth/login` route if it is opened by URL — must state that plainly rather than navigating to a
+portal that does not exist. The landing page funnels all its CTAs through a single
+`campusflow:deploy-notice` event handled by one component, so switching to real links on deployment
+day is a one-line change per CTA and one component removed, not a copy hunt. The login page carries
+its own amber status panel because it is reachable directly. **When the instance is deployed, all of
+these go, and the footer's "presented, not deployed" Status column changes with them** — leaving
+either behind would be the dishonest direction.
+
+### A grid child's min-content width widens a phone page
+
+The landing page's deployment chapter put a terminal (`<pre>` with command lines up to ~90
+characters) inside a `grid gap-8 lg:grid-cols-[...]` section. At 1024 px and above it is two
+columns and everything is fine; at 390 px the implicit single column is `auto`-sized, so it took
+the terminal's **min-content** width — about 530 px — and the whole document became horizontally
+scrollable on a phone. `overflow-x: auto` was already on the `<pre>` and was not enough: the
+min-content contribution propagates through the grid item above it.
+
+The fix is `min-w-0` on the grid children (the `Reveal` wrappers), not a smaller font or a
+truncated command. Any future panel that contains an unbreakable wide child — a terminal, a table,
+a code block — needs the same treatment at every level between it and the grid.
+
+Two measurement traps found while chasing it, both worth remembering:
+
+* **A page resized after a desktop load is not a phone.** Chrome's mobile emulation only applies
+  the phone layout viewport when emulation is set *before* navigation; `setDeviceMetricsOverride`
+  on an already-loaded desktop page leaves some layout reads stale. Emulate, then navigate.
+* **`document.documentElement.scrollWidth` can disagree with `window.innerWidth`.** Content wider
+  than the device makes Chrome expand the *layout* viewport (≈700 px in this case) instead of
+  scrolling, so a horizontal-overflow check must read `scrollWidth - clientWidth` at a settled
+  scroll position, and verify per section with `scrollIntoView` rather than trusting one number
+  taken mid-scroll.
+
+### An unfocused tab never delivers IntersectionObserver callbacks
+
+While verifying the landing page's tour autoplay, the tour sat frozen at 01/13 with its timer
+reported as `paused`, even though the window was fully inside the viewport, `document.hidden` was
+false and `prefers-reduced-motion` was `no-preference`. The page had lost input focus
+(`document.hasFocus() === false`), and in that state Chrome does not deliver IntersectionObserver
+callbacks — a freshly attached observer with a 400 ms budget reported nothing at all, while
+`document.getAnimations()` still listed 16 running animations, so the tab was not frozen, only
+unfocused.
+
+The consequence for testing: **a headless check of anything gated on `useInView` must give the tab
+focus first** (a real click on the page is enough), otherwise a correct implementation reads as
+broken. It is not a product bug — a real visitor's tab has focus — but it will silently poison an
+automated visual/behavioural check, and it looks exactly like a latched flag in the component.
+
+### The staff "results" screen is not `/exams/{id}/results`
+
+The matching image for a staff results board is easy to get wrong. `/exams/{id}/results` renders
+`ExamResult`, which fetches **the signed-in user's own attempt** (`useStudentExamResult`). Signed in
+as a lead, an HOD or an admin there is no attempt, so the page renders "Results Unavailable — No
+exam attempt found for this student" while a caption promising candidate scores sits underneath it.
+The board those roles actually get is the exam page's **Submissions & Grading** tab.
+
+Related and deliberate: `GET /exams/{id}/attempts` and the unlock route both require
+`exams:grade`, and the service enforces offering scope with "exam grading and attempt review". The
+exam bureau (`exam_controller`) is **not** inside that scope, so it cannot read a candidate's
+attempt record at all — the screen is empty for that role, not slow. `allow_exam_bureau=True` is
+opt-in per call site and the grading/attempt routes do not opt in. A tour that shows the controller
+a grading queue is therefore describing a screen the role cannot have.
+
+Capture lesson: an empty state photographs perfectly. When a frame is meant to show rows, assert
+that the rows exist (an API call as that role, or a DOM count) before trusting the screenshot.

@@ -570,3 +570,121 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
   screenshots, the measured verification section and the three-command install carry that job instead.
   Screenshots become a maintenance obligation — they are honest, so they age, and a UI change means
   recapturing them.
+
+---
+
+### ADR-028: On-Device Face and Head-Direction Monitoring, and a Paper That Covers When Unobserved
+
+* **Status:** Accepted (2026-10-24)
+* **Context:** The integrity pipeline could prove the camera was alive and the tab was focused,
+  and it could localise a phone. It could not answer the question a candidate actually exploits:
+  *are you still looking at your own paper?* Turning to a neighbour's screen, reading a sheet
+  beside the desk, or having someone else sit down all leave the camera running and the tab
+  focused, so none of the browser signals fired. Two related holes made it worse: a camera outage
+  cost exactly one event however long it lasted, and a banner was the only response to a
+  condition that still left the question readable. ADR-003 rejected server-side streaming and
+  ADR-024 rejected model output as a verdict; this decision has to stay inside both boundaries.
+* **Decision:**
+  - **Detection runs on the candidate's device, and only conclusions are recorded.** A face
+    detector (BlazeFace, TF.js, loaded lazily at ~1 MB) runs over a 320-px copy of the required
+    camera frame every 700 ms. No frame for this check is transmitted, stored or analysed
+    elsewhere; the events that reach the server are a direction, an angle, a dwell and the same
+    still frame the other signals already carry.
+  - **The angle is geometry, not a model opinion.** The nose tip's horizontal offset from the eye
+    midpoint, normalised by the eye span, inverts to a yaw through a single documented constant
+    (`NOSE_DEPTH_RATIO`). It is invariant to resolution and distance, and the enforcement
+    threshold (50°, a real profile turn) sits far enough out that the constant's error cannot
+    flip a verdict at the boundary.
+  - **Away time accumulates; a glance is not a reset.** Two seconds turned away, three seconds
+    with no face, one and a half seconds with a second face — but measured cumulatively inside an
+    episode. A single good frame between two turns does not restart the clock; the episode ends
+    only after 1.6 s of actually facing the paper. Without this, turning for 1.9 s, glancing back
+    for one frame and turning again defeats any contiguous-dwell rule — the classic evasion, and
+    the reason a naive implementation is not trustworthy. A capped sample delta stops a
+    throttled tab from manufacturing away time. A persisting condition is re-reported every
+    twenty seconds, so a blink, a glance or a dropped frame is never an event, and ten minutes
+    unobserved is not one event either.
+  - **They consume the allowance.** Unlike a modelled *device* observation (ADR-024, review
+    evidence only), these are measurements of the candidate's own presence, so `looking_away`,
+    `face_not_visible` and `multiple_faces_detected` count against the disclosed `max_violations`
+    exactly as leaving the paper does. A camera outage is now reported on the same escalation
+    cadence rather than once per outage.
+  - **The allowance is disclosed before the first event.** `max_violations` is part of the
+    candidate's brief, and the delivery payload carries the count already recorded, so a resumed
+    attempt shows `n / m` from its first frame. The number is visible in the header chip and
+    repeated by the cover gate — one answer wherever the candidate looks.
+  - **The paper is covered when a condition is confirmed.** Camera off, a black picture, or a
+    dwell-confirmed no-face / second-face / sustained-turn condition replaces the question area
+    with a gate that states what is happening, how many events are recorded, and that answers and
+    the timer are safe. The gate is driven by the confirmed condition, not by a single frame: a
+    detector miss must not hide the question, and a glance back must not dismiss the cover. It
+    lifts only after the return has held for the recovery window. A banner was tried and is
+    insufficient — it leaves the question readable, which is the whole payoff of being
+    unobserved.
+  - **Failure is disclosed, never simulated.** If the model cannot load, the self-view strip says
+    `Face check: unavailable`; the pipeline never renders a protection that is not running.
+* **Consequences:** The strongest cheat the browser can see is now detected within seconds and
+  costs the candidate their allowance; hiding for the rest of the hour costs an event every
+  twenty seconds, and flickering back no longer resets the timer. Accepted limits, stated to
+  candidates and reviewers rather than hidden: a candidate who turns their whole body and screen
+  keeps a frontal face, the check runs in the candidate's own client and so is a deterrent rather
+  than a tamper-proof observer, and poor lighting or glare can make a face unmeasurable — which
+  never reports and never accrues away time, by design, so a bad frame cannot punish anyone (and
+  an unmeasurable reading cannot be used to dismiss an already-confirmed cover for longer than
+  the recovery window). The model download adds ~1 MB once per session. Server-side video with
+  invigilation would close the remaining gaps and is deliberately out of scope.
+
+---
+
+### ADR-029: A Per-Exam Integrity Profile, and an Observation Tier for the Weakest Cues
+
+* **Status:** Accepted (2026-10-27)
+* **Context:** ADR-023 made the *consequence* of reaching the tolerance per-exam, and ADR-028 made
+  the camera signals enforceable — but every dwell in that pipeline was still a constant compiled
+  into the client (`turnDwellMs: 2000`, `absenceDwellMs: 3000`). A closed-book final and a
+  first-year quiz therefore ran at identical sensitivity, and a paper could not opt out of a cue
+  it did not want. Two further holes were visible against how this is actually cheated: a phone
+  held below the shot while the head stays forward, and a second person reading answers out of
+  frame — neither of which produces a single event in the existing vocabulary. The counter-pressure
+  is a published one: an AI auto-proctor study across 244 attempts recorded 74 incorrect decisions
+  in 244 attempts, and no independent per-signal false-positive rate exists for hand-to-face or
+  audio on an ordinary webcam. Research into commercial systems (ProctorU, Proctorio, Respondus,
+  Honorlock) found the same asymmetry: browser events are near-deterministic, while a webcam
+  inference is a flag for a human, and a generic audio alarm is explicitly *not* evidence.
+* **Decision:**
+  - **Sensitivity is a per-exam property, disclosed as values.** Three tiers — `relaxed`,
+    `standard`, `strict` — set the dwell for every camera cue
+    (`INTEGRITY_DWELL_MS`), and `standard` is exactly what every paper authored before the setting
+    existed already ran at, so an upgrade cannot tighten a cohort's paper. The server sends the
+    milliseconds with the brief and the delivery; the client adopts them (`setDwell`) and enforces
+    what the candidate was told rather than its own constants. An unknown tier is refused at
+    authoring time (422) rather than silently defaulting, because a silent downgrade would hold a
+    cohort to a dwell nobody authored.
+  - **Each camera cue is independently switchable per exam.** `face_monitoring_enabled` (default
+    on — it is the baseline presence check), `hand_monitoring_enabled` and
+    `audio_monitoring_enabled` (default off, because each analyses more of the candidate's own
+    room). All three are disclosed to the candidate before the paper starts.
+  - **Two new signals, and both sit in an observation tier.** `hand_near_face` — a hand held at or
+    over the face for the tier's dwell, the geometry of reading from something in the hand —
+    and `voice_detected` — a sustained second voice measured from the microphone. Both are
+    recorded as evidence, raise the faculty review flag, show the candidate a neutral reminder,
+    and **never consume the allowance, lock the attempt or auto-submit** (the whole reason is the
+    benign-cause list: a scratch, glasses, a cough, a fan, a housemate, an accessibility need).
+    `HAND_AUDIO_OBSERVATION_EVENT_TYPES` is the single place that decides this.
+  - **The detectors share the face measurement instead of guessing separately.** Hand geometry
+    scales the landmarks from the face loop's frame onto its own, so both agree where the head is.
+    Voice reuses the call element's existing stream rather than requesting a second capture.
+  - **Nothing is recorded for the voice cue.** Frames are read as numbers, tested for amplitude,
+    band concentration and syllabic modulation, then discarded: no clip, no transcript, no
+    streaming. The event carries a level band and a duration. A steady loud hum is explicitly
+    rejected for lack of modulation, which is the false positive that would make the signal
+    worthless.
+* **Consequences:** A department can run a mid-term at `relaxed` with hands and voice off and a
+  final at `strict` with both on, and the candidate is told exactly that, in seconds, before the
+  paper starts. The two weakest cues add real coverage — the below-shot phone and the out-of-frame
+  voice — without handing a model the power to fail anyone, which is the line ADR-003, ADR-024 and
+  ADR-028 all draw. Accepted limits, stated on the landing page and to candidates: a phone under
+  the desk, a second screen out of shot and a crib sheet on a knee remain invisible to any single
+  webcam, a quiet speaker at distance is not detected, and neither new cue carries an accuracy
+  figure we could publish. The hand landmarker adds a ~3 MB model fetch once per session, loaded
+  lazily and reported as `unavailable` when it cannot load rather than presented as protection.

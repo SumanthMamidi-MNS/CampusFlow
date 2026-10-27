@@ -205,10 +205,15 @@ only for usability, never as a security boundary.
   gradebook access.
 - **Audience projections (two-projection rule):** a candidate and a staff member never receive
   the same payload type. `ExamResponse` carries `is_correct` and `explanation` and is staff-only;
-  candidates get `ExamStudentResponse` (metadata only, `config` reduced to
-  `{proctoring_enabled, max_attempts}`) from `GET /exams` and `GET /exams/{id}/public`. The same
-  rule applies to gradebooks (`MyCourseGradesResponse` for students) and to any future domain: a
-  shared response model that mixes staff and candidate fields is a defect.
+  candidates get `ExamStudentResponse` (metadata only) from `GET /exams` and
+  `GET /exams/{id}/public`, whose `config` is an explicit allowlist of the switches and
+  disclosures the delivery surface needs: `proctoring_enabled`, `max_attempts`,
+  `show_results_immediately`, `warning_policy`, `max_violations` (the disclosed allowance),
+  `device_detection_enabled`, `obstruction_threshold_seconds` and
+  `evidence_retention_days`. An exact-key assertion in
+  `tests/test_authorization_matrix.py` forces every addition to that projection to be
+  deliberate. The same rule applies to gradebooks (`MyCourseGradesResponse` for students) and to
+  any future domain: a shared response model that mixes staff and candidate fields is a defect.
 - **Anti-enumeration:** a candidate requesting an exam they may not see (draft, or another
   offering) receives **404**, not 403, so direct URLs cannot be probed.
 
@@ -219,11 +224,12 @@ only for usability, never as a security boundary.
 
 ### Observable Proctoring Model
 CampusFlow implements **observable, rule-based proctoring only** (ADR-003, ADR-013). There is
-no gaze or facial analysis, no biometric processing, no screen recording and no automated
-cheating verdict. Events are recorded as an append-only audit trail; they are advisory
-evidence for a human reviewer. The single camera model in the product is on-device
-*object* detection for prohibited devices (ADR-024, below): it recognises things, never
-people, and it never leaves the candidate's browser.
+no screen recording, no face recognition or identity matching, no stored biometric template
+and no automated cheating verdict. Events are recorded as an append-only audit trail; they
+are evidence for a human reviewer. Two analyses run on the candidate's own device and only
+their conclusions — an event, a direction, an angle, a dwell — reach the server: on-device
+*object* detection for prohibited devices (ADR-024) and face/head-direction monitoring
+(ADR-028). Neither streams video, and the face check never identifies who is in the frame.
 
 - **Camera-integrity mode (per exam, covered by `proctoringEnabled`):** when the exam requires
 the camera, the candidate's browser asks for it explicitly and the page reports readiness
@@ -235,9 +241,25 @@ keep the camera's **true, un-mirrored** orientation.
 - **Evidence frames:** one 320px-wide JPEG (≈a few KB) a minute while the attempt runs, stored
 as `camera_snapshot` event details on the attempt and shown only to staff holding
 `exams:proctor_view` in the integrity timeline (`ExamDetail`). Camera signals recorded:
-`camera_off` (the required camera stopped), `camera_obstructed` (a frame that stops changing,
-reported once after the four-second policy grace, recovering silently), `second_device_detected`
-(a phone in view) — evidence for a lecturer, never a verdict.
+`camera_off` (the required camera stopped; re-reported every 20 s while the outage lasts),
+`camera_obstructed` (a frame that stops changing, after the authored policy grace),
+`second_device_detected` (a phone in view), and the face-monitoring signals
+`looking_away`, `face_not_visible` and `multiple_faces_detected` — evidence for a lecturer,
+never a verdict.
+- **Face and head-direction monitoring (ADR-028, on by default with the camera):** BlazeFace
+runs over a 320 px copy of the required frame every 700 ms in the candidate's browser and
+returns a face count and three landmarks. Yaw is geometry — the nose tip's offset from the
+eye midpoint, normalised by the eye span — so it is independent of resolution and camera
+distance and needs no hosted service. Away time **accumulates**: a single good frame between
+two turns is not a return (the episode ends only after `recoveryMs` of actually facing the
+paper), so flickering between `turned_left`/`turned_right` and `no_face` cannot reset the
+dwell. The dwells are 2 s turned, 3 s absent and 1.5 s for a second face; a persisting
+condition is re-reported every 20 s. `unreadable` frames (glare, too far, partial view) never
+count as away time, so a bad frame cannot punish anyone. While a condition is confirmed the
+question area is **covered** by a gate that names it and repeats `n / m`; the gate lifts on a
+real return, and answers plus the timer are untouched. Nothing about this check is streamed:
+the detector runs locally and only the resulting event, with the still frame the trail
+already attaches, is sent.
   - **Retention and erasure (ADR-026):** frames are personal data and do not live forever.
     `PROCTORING_EVIDENCE_RETENTION_DAYS` (institution setting, default 90, `0` = keep) drives a
     daily retention job (`purge_proctoring_evidence`, `scripts/purge_proctoring_evidence.py`) that
@@ -271,13 +293,16 @@ reported once after the four-second policy grace, recovering silently), `second_
   - Returning inside the five-second grace (`quick_tab_return`: recorded, never charged) and
     a window resize (low-signal).
 - **Tolerated-event threshold:** Each exam carries `config.max_violations` (default 5, authored
-per exam and validated by the API) and a `config.warning_policy` (ADR-023). Under `remove`
+per exam and validated by the API) and a `config.warning_policy` (ADR-023). Both are
+disclosed in the candidate's brief, and the delivery payload carries the count already
+recorded, so a resumed attempt shows the true `n / m` from its first frame. Under `remove`
 (the default) reaching the threshold locks the attempt until a lecturer reopens it; under
 `review` the attempt is flagged once for faculty review and the candidate keeps working.
 Either way an automated signal never decides guilt.
-- **Neutral candidate messaging:** Candidates see a calm, informational notice of the
-remaining allowance. There is no flashing/strobe warning, no shouting copy, and no
-lockdown screen.
+- **Candidate messaging:** The attempt header carries a persistent integrity chip with the
+recorded count and allowance (`n / m`), a recorded event raises a red banner with the
+server's wording, and the cover gate names the condition that is hiding the paper. The copy
+is instructional, not accusatory; there is no strobe effect and no permanent lockout screen.
 - **Faculty review:** The exam workspace exposes a per-attempt integrity timeline with
 severities and timestamps, so an instructor can interpret context before acting.
 - **Faculty-authorised resumption:** `POST /exams/{id}/attempts/{attempt_id}/unlock`

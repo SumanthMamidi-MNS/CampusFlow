@@ -251,6 +251,77 @@ wearable signal is reported as raw classifier output and **no wearable accuracy 
 The sample is stills, not recorded footage, so the measurement bounds the detector's
 behaviour; re-measure against exam footage before quoting precision/recall as field numbers.
 
+### Verifying face and head-direction monitoring
+
+The detector needs a webcam and a model download, so it is not exercised automatically. Its
+*decision layer* is deterministic, and
+[check-face-monitoring.ts](frontend/scripts/check-face-monitoring.ts) drives the shipped module with
+synthetic landmarks and a synthetic clock:
+
+```bash
+cd frontend
+node scripts/check-face-monitoring.ts       # Node 22.6+ (type stripping); 47 checks
+```
+
+It exits non-zero on any mismatch. It covers a frontal face at ~0°, a 62° turn in both
+directions, resolution invariance, the 50° threshold on both sides, the 2 s / 3 s / 1.5 s dwells,
+the 20 s escalation, the accumulated-dwell rule (a one-frame return between two turns does not
+reset the tally), a held return that does end the episode, and 60 s of unmeasurable frames
+recording nothing and covering nothing.
+
+### Verifying hand-at-face and voice monitoring (ADR-029)
+
+Both new detectors need hardware — a hand landmarker needs a model download, the voice detector
+needs a live microphone — so neither runs in CI. Their decision layers are deterministic and
+[check-hand-voice-monitoring.ts](frontend/scripts/check-hand-voice-monitoring.ts) drives the
+shipped modules with synthetic landmarks, synthetic analyser frames and a synthetic clock:
+
+```bash
+cd frontend
+node scripts/check-hand-voice-monitoring.ts   # Node 22.6+; 42 checks
+```
+
+What it pins, and why each one matters:
+
+* **Hand geometry.** The face extent from a detector box and from a bare landmark set; a hand at
+the face versus a hand on the desk; the ratio threshold on both sides of the boundary; a hand
+with too few landmarks ignored; the closest of two hands deciding; and a hand with no face
+reference reading `unmeasurable` rather than `at_face`, so a candidate cannot be charged for a
+measurement the geometry cannot make.
+* **Hand decisions.** A one-second scratch is never an event; a blink away does not reset the
+*dwell* (the accumulation survives it, which is the whole defence against the classic
+evasion); an unmeasurable frame neither reports nor clears an open episode; a throttled tab
+cannot leap the dwell in one gap; escalation keeps a minute-long episode to a handful of events;
+and a real return closes the episode so the next one reports fresh.
+* **Voice analysis.** In-band versus out-of-band energy; a level under the floor rejected; a
+**steady loud hum rejected for lack of modulation** (the false positive that would make a generic
+sound alarm worthless); and syllabic speech detected at the same average level as the hum.
+* **Voice decisions.** A cough is not sustained enough to report; sustained speech reports; a
+pause between sentences does not defeat the dwell; a long conversation stays a few events rather
+than thousands; a suspended tab cannot leap the dwell; and a quiet room ends the episode.
+
+The audio frames are synthesised as a 180 Hz carrier with an explicit in-band/out-of-band power
+distribution, so `bandEnergyRatio` is exercised through the same dBFS-to-linear conversion the
+analyser path uses. Neither harness claims detection *accuracy*: they prove the rules fire when
+they should and stay silent when they should, which is what can be verified without a person in
+front of a camera.
+
+The detector is `@tensorflow-models/face-detection` (BlazeFace, TF.js runtime). That package
+imports MediaPipe's `@mediapipe/face_detection` at module scope; `vite.config.ts` aliases the
+specifier to a small stand-in so the assessment bundle neither downloads several megabytes of
+unused WASM nor fails to resolve a peer dependency. If the runtime ever changes to
+`runtime: 'mediapipe'`, remove the alias and install the real solution — the stand-in throws
+rather than pretending to work.
+
+On a real machine, `/exams/{id}/take` shows the live state under the self-view (`Face check:
+facing the screen`, `head turned away`, `no face visible`, `more than one face`,
+`unavailable`). A full turn to either side held for two seconds must cover the question area and
+add one `looking_away` event; a single glance back must not dismiss that cover, while facing the
+paper for the recovery window must.
+Covering the lens must cover the paper within the authored obstruction threshold. If the model
+host is blocked, the strip says `Face check: unavailable` and the assessment still runs — the
+pipeline never claims a check that is not running.
+
 ### Which frontend image runs where
 
 The **development** stack builds `frontend/Dockerfile.dev`: `node:20-alpine`, `npm ci`, then the
@@ -289,6 +360,39 @@ IPv6) while `127.0.0.1` can refuse the connection, and a capture run that signs 
 must clear `localStorage` between sessions or the previous token wins. Nothing in the product is
 modified to improve a screenshot — the images stay honest, which is why they age and need refreshing.
 
+### Regenerating the landing-page tour
+
+`frontend/public/tour/<portal>/*.webp` are the screens behind the landing page's chapter 03. Six
+portals, 55 captures, all 1440×900 at the browser's own scale factor, encoded by Chrome as WebP
+(quality 82) so the whole tour is ~2.6 MB and only the active portal is fetched.
+
+Every capture must be a screen **that role can actually open**, and the caption beside it must
+describe what the frame shows. Two mistakes are easy to make and both were made once:
+
+* `/exams/{id}/results` is the *student's* scorecard. Signed in as staff it renders "Results
+  Unavailable", so the staff "results board" is `/exams/{id}` → **Submissions & Grading**.
+* The attempt and grading endpoints require `exams:grade`, which the exam bureau deliberately does
+  not hold. A controller's tour therefore has no grading-queue screen to show — the role section
+  says so instead of photographing an empty table.
+
+The capture harness is a throwaway script kept outside version control; the recipe is what matters:
+
+1. Seed a database and run the API and the Vite dev server against it.
+2. Sign in over the API, then write `access_token` and `campusflow_user` into `localStorage` before
+   navigating, so the SPA hydrates a session instead of showing the sign-in screen.
+3. **Wait for `#boot` to be removed.** The boot screen holds for a minimum of 1.8 visible seconds
+   plus a 0.42 s handover; a capture taken before that is a screenshot of the splash, not the
+   product.
+4. Drive the installed Chrome over CDP (`Page.captureScreenshot` with `format: 'webp'`) and capture
+   one step per route or interaction: tabs, dialogs, a typed editor, an attempt in progress.
+5. Press interactions through their real controls. React owns the textareas and the tab state, so a
+   value has to go through the native setter and an `input` event, and a tab is a click, not a URL.
+
+The in-progress attempt cannot be captured from the seeded attempts — they are already submitted —
+so the recipe creates one temporary live exam (proctoring disabled) with five questions, starts an
+attempt for a seeded student, captures the delivery screen, and deletes the exam afterwards. The
+delete is the API's own `DELETE /exams/{id}`, which leaves no orphan attempts or responses.
+
 ---
 
 ## 6. Seed Data & Database Initialization
@@ -307,6 +411,7 @@ uv run python ../scripts/seed.py
 | Role | Email | Password | Scope & Responsibilities |
 |---|---|---|---|
 | **Super Admin** | `admin@campusflow.edu` | `Admin@CampusFlow2026` | Full platform access, user provisioning, institution branding, audit logs |
+| **Campus Lead** | `lead@campusflow.edu` | `Password@123` | The `admin` role without platform reach: accounts, academic structure, institution settings |
 | **Exam Controller** | `controller@campusflow.edu` | `Password@123` | Institutional examination scheduling, question pool approvals, exam publishing |
 | **Department Head (CSE)** | `hod.cse@campusflow.edu` | `Password@123` | Department management, program definitions, course offerings, analytics |
 | **Faculty (CSE)** | `faculty.cse@campusflow.edu` | `Password@123` | Course instructor (CS201, CS301), question bank authoring, exam grading |
@@ -631,3 +736,32 @@ Every migration in this repository is reversible; check `alembic history` agains
 the full pytest suite against PostgreSQL (and SQLite), and the frontend
 lint/typecheck/build. The PostgreSQL job is the one that matters for release —
 the concurrency constraints and the JSON columns behave differently from SQLite.
+
+### 7.11 Hosting the SPA on Vercel (optional split)
+
+The supported deployment is still the single Compose host in §7.1. Vercel is a reasonable host for
+the **static SPA only**; it cannot run this backend. The API needs a long-lived FastAPI process,
+persistent PostgreSQL and Redis connections, the Piston sandbox container, the retention and backup
+jobs, and cookie handling across an entire exam attempt. Vercel Functions are not a drop-in for any
+of that, and a database-per-request serverless model would break the attempt transaction.
+
+If the frontend is hosted separately:
+
+1. Create a Vercel project with **Root Directory** `frontend`. The Vite preset builds with
+   `npm run build` and serves `dist/`; keep `npm ci` as the install command.
+2. Proxy the API through the same origin with a rewrite: `/api/:path*` to
+   `https://<backend-host>/api/:path*`, placed **before** the SPA fallback
+   (`/:path*` to `/index.html`).
+3. Keep the backend, PostgreSQL, Redis and Piston on the Compose host, reachable over HTTPS at the
+   same `/api/v1/...` paths.
+4. Do not change the client's `baseURL` (`/api/v1`) and do not split the API onto a second origin.
+   The `httpOnly`, `SameSite=Strict` refresh cookie and the access-token header are built around
+   one origin. The Vercel rewrite keeps the browser on one origin, so no CORS or `SameSite=None`
+   change is needed.
+5. `CORS_ORIGINS` only needs the Vercel origin if a browser later calls the API directly from a
+   different origin; the same-origin rewrite does not use it.
+
+The SPA has no server-side dependency: every `/api` call is proxied and `index.html` is the only
+entry point. No `vercel.json` is committed because the rewrite destination is institution-specific;
+set it in the Vercel project (or in a local `frontend/vercel.json` at deploy time) so no placeholder
+host ships in the repository.
