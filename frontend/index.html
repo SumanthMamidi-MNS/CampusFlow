@@ -31,7 +31,34 @@
         background: #f8fafc;
         font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
         text-align: center;
-        transition: opacity 0.28s ease;
+        /* The handover is owned here, not by an inline style in main.tsx: the
+           overlay and its contents have to leave as one surface. Duration and
+           easing match BOOT_EXIT_MS in main.tsx. */
+        transition: opacity 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      #boot .mark,
+      #boot .word,
+      #boot .tag,
+      #boot .roles,
+      #boot .bar,
+      #boot .caption,
+      #boot .foot {
+        transition:
+          opacity 0.34s ease,
+          transform 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      /* The curtain lifts: the panel fades out while the brand inside it rises
+         a few pixels and shrinks by a hair, so the page behind is revealed
+         rather than switched on. */
+      #boot.is-leaving {
+        opacity: 0;
+      }
+
+      #boot.is-leaving > * {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.99);
       }
 
       #boot::before {
@@ -142,31 +169,59 @@
           opacity: 0.45;
           animation: none;
         }
+
+        /* A cross-fade is motion too; a reader who asked for less gets the page
+           at once rather than a 0.42 s dissolve. */
+        #boot,
+        #boot .mark,
+        #boot .word,
+        #boot .tag,
+        #boot .roles,
+        #boot .bar,
+        #boot .caption,
+        #boot .foot {
+          transition-duration: 0.01s;
+        }
       }
     </style>
   </head>
   <body>
     <div id="boot" role="status" aria-live="polite" aria-label="Loading CampusFlow">
-      <svg class="mark" viewBox="6 10 84 84" fill="none" aria-hidden="true">
+      <svg class="mark" viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <defs>
-          <linearGradient id="boot-border" x1="6" y1="6" x2="90" y2="90" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#A5B4FC" />
-            <stop offset="50%" stop-color="#6366F1" />
-            <stop offset="100%" stop-color="#312E81" />
+          <linearGradient id="boot-border" x1="6" y1="4" x2="90" y2="92" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#C7D2FE" />
+            <stop offset="42%" stop-color="#6366F1" />
+            <stop offset="100%" stop-color="#3730A3" />
           </linearGradient>
-          <linearGradient id="boot-bg" x1="48" y1="6" x2="48" y2="90" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#111533" />
-            <stop offset="100%" stop-color="#0A0C22" />
+          <linearGradient id="boot-bg" x1="48" y1="3" x2="48" y2="93" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#302E7A" />
+            <stop offset="52%" stop-color="#1D1B4E" />
+            <stop offset="100%" stop-color="#0F0E2C" />
           </linearGradient>
-          <linearGradient id="boot-cap" x1="24" y1="28" x2="72" y2="64" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#E0E7FF" />
-            <stop offset="100%" stop-color="#818CF8" />
+          <linearGradient id="boot-sheen" x1="48" y1="3" x2="48" y2="58" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.17" />
+            <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
           </linearGradient>
+          <linearGradient id="boot-cap" x1="22" y1="28" x2="74" y2="66" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#FFFFFF" />
+            <stop offset="100%" stop-color="#C7D2FE" />
+          </linearGradient>
+          <clipPath id="boot-clip"><rect x="3" y="3" width="90" height="90" rx="22" /></clipPath>
         </defs>
-        <rect x="6" y="10" width="84" height="84" rx="20" fill="url(#boot-bg)" stroke="url(#boot-border)" stroke-width="3" />
-        <path d="M48 28 L76 42 L48 56 L20 42 Z" fill="url(#boot-cap)" />
-        <path d="M32 50 V62 C32 66 40 70 48 70 C56 70 64 66 64 62 V50 L48 58 Z" fill="url(#boot-cap)" opacity="0.85" />
-        <path d="M76 42 V58" stroke="#818CF8" stroke-width="3" stroke-linecap="round" />
+        <rect x="1.5" y="1.5" width="93" height="93" rx="23" fill="url(#boot-bg)" />
+        <g clip-path="url(#boot-clip)">
+          <rect x="3" y="3" width="90" height="46" fill="url(#boot-sheen)" />
+        </g>
+        <rect x="1.5" y="1.5" width="93" height="93" rx="23" stroke="url(#boot-border)" stroke-width="3" />
+        <g transform="translate(-0.6 3.7)">
+          <path d="M48 27 L80 39 L48 51 L16 39 Z" fill="url(#boot-cap)" />
+          <path d="M48 27 L80 39 L48 51 Z" fill="#A5B4FC" opacity="0.35" />
+          <path d="M33 45.4 V55 C33 59 39.5 61.5 48 61.5 C56.5 61.5 63 59 63 55 V45.4 L48 51 Z" fill="url(#boot-cap)" />
+          <path d="M48 51 L63 45.4 V55 C63 59 56.5 61.5 48 61.5 Z" fill="#A5B4FC" opacity="0.32" />
+          <path d="M80 39 V52" stroke="#A5B4FC" stroke-width="3" stroke-linecap="round" />
+          <circle cx="80" cy="55.2" r="2.4" fill="#A5B4FC" />
+        </g>
       </svg>
 
       <div class="word">Campus<span>Flow</span></div>

@@ -27,17 +27,27 @@ import type { LucideIcon } from 'lucide-react';
 
 export const NAV = [
   { label: 'Platform', href: '#platform' },
+  { label: 'Screens', href: '#screens' },
   { label: 'Workflow', href: '#workflow' },
   { label: 'Integrity', href: '#integrity' },
-  { label: 'Stack', href: '#stack' },
-  { label: 'Deploy', href: '#deploy' },
+  { label: 'Run it', href: '#run' },
+  { label: 'Proof', href: '#proof' },
+] as const;
+
+export const MARQUEE = [
+  'One roster',
+  'One authorization model',
+  'One audit trail',
+  'One server',
+  'No public sign-up',
+  'Delivered per college',
 ] as const;
 
 export const STATS = [
-  { figure: '1', label: 'server', note: 'API, database, sandbox and proxy' },
-  { figure: '6', label: 'roles', note: 'over one 67-permission catalogue' },
-  { figure: '83', label: 'backend tests', note: 'passing on PostgreSQL' },
-  { figure: '0', label: 'SaaS dependencies', note: 'no public sign-up, no vendor' },
+  { figure: '1', label: 'server', note: 'API · database · sandbox · proxy' },
+  { figure: '6', label: 'roles', note: 'one 67-permission catalogue' },
+  { figure: '94', label: 'backend tests', note: 'in the suite · CI runs PostgreSQL' },
+  { figure: '0', label: 'SaaS deps', note: 'no sign-up, no vendor' },
 ] as const;
 
 export interface RecordRow {
@@ -80,13 +90,6 @@ export interface Shot {
   title: string;
   caption: string;
 }
-
-export const DASHBOARD_SHOT: Shot = {
-  src: '/shots/dashboard.png',
-  alt: 'CampusFlow institutional analytics: enrolment, faculty load, course performance and examination readiness computed from live records',
-  title: 'Institutional analytics',
-  caption: 'Enrolment, faculty load, course performance and examination readiness — computed from the same records the students and faculty see.',
-};
 
 export interface Module {
   id: string;
@@ -388,6 +391,8 @@ export interface Stage {
   kicker: string;
   title: string;
   body: string;
+  /** What this stage hands to the next one. */
+  leaves: string;
 }
 
 export const STAGES: Stage[] = [
@@ -395,31 +400,37 @@ export const STAGES: Stage[] = [
     kicker: 'Author',
     title: 'Question bank',
     body: 'Types, marks, negative marks and an approval state. CSV brings the backlog in.',
+    leaves: 'An approved question with its marks and its key.',
   },
   {
     kicker: 'Assemble',
     title: 'Paper sections',
     body: 'Sections, shuffling and per-question marks — or draw a random paper by tag and difficulty.',
+    leaves: 'A paper whose sections add up, ready to be scheduled.',
   },
   {
     kicker: 'Schedule',
     title: 'Window + policy',
     body: 'A start and end the server enforces, with the integrity tolerance and outcome authored on the paper.',
+    leaves: 'A window the server will close, whoever is still typing.',
   },
   {
     kicker: 'Sit',
     title: 'Timed attempt',
     body: 'Server clock, autosaved answers, camera check where required, every signal recorded.',
+    leaves: 'One attempt, with a timeline and an autosaved answer set.',
   },
   {
     kicker: 'Grade',
     title: 'Score + rubric',
     body: 'Objective answers score themselves; subjective answers wait in a queue with the rubric attached.',
+    leaves: 'A score, and the rubric every mark on it was given against.',
   },
   {
     kicker: 'Publish',
     title: 'Result + gradebook',
     body: 'The scorecard is released, the section grade updates, and analytics recompute from the same rows.',
+    leaves: 'A released result the gradebook and analytics both read.',
   },
 ];
 
@@ -504,81 +515,41 @@ export const SECURITY: Rule[] = [
 ];
 
 export const INTEGRITY_FACTS = [
-  { figure: '4 s', label: 'default obstruction threshold, authored per exam (2–30 s)' },
+  { figure: '3', label: 'sensitivity tiers — relaxed, standard, strict — authored per paper' },
   { figure: '1–20', label: 'integrity events tolerated, set on the paper' },
   { figure: '90 days', label: 'default camera-evidence retention, disclosed to candidates' },
   { figure: '0', label: 'answer keys reachable from a candidate payload' },
 ] as const;
 
-export const GALLERY: Shot[] = [
+/**
+ * The integrity signals a paper can run with, split by what they are allowed to
+ * do (ADR-029).
+ *
+ * The split is the honest part and the reason it is on the page: browser events
+ * and the two presence measurements can be counted against a disclosed
+ * allowance, while a model's guess about a hand, a voice or a phone is only ever
+ * evidence for a human. A reviewer reading this should be able to tell which is
+ * which without opening the code.
+ */
+export const INTEGRITY_CUES = [
   {
-    src: '/shots/examinations.png',
-    alt: 'Scheduled, live and published examinations with attempt counts',
-    title: 'The examination board',
-    caption: 'What is scheduled, what is live, and what is waiting to be released.',
+    tier: 'counts toward the disclosed allowance' as const,
+    items: [
+      'Leaving the paper — tab switch, focus loss, full-screen exit',
+      'Head turned past the threshold for the tier, sustained',
+      'No face in frame for the tier\u2019s absence window',
+      'Two or more faces at the desk',
+      'Camera stopped or obstructed past the authored grace',
+      'Clipboard and context-menu attempts, window resize, network change',
+    ],
   },
   {
-    src: '/shots/assessment.png',
-    alt: 'Candidate assessment brief with the timed-paper summary, integrity disclosure and camera notice',
-    title: 'The candidate’s brief',
-    caption: 'Timing, marks and the integrity policy are disclosed before the clock starts.',
-  },
-  {
-    src: '/shots/course-workspace.png',
-    alt: 'Course workspace with announcements, materials and the roster',
-    title: 'The course workspace',
-    caption: 'Materials, announcements and the roster behind one section.',
-  },
-  {
-    src: '/shots/question-banks.png',
-    alt: 'Question bank authoring with departments, approval state and question types',
-    title: 'Banks, not spreadsheets',
-    caption: 'Six question types, an approval state, and CSV for the backlog.',
-  },
-  {
-    src: '/shots/programming.png',
-    alt: 'Sandboxed programming problem with the in-browser editor and per-test results',
-    title: 'Code, graded',
-    caption: 'The editor runs public tests; grading runs the hidden suite in the sandbox.',
-  },
-  {
-    src: '/shots/student-dashboard.png',
-    alt: 'Student dashboard with their own deadlines, marks and upcoming examinations',
-    title: 'The student’s own view',
-    caption: 'A different projection of the same data — deadlines, marks, next examination.',
-  },
-];
-
-export const STACK = [
-  {
-    layer: 'API',
-    choice: 'Python 3.12 · FastAPI · Pydantic v2',
-    why: 'Request schemas double as the validation and authorization surface.',
-  },
-  {
-    layer: 'Data',
-    choice: 'PostgreSQL 15 · SQLAlchemy 2 (async) · Alembic',
-    why: 'Invariants live in constraints, not in application hope.',
-  },
-  {
-    layer: 'Frontend',
-    choice: 'React 19 · TypeScript · Vite · TanStack Query · Tailwind CSS 4',
-    why: 'A typed SPA on a light institutional theme — no separate UI kit to keep in sync.',
-  },
-  {
-    layer: 'Identity',
-    choice: 'JWT access tokens · rotating refresh cookies · RBAC · audit',
-    why: 'Six roles over 67 permissions, with every consequential change written down.',
-  },
-  {
-    layer: 'Sandbox',
-    choice: 'Piston (isolate) in a dedicated container',
-    why: 'Real CPU, memory and concurrency ceilings around untrusted student code.',
-  },
-  {
-    layer: 'Delivery',
-    choice: 'Docker Compose · Caddy with TLS · GitHub Actions',
-    why: 'One host, one origin, one front door; CI runs the suite against PostgreSQL.',
+    tier: 'evidence for a human, never a penalty' as const,
+    items: [
+      'A probable phone, earbuds or smartwatch in the camera picture',
+      'A hand held at the face past the dwell \u2014 reading off something in the hand',
+      'A second voice, sustained, from the candidate\u2019s own microphone',
+    ],
   },
 ] as const;
 
@@ -616,45 +587,6 @@ docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec backend \\
   python scripts/provision_admin.py --email you@example.edu --password 'at least 12 characters'`;
 
-export interface EnvVar {
-  key: string;
-  required?: boolean;
-  note: string;
-}
-
-export const ENV_VARS: EnvVar[] = [
-  {
-    key: 'POSTGRES_PASSWORD',
-    required: true,
-    note: 'Compose refuses to start without it. Generate one with secrets.token_urlsafe(48).',
-  },
-  {
-    key: 'JWT_SECRET_KEY',
-    required: true,
-    note: 'The API refuses to boot outside debug while this is still the shipped placeholder.',
-  },
-  {
-    key: 'CORS_ORIGINS',
-    note: 'The deployment origin. Same-origin by default; add a second only if one exists.',
-  },
-  {
-    key: 'INSTITUTION_NAME · INSTITUTION_TIMEZONE',
-    note: 'What the interface calls the college, and the clock its windows are authored in.',
-  },
-  {
-    key: 'PROCTORING_EVIDENCE_RETENTION_DAYS',
-    note: 'How long camera stills are kept. The event and its timeline always survive.',
-  },
-  {
-    key: 'CODE_RUN_MEMORY_LIMIT_KB · CODE_RUN_MAX_TIMEOUT_MS',
-    note: 'The ceilings the sandbox enforces on submitted code.',
-  },
-  {
-    key: 'EMAIL_BACKEND',
-    note: 'Console by default. Set to smtp with a relay of your own — none is bundled.',
-  },
-];
-
 export const BOOT_SEQUENCE = [
   'Compose interpolates `.env` and starts PostgreSQL, Redis, the Piston sandbox and the API.',
   'Migrations run at start; the API stays unhealthy until the schema is at head.',
@@ -665,10 +597,414 @@ export const BOOT_SEQUENCE = [
 
 export const VERIFICATION = [
   { dir: 'backend', command: 'ruff check .', result: 'clean' },
-  { dir: 'backend', command: 'pytest -q · SQLite', result: '81 passed, 2 skipped' },
-  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: '83 passed' },
+  { dir: 'backend', command: 'pytest -q · SQLite', result: '92 passed, 2 skipped' },
+  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: 'CI · the same 94' },
   { dir: 'frontend', command: 'npm run lint', result: '0 errors' },
   { dir: 'frontend', command: 'npm run build', result: 'success' },
+];
+
+export interface TourStep {
+  src: string;
+  alt: string;
+  title: string;
+  body: string;
+}
+
+export interface Tour {
+  id: string;
+  label: string;
+  who: string;
+  blurb: string;
+  steps: TourStep[];
+}
+
+/**
+ * The guided tour: one portal at a time, every screen a real capture of the
+ * running build against the seeded development database.
+ *
+ * Each step says what the person is looking at and what the screen lets them do;
+ * nothing here describes a state the application cannot reach. Captures are
+ * regenerated with `scratch/tour-*.mjs` (see `docs/development.md`).
+ */
+export const TOURS: Tour[] = [
+  {
+    id: 'student',
+    label: 'Student',
+    who: 'Alex Rivera · CS201 and CS301',
+    blurb: 'A candidate’s term from the first sign-in to a graded scorecard.',
+    steps: [
+      {
+        src: '/tour/student/student-01-dashboard.webp',
+        alt: 'Student dashboard showing two enrolled courses, one completed task, a 94.2 percent average and recent graded work',
+        title: 'The student’s home',
+        body: 'Enrolled courses, completed work, the running average and recent marks — every number scoped to their own record.',
+      },
+      {
+        src: '/tour/student/student-02-courses.webp',
+        alt: 'Course list with CS201 and CS301, section A, the instructor and an active status',
+        title: 'The sections they belong to',
+        body: 'Two offerings, each one a section of a course in a term. The roster is what decides what appears here.',
+      },
+      {
+        src: '/tour/student/student-03-course.webp',
+        alt: 'Course workspace showing announcements from the instructor, with the pinned welcome note',
+        title: 'Inside the course',
+        body: 'Announcements addressed to this section — the pinned welcome and the midterm logistics note.',
+      },
+      {
+        src: '/tour/student/student-04-course-materials.webp',
+        alt: 'Course materials tab with a lecture notes folder and a linked module file',
+        title: 'Materials',
+        body: 'Folders and files shared with the cohort. A download is authorised for the caller, not for whoever holds the link.',
+      },
+      {
+        src: '/tour/student/student-05-course-assignments.webp',
+        alt: 'Assignments tab showing one coursework item already graded at 95 out of 100 with feedback',
+        title: 'Coursework in place',
+        body: 'The assignment for this section: weighting, late policy, the mark awarded and the instructor’s feedback.',
+      },
+      {
+        src: '/tour/student/student-06-assignments.webp',
+        alt: 'All coursework across courses, tabulated by pending, awaiting evaluation and graded',
+        title: 'Every deadline in one list',
+        body: 'All coursework across their courses, filtered by what is pending, awaiting evaluation or finished.',
+      },
+      {
+        src: '/tour/student/student-07-programming.webp',
+        alt: 'Programming problem list with a Python problem, its marks, test count and time limit',
+        title: 'The programming environment',
+        body: 'Sandboxed problems this section may attempt, with the marks, the test count and the execution limit stated up front.',
+      },
+      {
+        src: '/tour/student/student-08-problem.webp',
+        alt: 'Problem detail with the statement, examples and a starter code editor with a line-number gutter',
+        title: 'Opening a problem',
+        body: 'The statement and its examples on the left, a real editor on the right, and the constraints the judge will enforce.',
+      },
+      {
+        src: '/tour/student/student-09-problem-run.webp',
+        alt: 'Solution in the editor with the sandbox output panel showing HELLO WORLD as stdout',
+        title: 'Run it in the sandbox',
+        body: 'Run sends the code to the isolated Piston sandbox and returns stdout, stderr and the exit status. Nothing is graded yet.',
+      },
+      {
+        src: '/tour/student/student-10-exams.webp',
+        alt: 'Examination list showing a published midterm with results and a scheduled final with its window',
+        title: 'Examinations',
+        body: 'What is scheduled, what is live, and what has been released, with the window and the marks disclosed.',
+      },
+      {
+        src: '/tour/student/student-11-exam-brief.webp',
+        alt: 'Assessment brief disclosing duration, total marks, the integrity policy, camera check and retention window',
+        title: 'The brief before the clock',
+        body: 'Duration, marks, the integrity rule, the camera check and the retention window — all disclosed before the paper starts.',
+      },
+      {
+        src: '/tour/student/student-12-exam-attempt.webp',
+        alt: 'Timed paper in progress with the server-owned countdown, a question navigator, autosave and flag for review',
+        title: 'Writing the paper',
+        body: 'The server owns the clock; answers autosave, questions can be flagged, and the navigator shows what is still unanswered.',
+      },
+      {
+        src: '/tour/student/student-13-result.webp',
+        alt: 'Official exam scorecard with 14 of 15 marks and a per-question breakdown showing the answer given and the key',
+        title: 'The scorecard',
+        body: 'Marks per question with the answer given and the correct key — served only after the instructor publishes results.',
+      },
+    ],
+  },
+  {
+    id: 'faculty',
+    label: 'Faculty',
+    who: 'Sarah Chen · teaches CS201 and CS301',
+    blurb: 'Teaching two sections: materials, coursework, the gradebook and the papers.',
+    steps: [
+      {
+        src: '/tour/faculty/faculty-01-courses.webp',
+        alt: 'Faculty course list showing the two sections they are assigned to',
+        title: 'The sections they teach',
+        body: 'Two offerings, each with its section, term and status. A lecturer sees the sections they are assigned to, not the catalogue.',
+      },
+      {
+        src: '/tour/faculty/faculty-02-course.webp',
+        alt: 'Teaching workspace with announcements and a post announcement action',
+        title: 'The teaching workspace',
+        body: 'The same section the student sees, with the actions that publish into it — starting with announcements.',
+      },
+      {
+        src: '/tour/faculty/faculty-03-coursework.webp',
+        alt: 'Assignments tab with a create assignment action, the weighting, late policy and three submissions to grade',
+        title: 'Coursework management',
+        body: 'Create an assignment with its weighting and late policy, then open the submissions that need marking.',
+      },
+      {
+        src: '/tour/faculty/faculty-04-gradebook.webp',
+        alt: 'Course gradebook with weighted scores per student and a CSV export',
+        title: 'The gradebook',
+        body: 'Weighted marks assembled from coursework and examinations, per student, exportable as a CSV.',
+      },
+      {
+        src: '/tour/faculty/faculty-05-roster.webp',
+        alt: 'Class roster with three enrolled students and an enrol student action',
+        title: 'The roster',
+        body: 'Everyone enrolled in the section, with the ability to add a student to it — the roster that gates every other screen.',
+      },
+      {
+        src: '/tour/faculty/faculty-06-banks.webp',
+        alt: 'Question bank repository filtered by department with a DSA bank and its question count',
+        title: 'The question repository',
+        body: 'Banks scoped by department and course, so a paper is drawn from material the section actually covers.',
+      },
+      {
+        src: '/tour/faculty/faculty-07-bank.webp',
+        alt: 'Question bank detail listing authored questions with their types and marks',
+        title: 'Inside a bank',
+        body: 'Questions in one bank with their types and marks — the pool a paper is built from or randomised out of.',
+      },
+      {
+        src: '/tour/faculty/faculty-08-exams.webp',
+        alt: 'Examination board with a published midterm and a scheduled final, each with window and marks',
+        title: 'The examination board',
+        body: 'Scheduled, live and published papers for the sections they teach, with windows and question counts.',
+      },
+      {
+        src: '/tour/faculty/faculty-09-exam.webp',
+        alt: 'Exam detail showing six questions with types and marks, and the tabs for grading and performance',
+        title: 'One paper, as built',
+        body: 'Questions in order with type and marks, plus the three views a paper needs: content, grading and performance.',
+      },
+      {
+        src: '/tour/faculty/faculty-10-exam-grading.webp',
+        alt: 'Candidate attempts with status, score, integrity event count and review and reopen actions',
+        title: 'The grading queue',
+        body: 'Each candidate’s status, score and integrity events, with the review and reopen actions the lecturer is authorised for.',
+      },
+      {
+        src: '/tour/faculty/faculty-11-exam-performance.webp',
+        alt: 'Performance analytics with attempt count, average score, median, pass percentage and high and low marks',
+        title: 'Cohort performance',
+        body: 'Attempts, average, median, pass percentage and the high and low — computed from the submissions, not typed in.',
+      },
+    ],
+  },
+  {
+    id: 'hod',
+    label: 'Department head',
+    who: 'Marcus Sterling · Computer Science',
+    blurb: 'Everything in one department, and nothing outside it.',
+    steps: [
+      {
+        src: '/tour/hod/hod-01-dashboard.webp',
+        alt: 'Department head dashboard with institutional counts, pass rate, department performance and audited activity',
+        title: 'The department head’s view',
+        body: 'The counts they are permitted to see, department performance, and the audited actions behind the numbers.',
+      },
+      {
+        src: '/tour/hod/hod-02-academics.webp',
+        alt: 'Academic structure page listing departments with codes and heads',
+        title: 'Academic structure',
+        body: 'Departments, their codes and heads, and the academic terms every offering belongs to.',
+      },
+      {
+        src: '/tour/hod/hod-03-course.webp',
+        alt: 'A section workspace opened from within the department scope',
+        title: 'A section in scope',
+        body: 'Their department’s section, opened through the same offering check the instructor passes.',
+      },
+      {
+        src: '/tour/hod/hod-04-roster.webp',
+        alt: 'Roster of the section with three students and their enrolment status',
+        title: 'The cohort',
+        body: 'The students enrolled in the section — visible because the section belongs to the department they head.',
+      },
+      {
+        src: '/tour/hod/hod-05-gradebook.webp',
+        alt: 'Course gradebook with weighted results per student and a CSV export',
+        title: 'The gradebook, read',
+        body: 'Weighted marks for the section, exportable for departmental review rather than for re-marking.',
+      },
+      {
+        src: '/tour/hod/hod-06-banks.webp',
+        alt: 'Question banks filtered to the departments the head is responsible for',
+        title: 'Banks in the department',
+        body: 'Question banks limited to the department’s courses, so assessment material cannot leak across departments.',
+      },
+      {
+        src: '/tour/hod/hod-07-bank.webp',
+        alt: 'Question bank detail with authored questions, types and marks',
+        title: 'Authoring material',
+        body: 'The same bank, opened for authoring: question types, marks and the pool a paper draws from.',
+      },
+      {
+        src: '/tour/hod/hod-08-exams.webp',
+        alt: 'Examination board for the department, from scheduled to published',
+        title: 'Department examinations',
+        body: 'Papers for the department’s sections, from the draft slate to the published results.',
+      },
+      {
+        src: '/tour/hod/hod-09-exam.webp',
+        alt: 'Exam detail with its questions, marks and the grading and performance tabs',
+        title: 'One paper',
+        body: 'The paper as delivered: question types, marks and the moderation views behind the score.',
+      },
+      {
+        src: '/tour/hod/hod-10-performance.webp',
+        alt: 'Performance analytics for the paper with attempts, average, median and pass percentage',
+        title: 'Paper analytics',
+        body: 'Attempts, average, median, pass percentage and the spread — the departmental read on one paper.',
+      },
+    ],
+  },
+  {
+    id: 'controller',
+    label: 'Exam controller',
+    who: 'Eleanor Vance · examination office',
+    blurb: 'Every paper and every bank, without owning the gradebook.',
+    steps: [
+      {
+        src: '/tour/controller/controller-01-dashboard.webp',
+        alt: 'Exam controller dashboard with institution counts, department performance and audited recent activity',
+        title: 'The examination office',
+        body: 'The institutional picture the bureau is allowed to see, and the audited activity behind it.',
+      },
+      {
+        src: '/tour/controller/controller-02-exams.webp',
+        alt: 'Examination board listing every paper in the institution with status and window',
+        title: 'Every paper, one board',
+        body: 'All papers in the institution, from scheduled to published, with windows and marks.',
+      },
+      {
+        src: '/tour/controller/controller-03-exam.webp',
+        alt: 'Exam detail with the question set, types and marks',
+        title: 'A paper end to end',
+        body: 'The paper itself: questions, types and marks. The bureau reads the paper and its results; grading and attempt review stay with the section they belong to.',
+      },
+      {
+        src: '/tour/controller/controller-04-performance.webp',
+        alt: 'Performance analytics for the published paper',
+        title: 'Performance',
+        body: 'Aggregated attempts, average and pass percentage for the paper, computed from the submissions.',
+      },
+      {
+        src: '/tour/controller/controller-05-banks.webp',
+        alt: 'Question banks across departments, with their course and question counts',
+        title: 'Banks across departments',
+        body: 'Every department’s banks in one repository, which is the bureau’s reach without the gradebook.',
+      },
+      {
+        src: '/tour/controller/controller-06-bank.webp',
+        alt: 'Question bank detail with the authored question set',
+        title: 'One bank',
+        body: 'The question set inside a bank, with types, marks and its approval state.',
+      },
+    ],
+  },
+  {
+    id: 'lead',
+    label: 'Campus lead',
+    who: 'Priya Nair · college administrator',
+    blurb: 'The institution’s accounts, structure and settings.',
+    steps: [
+      {
+        src: '/tour/lead/lead-01-dashboard.webp',
+        alt: 'Campus lead dashboard with enrolment counts, pass rate, department performance and audited recent activity',
+        title: 'The campus lead’s dashboard',
+        body: 'Institution-wide counts, department performance and the audited actions that produced them.',
+      },
+      {
+        src: '/tour/lead/lead-02-users.webp',
+        alt: 'User management table listing accounts with their roles, status and join date',
+        title: 'User management',
+        body: 'Every account with its roles and status, filtered by role or state, and the place accounts are provisioned.',
+      },
+      {
+        src: '/tour/lead/lead-03-add-user.webp',
+        alt: 'Create new user dialog with name, institutional email, phone, status and role checkboxes',
+        title: 'Creating an account',
+        body: 'One account, one explicit role set, one initial password. There is no public sign-up to fall back on.',
+      },
+      {
+        src: '/tour/lead/lead-04-bulk-import.webp',
+        alt: 'Bulk import dialog documenting the CSV columns and the default initial password',
+        title: 'Importing a cohort',
+        body: 'A CSV with its columns documented in the dialog, so a whole intake arrives with roles already assigned.',
+      },
+      {
+        src: '/tour/lead/lead-05-academics.webp',
+        alt: 'Academic structure page with departments, codes and heads',
+        title: 'The academic structure',
+        body: 'Departments, heads and terms — the frame every course, section and paper hangs from.',
+      },
+      {
+        src: '/tour/lead/lead-06-settings.webp',
+        alt: 'Institution branding settings with the name, code, accent colours and a live preview',
+        title: 'Institution settings',
+        body: 'Name, code, contact details, timezone and the accent colour, previewed on the sign-in card before it is saved.',
+      },
+      {
+        src: '/tour/lead/lead-07-courses.webp',
+        alt: 'Course offerings across the institution with their sections and instructors',
+        title: 'Courses and offerings',
+        body: 'Every offering in the term, with its section and instructor — the institutional view of who teaches what.',
+      },
+      {
+        src: '/tour/lead/lead-08-exams.webp',
+        alt: 'Examination board for the institution with statuses and windows',
+        title: 'The paper slate',
+        body: 'The institution’s papers in one board, from scheduled to published, with the windows candidates see.',
+      },
+      {
+        src: '/tour/lead/lead-09-results.webp',
+        alt: 'Results board for a published examination listing candidates and their scores',
+        title: 'The results board',
+        body: 'The released paper, candidate by candidate, with the score and the integrity trail behind each attempt.',
+      },
+    ],
+  },
+  {
+    id: 'super',
+    label: 'Super admin',
+    who: 'System Administrator · platform operations',
+    blurb: 'The install itself: accounts, structure, branding and the audited trail.',
+    steps: [
+      {
+        src: '/tour/super/super-01-dashboard.webp',
+        alt: 'System administrator dashboard with enrolment counts, pass rate, department performance and audited activity',
+        title: 'The platform view',
+        body: 'The same institution as everyone else sees it, plus the administrative surface the platform role reaches.',
+      },
+      {
+        src: '/tour/super/super-02-users.webp',
+        alt: 'User management table with every account, its roles, status and join date',
+        title: 'Accounts',
+        body: 'Every account and role in one table, including the accounts that hold the campus lead role.',
+      },
+      {
+        src: '/tour/super/super-03-academics.webp',
+        alt: 'Academic structure with departments and academic terms',
+        title: 'Structure',
+        body: 'Departments and terms — created once here, then inherited by every course and section.',
+      },
+      {
+        src: '/tour/super/super-04-settings.webp',
+        alt: 'System settings with institutional identity, accent colours, contact details and a live preview',
+        title: 'Branding and policy',
+        body: 'The institution’s name, accent colour and contact details, previewed before they are written.',
+      },
+      {
+        src: '/tour/super/super-05-exams.webp',
+        alt: 'Examination board listing the institution’s papers',
+        title: 'The examination board',
+        body: 'Every paper in the deployment, with its status and window — the same data the bureau works from.',
+      },
+      {
+        src: '/tour/super/super-06-results.webp',
+        alt: 'Results board listing candidates and scores for a published paper',
+        title: 'Released results',
+        body: 'A published paper’s results, candidate by candidate, with the integrity trail attached to each attempt.',
+      },
+    ],
+  },
 ];
 
 export const LIMITS = [
@@ -692,15 +1028,19 @@ export const LIMITS = [
     title: 'One institution per deployment',
     body: 'Multiple colleges means a second deployment, not a tenant in this one. Multi-tenancy is deliberately out of scope.',
   },
+  {
+    title: 'No webcam can see everything',
+    body: 'A phone under the desk, a second screen out of shot and a crib sheet on a knee are invisible to any single camera. The hand, voice and device cues are review evidence with no published accuracy figure, so they never fail a candidate on their own — a person decides.',
+  },
 ];
 
 export const FAQ = [
   {
     q: 'Is there a hosted demo I can click through?',
-    a: 'No. A live instance would be a writable, multi-tenant examination platform with a privileged sandbox and real proctoring data — not something to leave on a public URL. The three-command stack is the demo, and a seeded development database ships with the five demo accounts.',
+    a: 'Not yet — this page is the presentation. A live instance would be a writable, multi-tenant examination platform with a privileged sandbox and real proctoring data, so it stays closed until it is deployed for a college. Everything on these screens is the working product, captured from a seeded development database.',
   },
   {
-    q: 'How long does it take to get running?',
+    q: 'How long does deployment take?',
     a: 'Three commands on a host with Docker Engine, Compose v2 and free ports 80/443: copy the production env file, bring the stack up, then provision the first Campus Lead. Migrations run at start, so the first sign-in works immediately afterwards.',
   },
   {
@@ -708,8 +1048,8 @@ export const FAQ = [
     a: 'Neither. Camera verification runs in the candidate’s browser and the device model runs on-device; the server receives an event, not a video stream. There is no third-party proctoring service in the request path.',
   },
   {
-    q: 'Can I run it without Docker?',
-    a: 'Yes, for development. The bootstrap falls back to a local SQLite file and everything runs except sandboxed execution — and the interface says so rather than pretending the sandbox is available.',
+    q: 'How is it deployed, and who operates it?',
+    a: 'The college owns the instance: one Compose stack on one supervised host, with the API, a PostgreSQL database, the sandbox and the web server behind a single TLS listener. TLS, nightly backups with a verified restore, evidence retention and upgrades are covered by the runbook that ships with it. There is no shared tenancy and no vendor in the request path.',
   },
   {
     q: 'Which database does production use?',
@@ -724,7 +1064,11 @@ export const FAQ = [
     a: 'No. Candidates and staff are served by different response models, and every listing is filtered by the offering-scope kernel before it reaches the query. A request for an object outside the cohort returns 404 rather than a 403 that confirms it exists.',
   },
   {
-    q: 'Is it really MIT licensed?',
-    a: 'Yes — the whole repository, with no open-core split. One deployment per institution, and no licence server to call.',
+    q: 'Can I sign in right now?',
+    a: 'Not yet — this page is a presentation of the working product. The instance is not publicly deployed; when it is, the sign-in portal opens for the accounts the college provisions, and there is still no public sign-up.',
+  },
+  {
+    q: 'Who is behind CampusFlow?',
+    a: 'Designed and developed by Sumanth Mamidi as a complete product for one college at a time — the whole system, not a hosted service with tiers.',
   },
 ] as const;

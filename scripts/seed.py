@@ -174,6 +174,7 @@ async def seed():
         print("  -> Provisioning users across all roles...")
         users_meta = [
             ("admin@campusflow.edu", "Admin@CampusFlow2026", "System", "Administrator", ["super_admin", "admin"]),
+            ("lead@campusflow.edu", "Password@123", "Priya", "Nair", ["admin"]),
             ("controller@campusflow.edu", "Password@123", "Eleanor", "Vance", ["exam_controller"]),
             ("hod.cse@campusflow.edu", "Password@123", "Marcus", "Sterling", ["department_head", "faculty"]),
             ("faculty.cse@campusflow.edu", "Password@123", "Sarah", "Chen", ["faculty"]),
@@ -800,6 +801,7 @@ async def seed():
     print("[SUCCESS] CampusFlow database successfully seeded with realistic institutional data!")
     print("\nDemo Accounts:")
     print("  * Super Admin:       admin@campusflow.edu       / Admin@CampusFlow2026")
+    print("  * Campus Lead:       lead@campusflow.edu        / Password@123")
     print("  * Exam Controller:   controller@campusflow.edu  / Password@123")
     print("  * Department Head:   hod.cse@campusflow.edu     / Password@123")
     print("  * Faculty (CSE):     faculty.cse@campusflow.edu / Password@123")

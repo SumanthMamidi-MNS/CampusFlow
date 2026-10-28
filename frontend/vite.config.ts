@@ -12,6 +12,14 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // `@tensorflow-models/face-detection` imports the MediaPipe solution at
+      // module scope even though this application only ever uses its TF.js
+      // runtime. Without this alias every assessment build either bundles
+      // several megabytes of unused WASM or fails to resolve a peer dependency.
+      // The stand-in documents itself and throws if that runtime is ever chosen.
+      '@mediapipe/face_detection': fileURLToPath(
+        new URL('./src/features/exams/mediapipe-face-detection-stub.ts', import.meta.url)
+      ),
     },
   },
   server: {

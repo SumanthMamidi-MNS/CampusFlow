@@ -34,6 +34,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchUser = useCallback(async () => {
+    // A browser that has never held a session has nothing to recover. Asking
+    // `/auth/me` anyway earns a 401, then a pointless `/auth/refresh` round trip
+    // that also 401s — two failed requests and two console errors for a visitor
+    // who is not signed out of anything, on the one page that is public
+    // (ADR: the landing page must stay reachable without a session).
+    //
+    // A token (issued by this tab) or a cached profile (this browser has signed
+    // in before) both mean a session may still exist, and those still ask: that
+    // is the reload path, where the httpOnly refresh cookie is expected to mint
+    // a fresh token.
+    if (!localStorage.getItem(ACCESS_TOKEN_KEY) && !readCachedUser()) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
       // A missing access token is not a failure: the httpOnly refresh cookie may
       // still be valid, and the API client uses it to mint a fresh token before

@@ -20,10 +20,16 @@ function onLoginRoute(): boolean {
 // with a possibly stale access token, so it has to be allowed to refresh.
 const NO_REFRESH_PREFIXES = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/password/'];
 
-/** Clear the session and send the user to sign-in exactly once. */
-function forceSignOut(): void {
+/**
+ * Clear the session and send the user to sign-in exactly once.
+ *
+ * Only a caller that *had* an access token can be signed out. A visitor who
+ * never had one is already signed out, and bouncing them to `/auth/login` from
+ * `/auth/me` would make the public landing page unreachable.
+ */
+function forceSignOut(hadToken: boolean): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
-  if (!onLoginRoute()) {
+  if (hadToken && !onLoginRoute()) {
     window.location.href = '/auth/login';
   }
 }
@@ -52,6 +58,8 @@ apiClient.interceptors.response.use(
       !originalRequest._retry &&
       !isCredentialEndpoint;
 
+    const hadToken = Boolean(originalRequest?.headers?.Authorization);
+
     if (canRetry && originalRequest) {
       originalRequest._retry = true;
       try {
@@ -71,7 +79,7 @@ apiClient.interceptors.response.use(
         // the stored token, so a later reload can still recover the session.
         const status = (refreshError as AxiosError)?.response?.status;
         if (status === 401 || status === 403) {
-          forceSignOut();
+          forceSignOut(hadToken);
         }
       }
     }
