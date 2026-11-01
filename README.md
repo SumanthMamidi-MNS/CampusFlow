@@ -14,7 +14,7 @@
   <a href="https://docs.docker.com/compose/"><img src="docs/assets/badges/docker.svg" alt="Docker Compose" height="30"></a>
   <a href="docs/architecture.md"><img src="docs/assets/badges/authorization.svg" alt="Authorization: offering scope" height="30"></a>
   <a href="docs/decisions.md#adr-014-piston-sidecar-for-sandboxed-student-code-execution"><img src="docs/assets/badges/sandbox.svg" alt="Sandbox: Piston isolate" height="30"></a>
-  <a href="backend/tests/"><img src="docs/assets/badges/tests.svg" alt="83 Passing" height="30"></a>
+  <a href="backend/tests/"><img src="docs/assets/badges/tests.svg" alt="97 Passing" height="30"></a>
   <a href="LICENSE"><img src="docs/assets/badges/license.svg" alt="MIT License" height="30"></a>
 </p>
 
@@ -120,8 +120,9 @@ flowchart LR
 ```
 
 Timing is server-authoritative and the attempt is autosaved, so a dropped connection or a closed
-tab is reconciled rather than lost. Every integrity signal is recorded with its policy threshold,
-and any resumption is a faculty decision written to the audit trail — not a silent reset.
+tab is reconciled rather than lost. Every integrity signal is recorded against its policy: ten
+warnings by default, and one warning at most every ten seconds while the condition persists.
+Any resumption is a faculty decision written to the audit trail — not a silent reset.
 
 ## A look inside
 
@@ -236,8 +237,8 @@ cd ../frontend && npm run lint && npm run build
 
 ```
 backend   ruff check .                                    → clean
-backend   pytest -q (SQLite)                              →  81 passed,  2 skipped
-backend   pytest -q (PostgreSQL)                          →  83 passed
+backend   pytest -q (SQLite)                              →  98 passed,  2 skipped
+backend   pytest -q (PostgreSQL)                          →  100 in the suite · CI
 frontend  npm run lint                                    →   0 errors
 frontend  npm run build                                   →  success
 ```

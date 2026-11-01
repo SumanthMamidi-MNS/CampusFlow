@@ -4,7 +4,7 @@ import type { User } from '@/core/api/types';
 import apiClient, { ACCESS_TOKEN_KEY } from '@/core/api/client';
 
 /** Last profile verified by the backend, kept so a reload can show it at once. */
-const USER_CACHE_KEY = 'campusflow_user';
+export const USER_CACHE_KEY = 'campusflow_user';
 
 function readCachedUser(): User | null {
   try {

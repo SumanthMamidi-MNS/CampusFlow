@@ -613,6 +613,16 @@ async def seed():
             select(Exam).where(Exam.title == "CS201 Midterm Examination: Data Structures")
         )
         exam = res_exam.scalar_one_or_none()
+        if exam is not None:
+            # An exam created by an earlier run keeps its identity, but its
+            # integrity profile has to match what this build actually enforces:
+            # ten warnings, every camera cue on. Updating the keys (rather than
+            # replacing the dict) leaves any other authored setting alone, so a
+            # rerun repairs an older row instead of fighting it.
+            repaired = dict(exam.config or {})
+            repaired.update({"proctoring_enabled": True, "max_violations": 10})
+            if repaired != (exam.config or {}):
+                exam.config = repaired
         if not exam:
             exam = Exam(
                 title="CS201 Midterm Examination: Data Structures",
@@ -625,7 +635,7 @@ async def seed():
                 passing_marks=7.5,
                 start_window=now - timedelta(days=2),
                 end_window=now + timedelta(days=1),
-                config={"proctoring_enabled": True, "max_violations": 5, "shuffle_questions": False},
+                config={"proctoring_enabled": True, "max_violations": 10, "shuffle_questions": False},
                 status="published",
             )
             session.add(exam)
@@ -733,7 +743,7 @@ async def seed():
                 passing_marks=50.0,
                 start_window=now + timedelta(days=5),
                 end_window=now + timedelta(days=7),
-                config={"proctoring_enabled": True, "max_violations": 4, "shuffle_questions": True},
+                config={"proctoring_enabled": True, "max_violations": 10, "shuffle_questions": True},
                 status="scheduled",
             )
             session.add(final_exam)

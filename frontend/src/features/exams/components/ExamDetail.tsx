@@ -58,6 +58,56 @@ function humanize(value: string): string {
   return value.replace(/_/g, ' ');
 }
 
+const DEVICE_LABEL: Record<string, string> = {
+  mobile_phone: 'phone',
+  earbuds: 'earbuds',
+  smartwatch: 'smartwatch',
+  remote_control: 'remote control',
+};
+
+/**
+ * The measurement behind a camera/model observation, in the words a reviewer
+ * needs. The timeline used to show only the event name, which left "second
+ * device detected" with no answer to *which* device, *how sure* the model was,
+ * or *where* it looked — the numbers the server already stores with the event.
+ * Only known keys are rendered: a bbox, a snapshot and anything unrecognised are
+ * never dumped into this panel.
+ */
+function describeMeasurement(details?: Record<string, any> | null): string[] {
+  if (!details) return [];
+  const parts: string[] = [];
+  const category = DEVICE_LABEL[String(details.category)];
+  if (category) parts.push(`device: ${category}`);
+  if (typeof details.confidence === 'number') {
+    parts.push(`${Math.round(details.confidence * 100)}% model confidence`);
+  }
+  if (details.region === 'wrist') parts.push('read from a wrist close-up');
+  if (details.region === 'frame') parts.push('whole-frame read (weaker signal)');
+  if (typeof details.confirmations === 'number') {
+    parts.push(`${details.confirmations} consecutive agreeing scans`);
+  }
+  if (typeof details.dwell_ms === 'number') {
+    parts.push(`held for ${(details.dwell_ms / 1000).toFixed(1)} s`);
+  }
+  if (typeof details.dominance === 'number') {
+    parts.push(`mouth moved ${details.dominance.toFixed(1)}× the forehead band`);
+  }
+  if (details.audio_active === true) parts.push('the voice check heard something too');
+  if (typeof details.away_seconds === 'number') {
+    parts.push(`away for ${Math.round(details.away_seconds)} s`);
+  }
+  if (typeof details.page_hidden === 'boolean') {
+    parts.push(details.page_hidden ? 'the page was hidden' : 'another application was in front');
+  }
+  return parts;
+}
+
+function MeasurementLine({ details }: { details?: Record<string, any> | null }) {
+  const parts = describeMeasurement(details);
+  if (parts.length === 0) return null;
+  return <p className="mt-1 text-[11px] text-slate-600">{parts.join(' · ')}</p>;
+}
+
 export function ExamDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -381,6 +431,18 @@ export function ExamDetail() {
                         <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(attempt.status)}`}>
                           {humanize(attempt.status)}
                         </span>
+                        {attempt.resume_requested && (
+                          <span
+                            title={
+                              attempt.resume_requested_at
+                                ? `Asked to continue on ${new Date(attempt.resume_requested_at).toLocaleString()}`
+                                : 'Asked to continue'
+                            }
+                            className="mt-1 block w-fit rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-800"
+                          >
+                            Asked to continue
+                          </span>
+                        )}
                         {attempt.flagged_for_review && (
                           <span
                             title={
@@ -440,7 +502,8 @@ export function ExamDetail() {
                               disabled={unlockAttemptMutation.isPending}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                             >
-                              <KeyRound className="h-3.5 w-3.5" aria-hidden="true" /> Reopen
+                              <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />{' '}
+                              {attempt.resume_requested ? 'Approve reopening' : 'Reopen'}
                             </button>
                           )}
                         </div>
@@ -851,6 +914,11 @@ function IntegrityLogModal({
                 These observable events are advisory and are provided to support your professional
                 judgement. They do not by themselves determine a breach.
               </p>
+              <p className="mb-3 text-[11px] text-slate-500">
+                Browser/page events are direct session telemetry. Camera and microphone entries
+                are model/sensor observations that can be wrong; they are review leads, not proof.
+                A removed image is shown as expired and cannot be recovered from this log.
+              </p>
               <ol className="space-y-3 border-l border-slate-200 pl-4">
                 {timeline.map((event) => (
                   <li key={event.id} className="relative">
@@ -870,6 +938,28 @@ function IntegrityLogModal({
                     <p className="text-[11px] text-slate-500">
                       {new Date(event.timestamp).toLocaleString()} · {event.severity} severity
                     </p>
+                    <MeasurementLine details={event.details} />
+                    <p
+                      className={`mt-1 inline-flex rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
+                        event.event_category === 'camera_observation'
+                          ? 'border-amber-200 bg-amber-50 text-amber-900'
+                          : event.event_category === 'evidence'
+                            ? 'border-slate-200 bg-slate-50 text-slate-600'
+                            : 'border-indigo-100 bg-indigo-50 text-indigo-800'
+                      }`}
+                    >
+                      {event.event_category === 'camera_observation'
+                        ? 'Camera / sensor cue · counted by exam policy · reviewable'
+                        : event.event_category === 'evidence'
+                          ? 'Passive evidence · never counted'
+                          : 'Browser / page telemetry · counted by exam policy'}
+                    </p>
+                    {event.evidence_purged_at && (
+                      <p className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">
+                        Evidence image erased {new Date(event.evidence_purged_at).toLocaleString()} per
+                        the retention schedule. This event remains in the audit trail.
+                      </p>
+                    )}
                     {typeof event.details?.snapshot === 'string' && (
                       <figure className="mt-1.5 inline-block">
                         <img

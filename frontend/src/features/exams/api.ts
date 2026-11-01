@@ -378,3 +378,33 @@ export function useUnlockExamAttempt(examId: string) {
     },
   });
 }
+
+/**
+ * The candidate's own request to reopen an attempt the tolerance stopped.
+ *
+ * Addressed by exam, not attempt: the lock surface is reached even when the
+ * browser never learned an attempt id. The server resolves the caller's locked
+ * attempt, so this can never touch anyone else's paper, and it only records
+ * *that a request was made* — the attempt stays locked until a lecturer approves
+ * it through `useUnlockExamAttempt`.
+ */
+export function useRequestExamResume(examId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiClient.post<
+        ApiResponse<{
+          attempt_id: string;
+          status: string;
+          resume_requested: boolean;
+          message: string;
+        }>
+      >(`/exams/${examId}/resume-request`);
+      return res.data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exam-attempts', examId] });
+      queryClient.invalidateQueries({ queryKey: ['proctoring-timeline'] });
+    },
+  });
+}

@@ -57,20 +57,27 @@ This document preserves durable technical context, implementation constraints, a
 
 - **Clock Integrity:** Never trust client-reported timestamps for exam duration. Duration and expiration are strictly computed from `started_at` recorded on the server.
 - **Auto-Grading Safety:** Auto-grading routines must run idempotently on exam submission. Objective questions (MCQ, MSQ, True/False, Numerical) grade immediately; subjective questions (Short/Long answer) enter the manual grading queue.
-- **Observable Proctoring Only:** There is no webcam capture, gaze analysis, or biometric
-  processing anywhere in the product. Camera/gaze/strobe/lockdown code was removed in
-  Phase 13 (see ADR-013). Only browser telemetry (`tab_switch`, `window_blur`,
-  `fullscreen_exit`, `copy_paste_attempt`, `context_menu`) is recorded.
-- **Single Tolerance Source:** `_resolve_max_violations(exam)` in
+- **Observable proctoring, disclosed and on-device:** Camera cues are measured in the
+  candidate's browser — presence and head direction, prohibited devices, a hand at the face,
+  mouth movement and sustained voice — and are recorded with browser telemetry (`tab_switch`,
+  `window_blur`, `fullscreen_exit`, `copy_paste_attempt`, `context_menu`). Nothing is streamed:
+  a confirmed camera cue attaches one still to the event, and no audio is recorded, stored or
+  transmitted (ADR-024–032). The old "no webcam" rule from ADR-013 is historical; do not use it
+  to remove the current, disclosed checks.
+- **Single tolerance source:** `_resolve_max_violations(exam)` in
   `campusflow.domain.exams.service` is the only place the tolerance is read, from
-  `exam.config["max_violations"]` with a default of `DEFAULT_MAX_VIOLATIONS = 5`. Reaching it
-  auto-submits the attempt with a `max_violations_exceeded` flag (ADR-008) — it does **not**
-  lock the candidate out.
+  `exam.config["max_violations"]` with a default of `DEFAULT_MAX_VIOLATIONS = 10` and an authored
+  range of 1–20. Under `remove` (the default) reaching it **locks** the attempt with
+  `max_violations_exceeded`; it does not auto-submit. Under `review` it flags the attempt for
+  faculty and the candidate keeps working. A counted warning also stamps `last_warning_at`, and
+  no further warning can be counted for `PROCTORING_WARNING_COOLDOWN_SECONDS` (10); signals in
+  that gap are recorded but annotated `suppressed_by_cooldown` (ADR-034).
 - **Neutral Candidate Copy:** Warning strings must stay calm and informational. No strobe,
   no shouting, no "breach" language. Follow the responsible-UX rules in AGENTS.md §13.
-- **Faculty-Authorised Resumption:** `POST /exams/{exam_id}/attempts/{attempt_id}/unlock`
-  requires `exams:grade`, is always audited, and resets the recorded count. Students receive
-  403. A student-facing unlock affordance must never be reintroduced.
+- **Faculty-authorised resumption:** `POST /exams/{exam_id}/attempts/{attempt_id}/unlock`
+  requires `exams:grade`, is always audited, resets the recorded count and clears
+  `last_warning_at`. Students receive 403. A student-facing unlock affordance must never be
+  reintroduced outside the demo's own restart control.
 - **No Hidden Shortcuts:** Do not embed QA/simulation keyboard shortcuts inside candidate
   surfaces. Test via the API or unit tests instead.
 - **Answer Durability:** Answers are mirrored to `localStorage` and synced to the server on a
@@ -253,6 +260,18 @@ This document preserves durable technical context, implementation constraints, a
   demo sign-in now all use `campusflow.bedrock.auth.cookies.set_refresh_cookie`, and the demo
   route pops the raw refresh token out of the payload so it only ever travels in the httpOnly
   cookie.
+- **`create_all` is not a migration, and a relative SQLite URL is not a database choice.** Two
+  compounding defects broke `start.bat` after the attempt-delivery work added
+  `exam_attempts.delivery_variant`: the SQLite path used to be `sqlite+aiosqlite:///./campusflow.db`,
+  which `start.bat` resolved against the repository root while uvicorn ran with `backend/` as its
+  working directory — so the seed wrote one file and the server served another (both existed, with
+  different row counts) — and `Base.metadata.create_all` only creates *missing* tables, never a
+  missing column, so the seeded file already had `exam_attempts` without the new column and every
+  `SELECT` that named it raised `sqlite3.OperationalError: no such column`. The URL is now absolute
+  and anchored to the repository root, and `apply_schema` runs an additive reconciliation
+  (`ALTER TABLE … ADD COLUMN`, `CREATE INDEX IF NOT EXISTS`, both logged) after `create_all`. Adding
+  a column to a model is therefore safe on the SQLite fallback; dropping or retyping one is not, and
+  bootstrap says so instead of failing later inside a seed query.
 - **Running the stack without Docker.** `docker` was not running in this session, so Postgres
   (`:5432`) and the `.env` `postgresql+asyncpg://…` URL are unusable. The supported offline path
   is `cd backend && uv run --extra dev python ../scripts/bootstrap.py --sqlite` (creates the
@@ -376,6 +395,17 @@ This document preserves durable technical context, implementation constraints, a
   cleared the 0.50 bar on the sample (the only outputs were `smartwatch` at 0.07 and 0.03), and
   COCO has no earbud/watch ground truth, so no wearable accuracy is claimed anywhere. Do not
   describe earbud or smartwatch detection as working until it has been measured on real footage.
+- **A whole-frame classifier cannot see a watch; the wrist crop is the only path that can.** At
+  exam distance a watch is a few thousand pixels of a 480 px frame, which is why the whole-frame
+  read never cleared its bar. `wristCropFromNormalised` turns the hand landmarker's wrist point and
+  hand span into a crop that is mostly wrist, and that crop is what the classifier is shown. Two
+  things follow: the crop requires the hands to be *in view* (a watch on a hand under the desk is
+  still invisible), and the hand loop must be running for the device scan to get any crop at all —
+  it now runs when either `hand_monitoring_enabled` or `device_detection_enabled` is authored
+  (ADR-031), but the hand-at-face monitor is still only fed when that check is authored.
+- **Wiring a crop is not measuring a detector.** The wrist path changed what the classifier is
+  shown, not how well it does; there is still no labelled watch footage here, so the wearable
+  signal carries no claimed accuracy anywhere in the docs or the UI.
 - **A phone photo in a synthetic camera feed drives the whole chain.** Stub
   `navigator.mediaDevices.getUserMedia` with a canvas stream that redraws a sample phone image
   (jitter it a few pixels per frame), enable `device_detection_enabled` on a throwaway exam, and
@@ -432,8 +462,10 @@ This document preserves durable technical context, implementation constraints, a
 - **A JSON column does not track in-place mutation.** Erasing an evidence frame by
   `details.pop("snapshot")` would be silently discarded on flush; the purge assigns a new dict
   (`event.details = {…}`). Any future JSON edit in this codebase needs the same pattern.
-- **`PROCTORING_EVIDENCE_RETENTION_DAYS=0` means keep.** The purge returns a no-op for `0`; reading
-  it as "cutoff today" would delete every frame in the system on the first run.
+- **`PROCTORING_EVIDENCE_RETENTION_DAYS=0` does not mean keep.** A non-positive value falls back to
+  the finite 90-day default, so a half-configured deployment can never retain candidate images
+  indefinitely; the other extreme ("cutoff today", deleting every frame already captured) is
+  equally unreachable.
 - **The repo is not uniformly `ruff format`-clean**, so CI runs `ruff check` but not
   `ruff format --check` (a global format gate fails on files a branch did not touch). Format the
   files you change.
@@ -502,6 +534,12 @@ This document preserves durable technical context, implementation constraints, a
   shows the landing page when signed out and the dashboard (inside `RootLayout`) when signed in;
   every other protected path still redirects to `/auth/login`. Do not add API calls to the landing
   page: it must paint without a session.
+- **A staff-only query must be disabled, not just hidden.** The exams index fetched the question-bank
+  list for every visitor because the scheduling form's hook was mounted unconditionally, so a
+  candidate opening `/exams` produced two 403s and two console errors while the form itself was
+  hidden. `useQuestionBanks` now accepts an `enabled` option and the page passes the same role check
+  that hides the form. Hiding a control is not a gate on the request; every query behind a
+  staff-only surface needs the hook switched off for everyone else.
 - **A lazy `<img>` without intrinsic dimensions has zero height until it decodes.** Measuring section
   offsets on a page that has not been scrolled reports collapsed heights for every section below the
   fold (the landing gallery read 687px instead of 1707px). Scroll to the bottom first, wait for the
@@ -571,6 +609,16 @@ revealed rather than switched on. `BOOT_EXIT_MS` in `main.tsx` must stay in step
 transition, and the removal is still guaranteed by a timer because `transitionend` never fires in a
 background tab.
 
+**Never gate the release on a frame callback.** `releaseBootScreen` was started from a double
+`requestAnimationFrame`, and in a renderer that produces no frames — an occluded or backgrounded
+window, a headless capture, an embedded webview — that callback never runs. The splash then sat at
+full opacity over a fully painted application for its whole lifetime: `#root` had the landing page,
+`performance.getEntriesByType('paint')` was empty, `document.elementFromPoint` over every button
+returned an element inside `#boot`, and nothing on the page could be clicked. The poll now starts
+synchronously and waits for React's first paint (`#root` child count) before dismissing, which is
+what actually protects against a blank page; frames were only ever a timing nicety. If you add
+work to this file, use `setTimeout` for anything that must happen.
+
 ### Engagement for the tour is derived, never latched
 
 The landing page's screen tour stops its clock while the reader is looking closer — hover, focus,
@@ -599,16 +647,16 @@ either behind would be the dishonest direction.
 
 ### A grid child's min-content width widens a phone page
 
-The landing page's deployment chapter put a terminal (`<pre>` with command lines up to ~90
-characters) inside a `grid gap-8 lg:grid-cols-[...]` section. At 1024 px and above it is two
-columns and everything is fine; at 390 px the implicit single column is `auto`-sized, so it took
+The landing page's deployment chapter originally put a terminal (`<pre>` with command lines up to
+~90 characters) inside a `grid gap-8 lg:grid-cols-[...]` section. At 1024 px and above it was two
+columns and everything was fine; at 390 px the implicit single column is `auto`-sized, so it took
 the terminal's **min-content** width — about 530 px — and the whole document became horizontally
 scrollable on a phone. `overflow-x: auto` was already on the `<pre>` and was not enough: the
-min-content contribution propagates through the grid item above it.
-
-The fix is `min-w-0` on the grid children (the `Reveal` wrappers), not a smaller font or a
-truncated command. Any future panel that contains an unbreakable wide child — a terminal, a table,
-a code block — needs the same treatment at every level between it and the grid.
+min-content contribution propagates through the grid item above it. The terminal itself has since
+been replaced by a presentation card, but the layout rule still applies: `min-w-0` on the grid
+children (the `Reveal` wrappers), not a smaller font or a truncated command. Any future panel that
+contains an unbreakable wide child — a table, a code block, a terminal — needs the same treatment
+at every level between it and the grid.
 
 Two measurement traps found while chasing it, both worth remembering:
 
@@ -653,3 +701,97 @@ a grading queue is therefore describing a screen the role cannot have.
 
 Capture lesson: an empty state photographs perfectly. When a frame is meant to show rows, assert
 that the rows exist (an API call as that role, or a DOM count) before trusting the screenshot.
+
+## Integrity signals: three lessons from "I demonstrated cheating and nothing warned"
+
+**A webcam stream requested without audio has no audio track, and no analyser can invent one.**
+`getUserMedia({ video: ... })` returns a video-only stream; `AnalyserNode` fed from it reads
+silence forever while the candidate screen says a voice check is listening. The capture must request
+`{ video, audio }` in one call, and a refused microphone must fall back to the video-only request so
+the paper still starts — with `voiceScan` honestly reporting `unavailable` rather than `active`.
+Check `stream.getAudioTracks().length` before claiming to listen.
+
+**A cue that is recorded but never counted is indistinguishable from a detector that does not work.**
+The advisory tier meant a raised phone, sustained talking and mouth movement produced review items
+and zero warnings, so the candidate watching their counter saw nothing happen. Confirmed cues now
+spend the disclosed allowance (ADR-032). If a future cue is added, decide explicitly whether it
+charges the ladder; "recorded only" is a product decision that has to be argued, not a default.
+
+**Server-side duplicate debounce must not apply to a cue the client has already confirmed.**
+`PROCTORING_EVENT_DEDUPE_SECONDS` collapses a repeat of the same `event_type` inside a few seconds.
+That is right for `visibilitychange` + `blur` pairs and doubled listeners, and wrong for a confirmed
+camera cue: the client paid the dwell, resets its episode after each report, and a candidate who
+keeps the phone up has to keep climbing. The dedupe is now scoped to non-camera events.
+
+Also worth remembering: the seeder only *inserts* missing rows, so an exam created by an older run
+keeps its old `config` forever. When a policy default changes, the seed script has to repair the
+row (as `scripts/seed.py` and `demo.py` now do for the integrity profile) or the running app keeps
+serving the old contract while the code claims the new one.
+
+### A demo sitting is only "fresh" if its old attempts are gone
+
+`start_or_resume_attempt` treats **any** `locked_violation` attempt for the candidate as a permanent
+lock: it answers 423 before it looks at the attempt number, the window or the allowance. That is
+correct for an institution — only a lecturer's unlock should release a stopped paper — but wrong for
+the demo, where the previous reviewer's seventh warning left every later "Try the demo" click on the
+same stopped screen. The demo login now deletes the demo student's attempts for the demo exam before
+minting the session, so attempt 1, a full 20-minute clock and a zero warning count are what the next
+reviewer sees. Do not "fix" this by raising `max_attempts`; the blocker is the locked row, not the
+attempt allowance.
+
+The handover also has to be a document navigation, not `navigate()`: a demo session replaces the
+signed-in identity, and the previous user's auth context and TanStack cache must not survive into the
+candidate surface. `features/exams/demo.ts` clears the cached profile and uses `location.replace`, so
+Back cannot restore the page the demo was launched from.
+
+The demo endpoints are **DEBUG-only**: `main.py` mounts `demo_router` only when `settings.debug` is
+true, because the endpoints mint a session anonymously and write demo rows. The production frontend
+must not advertise them, and the public landing page must never call them. The exams board button is
+gated on `import.meta.env.DEV`, so a production bundle does not render a control that would answer
+404. That button is the only entry point; if the response shape changes, its launcher is the one
+place to update.
+
+### The brief's summary and its full disclosure share one source of truth
+
+The candidate brief used to print every integrity paragraph at once, which pushed the camera check
+and the Begin button below the fold. It now shows a four-line TL;DR plus one expander containing the
+full per-check text. Both halves read the same server-echoed fields (`max_violations`,
+`warning_policy`, `dwell_ms`, the cue switches, `evidence_retention_days`), so a policy change must
+not be hard-coded into either half. The demo-specific sentence ("you can start a fresh sitting
+straight away") is chosen by the `demo` flag, not by the paper's title.
+
+The student tour's `student-11-exam-brief` capture is a screenshot of this screen. When the brief's
+layout or its disclosed numbers change, re-shoot it with
+`CF_API=... CF_APP=... CF_EMAIL=student1@campusflow.edu CF_PASSWORD=... node scratch/tour.mjs brief frontend/public/tour/student`
+(a one-step `scratch/tour-brief.mjs` module), or the landing page will show an old-allowance paper
+beside a ten-warning product.
+
+### "Two tabs" was not a navigation the app performs
+
+There is no `window.open` in `frontend/src`; the demo launcher uses `window.location.replace`, which
+is a same-tab navigation by definition. The only new-tab links in the product are the tour's
+"Full size" image, the author profile on the landing page, and a course material's external "Open
+Link". A second CampusFlow tab therefore comes from the browser (session restore, a manually opened
+tab, or the automation/preview browser), not from the demo flow. The shared preview browser can
+carry an `about:blank` tab in the background; close it before treating a tab count as a finding.
+
+### A warning ladder needs a clock between the rungs
+
+The allowance is ten, and `ExamAttempt.last_warning_at` gates the next count. The gate is checked
+inside `record_proctoring_event`, not in the browser: a client burst, a duplicated listener or a
+reload cannot spend the ladder faster than the candidate can read it. A signal inside the ten-second
+gap is still written to `proctoring_events` with `counted: false`, `suppressed_by_cooldown: true` and
+`cooldown_seconds_remaining`; a camera cue still raises the review flag. Do not "simplify" this by
+deleting suppressed events — the lecturer needs the timeline, and the counter needs to explain why it
+did not move.
+
+The test suite sets `PROCTORING_WARNING_COOLDOWN_SECONDS` to 0 in an autouse fixture, because almost
+every ladder test fires three cues in a row. `test_a_counted_warning_opens_a_ten_second_gap` turns it
+back to 10 and backdates `last_warning_at` rather than sleeping. If you add a test that asserts the
+shipped cooldown in a payload, monkeypatch the constant to 10 in that test too; otherwise the
+disclosure will read 0 under the test seam.
+
+The landing page now shows the candidate paper and a faithful warning card in the integrity chapter.
+The card is markup, not a screenshot, so it cannot drift from the copy; the paper image is the real
+`student-12-exam-attempt.webp`. When the warning copy changes, update both the product and that card
+(and the brief screenshot if its chips change).

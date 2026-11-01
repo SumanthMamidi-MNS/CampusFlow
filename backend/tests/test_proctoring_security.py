@@ -10,6 +10,7 @@ from campusflow.domain.courses.models import Course, CourseOffering
 from campusflow.domain.departments.models import Department
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.exams.models import Exam, ExamAttempt, ExamQuestion, ProctoringEvent
+from campusflow.domain.exams.schemas import DEFAULT_EVIDENCE_RETENTION_DAYS
 from campusflow.domain.exams.service import purge_proctoring_evidence
 from campusflow.domain.question_banks.models import Question, QuestionBank, QuestionOption
 from campusflow.domain.users.models import User
@@ -139,7 +140,10 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     assert status1["max_violations"] == 3
     assert status1["auto_submitted"] is False
     assert status1["is_locked"] is False
-    assert "assessment-integrity notice" in status1["warning"].lower()
+    # Every warning states which one it is and what is left (D-31), so the count
+    # the candidate is judged by is never mysterious.
+    assert "warning 1 of 3" in status1["warning"].lower()
+    assert "2 warning(s) left" in status1["warning"].lower()
 
     # 6. Event 2: window blur
     ev2 = await client.post(
@@ -166,7 +170,8 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     # The candidate is thrown out with their answers preserved; only faculty
     # authorisation brings them back (ADR-015).
     assert status3["status"] == "locked_violation"
-    assert "removed from this examination" in status3["warning"].lower()
+    assert "examination stopped" in status3["warning"].lower()
+    assert "only your lecturer" in status3["warning"].lower()
 
     # A locked candidate cannot restart or resume the paper on their own.
     locked_start = await client.post(
@@ -240,7 +245,8 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     assert snap_status["is_locked"] is False
     assert snap_status["status"] == "in_progress"
 
-    # 12. Turning the required camera off mid-attempt is a genuine violation.
+    # 12. Camera loss is a counted warning as well as a camera observation: the
+    # candidate is told, and the number they are judged by stays truthful.
     cam_off = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=student_headers,
@@ -251,6 +257,7 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     assert cam_status["violations_count"] == 2
     assert cam_status["auto_submitted"] is False
     assert cam_status["is_locked"] is False
+    assert cam_status["event_category"] == "camera_observation"
 
     # 13. Oversized frames are refused instead of being stored.
     huge = await client.post(
@@ -281,8 +288,8 @@ async def test_camera_evidence_is_erased_after_its_retention_window(db_session):
 
     Erasure is deliberately narrow: only the stored image goes. A reviewer must
     still see that a frame was captured and when it was erased, and a recent
-    frame, an older non-evidence event, and a retention of 0 must all be left
-    alone.
+    frame and an older non-evidence event must be left alone. A non-positive
+    retention uses the finite application default, rather than disabling purge.
     """
     now = datetime.now(UTC)
 
@@ -387,8 +394,20 @@ async def test_camera_evidence_is_erased_after_its_retention_window(db_session):
     second = await purge_proctoring_evidence(db_session, 90)
     assert second["frames_erased"] == 0
 
-    # 0 means "keep evidence", never "delete everything before today".
-    disabled = await purge_proctoring_evidence(db_session, 0)
-    assert disabled["frames_erased"] == 0
+    # A frame older than the default is still purged when the caller passes 0.
+    stale = ProctoringEvent(
+        attempt_id=attempt.id,
+        event_type="second_device_detected",
+        timestamp=now - timedelta(days=DEFAULT_EVIDENCE_RETENTION_DAYS + 1),
+        severity="medium",
+        details={"snapshot": "data:image/jpeg;base64,CCCC", "category": "mobile_phone"},
+    )
+    db_session.add(stale)
+    await db_session.commit()
+    fallback = await purge_proctoring_evidence(db_session, 0, now=now)
+    assert fallback["frames_erased"] == 1
+    await db_session.refresh(stale)
+    assert "snapshot" not in stale.details
+    assert "evidence_purged_at" in stale.details
     await db_session.refresh(recent)
     assert recent.details["snapshot"].startswith("data:image/jpeg")

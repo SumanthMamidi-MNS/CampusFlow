@@ -100,9 +100,21 @@ uv run --extra dev python ../scripts/bootstrap.py --sqlite   # schema + idempote
 uv run python -m uvicorn campusflow.main:app --host 127.0.0.1 --port 8000
 ```
 
-`--sqlite` writes `DATABASE_URL=sqlite+aiosqlite:///./campusflow.db` into `backend/.env`, so a
-later `uvicorn` picks up the same file. This path exists for machines without Docker; the
-PostgreSQL path above remains the authoritative one for migrations and concurrency tests.
+`--sqlite` writes `DATABASE_URL` into `backend/.env` as an **absolute** path to the SQLite file at
+the repository root (`<repo>/campusflow.db`), so a later `uvicorn` picks up the same file no matter
+which directory it is started from — `start.bat` bootstraps from the root while uvicorn runs with
+`backend/` as its working directory, and a relative URL made those two processes seed and serve
+different files. If a database written by the old relative URL exists at `backend/campusflow.db`
+and the root file does not, bootstrap adopts it instead of starting empty.
+
+SQLite cannot apply Alembic migrations, so bootstrap reconciles the file against the model metadata
+after `create_all`: missing columns are added with `ALTER TABLE … ADD COLUMN` and missing indexes
+with `CREATE INDEX IF NOT EXISTS`, and each addition is logged. That covers the additive case, which
+is what `create_all` silently skipped before. A change it cannot express in place (a dropped or
+retyped column, or a `NOT NULL` column with no default) stops bootstrap with an explicit message:
+delete `campusflow.db` and rerun, or use PostgreSQL for the real migration. This path exists for
+machines without Docker; the PostgreSQL path above remains the authoritative one for migrations and
+concurrency tests.
 
 ### Database Migrations (Alembic)
 ```bash
@@ -305,6 +317,39 @@ distribution, so `bandEnergyRatio` is exercised through the same dBFS-to-linear 
 analyser path uses. Neither harness claims detection *accuracy*: they prove the rules fire when
 they should and stay silent when they should, which is what can be verified without a person in
 front of a camera.
+
+### Verifying mouth movement, the wrist crop and device labels (ADR-030/031)
+
+Mouth movement is measured from pixels, and the watch read depends on a crop built from hand
+landmarks, so neither can be exercised in CI either. Everything that decides *whether an event is
+recorded* is pure and is driven by
+[check-integrity-signals.ts](frontend/scripts/check-integrity-signals.ts):
+
+```bash
+cd frontend
+node scripts/check-integrity-signals.ts   # Node 22.6+; 50 checks
+```
+
+What it pins:
+
+* **Bands.** The mouth and forehead rects for a landmarked face, the forehead band kept clear of
+  the mouth, a face too small to measure returning nothing, and a band mostly outside the frame
+  rejected rather than measured against background.
+* **Motion and dominance.** Mean-luma extraction, region motion normalised so brightness cannot
+  manufacture movement, the mouth-dominant classification, a head-move pattern (both bands moving
+  together) classified as *not* talking, and an unmeasurable pair never reading as movement.
+* **Mouth decisions.** A short burst below the dwell is silent; talking with pauses accumulates
+  instead of restarting; one continuous episode escalates to a handful of events; a held still face
+  ends it; and mouth motion without the voice check still reports, because a silent second person
+  has to be caught by the camera alone.
+* **Wrist crop and labels.** A normalised wrist point turned into a frame rect, a tiny hand
+  rejected (the crop would be upscaled background), an out-of-frame wrist rejected, and the
+  ImageNet label mapping that gives `digital watch` its `smartwatch` category while ignoring
+  `stopwatch` and unknown labels.
+
+The harness proves the rules fire and stay silent; it says nothing about accuracy. In particular no
+watch footage has been scored, so `smartwatch` remains an unmeasured category (see
+`docs/memory.md`).
 
 The detector is `@tensorflow-models/face-detection` (BlazeFace, TF.js runtime). That package
 imports MediaPipe's `@mediapipe/face_detection` at module scope; `vite.config.ts` aliases the

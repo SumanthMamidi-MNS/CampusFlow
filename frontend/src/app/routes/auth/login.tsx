@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Lock, Mail, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Loader2, ShieldCheck, Info } from 'lucide-react';
 import { useAuth } from '@/core/auth/hooks';
 import { BrandMark } from '@/core/components/brand/BrandMark';
 
@@ -42,6 +42,19 @@ export function LoginPage() {
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div
+          role="status"
+          className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-[12.5px] leading-relaxed text-amber-900"
+        >
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+          <span>
+            <span className="font-semibold">Not deployed yet — coming soon.</span> This is the
+            finished product, presented; the hosted instance is being prepared and will be deployed
+            soon. Once it is live, your college provisions your account and this page opens for it.
+            There is no public sign-up.
+          </span>
+        </div>
+
         <div className="bg-white py-8 px-6 shadow-xs border border-slate-200 rounded-xl sm:px-10">
           <div className="mb-6">
             <h2 className="text-lg font-semibold text-slate-900">Institutional Sign-In</h2>

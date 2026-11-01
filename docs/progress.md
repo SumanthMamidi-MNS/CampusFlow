@@ -915,8 +915,8 @@ client's old hard-coded four seconds.
 
 ### D-2 — camera evidence expires (ADR-026)
 
-- `PROCTORING_EVIDENCE_RETENTION_DAYS` (default 90, `0` = keep) in settings, both env templates and
-  the production stack.
+- `PROCTORING_EVIDENCE_RETENTION_DAYS` (default 90; a non-positive value falls back to that default)
+  in settings, both env templates and the production stack.
 - `purge_proctoring_evidence()` erases the image from expired `camera_snapshot` events, stamps
   `evidence_purged_at`, keeps the event, audits `proctoring.evidence_purge`, and is idempotent.
 - `backend/scripts/purge_proctoring_evidence.py` runs it once; the `evidence-retention` service runs
@@ -924,7 +924,7 @@ client's old hard-coded four seconds.
 - The window is disclosed to candidates (`ExamStudentConfig.evidence_retention_days` and the
   delivery response) and the brief explains that pictures are deleted while the log entry remains.
 - `tests/test_proctoring_security.py` pins: expired frame erased, recent frame kept, non-evidence
-  event untouched, second run no-op, `0` no-op.
+  event untouched, second run no-op, non-positive window purged on the finite default.
 
 ### D-5 — memory ceiling enforced where the sandbox can enforce it
 
@@ -1568,6 +1568,39 @@ Found and fixed along the way: the deployment terminal's longest command line se
 width that widened the whole page on a phone. `min-w-0` on the grid children is the fix, and the
 two headless-measurement traps that hid it are recorded in `docs/memory.md`.
 
+##### Closing pass — the review-only rule, stated in one place and honoured everywhere
+
+ADR-029 is only worth what the weakest surface says, so the final pass walked every screen and
+document against one sentence: **camera and microphone signals are review-only; browser/page
+telemetry is the only thing that spends the allowance.**
+
+* **One classifier, not a second opinion per screen.** `_proctoring_event_category` returns
+  `evidence` (a stored frame), `camera_observation` (anything derived from camera or microphone)
+  or `browser_signal`, and that category travels with the event to the candidate and the faculty
+timeline. The candidate's cover gate and the reviewer's row both read the category instead of
+  re-deriving it from an event name.
+* **A lost camera is one event per outage.** The watchdog used to hold two timestamps that nothing
+  read; the intent — a single report per outage, so a broken webcam cannot flood the timeline or
+  re-alarm the candidate — is what the code does, and the dead refs are gone. The
+  `face_not_visible` reminder now states, like every other observation reminder, that the attempt
+  continues.
+* **The cover gate names the consequence it is actually applying.** Its allowance line takes the
+  gate's own tone, so a camera cover reads as an amber advisory rather than a rose violation, and
+  the observation count is always followed by "none counted against your browser-event allowance".
+* **Retention cannot be disabled by omission.** A non-positive `PROCTORING_EVIDENCE_RETENTION_DAYS`
+  now falls back to the finite 90-day default instead of meaning "keep forever"; ADR-026, the
+  architecture section, the audit table and the script docstring all say that, and
+  `test_proctoring_security.py` pins the fallback.
+
+Verification for this pass:
+
+```
+backend:  pytest tests/test_proctoring_security.py tests/test_demo_exam_and_integrity_vocab.py
+          tests/test_integrity_profile.py tests/test_warning_policy.py   → 24 passed
+frontend: npx tsc -b --noEmit                                              → clean
+docs:     grep for "0 means keep" / "keep forever" / "stays charged"      → no matches
+```
+
 #### Landing page — the guided tour as a cinematic player
 
 The "One portal at a time" chapter is a player now, not a slideshow. Three things changed.
@@ -1698,3 +1731,293 @@ boot:     mid-fade screenshot                  → landing already painted under
 header:   1440                                 → mark 40x40, wordmark 19 px, nav fits
 header:   390                                  → lockup 168 px, 58 px to Sign in, 0 overflow
 ```
+
+---
+
+### Phases 11–12 — integrity detection for the four named cheating paths
+
+The four paths a webcam proctor has to answer — leaving the page, a second device, a smartwatch,
+and talking an answer aloud — now each have a detector, an authored switch, a disclosed dwell and a
+server-side classification that keeps the model cue advisory (ADR-024, ADR-028, ADR-029, ADR-030,
+ADR-031).
+
+**App switching is distinguished from tab switching.** `visibilitychange` reports leaving the page
+(`tab_switch`, `page_hidden: true`), while `blur` reports another application in front of a still
+visible page (`window_blur`, `page_hidden: false`, `another_application_in_front`). A return inside
+the five-second grace records `quick_tab_return` and charges nothing; only one handler records,
+because a tab return fires both events and an application switch fires only `focus`.
+
+**The watchdog that made smartwatch detection possible did not always run.** A whole-frame
+classifier cannot see a watch at exam distance, so the device scan is handed close-up wrist crops
+built from the hand landmarker's wrist point and hand span. Those crops came from the hand-at-face
+loop, which only runs when `hand_monitoring_enabled` is authored — off by default — so on a typical
+paper the wearable read had no crop and a watch was undetectable. The landmarker loop now runs when
+**either** the hand check or the device check is authored; when the hand check is off it publishes
+the crops and returns before the hand monitor, so a device-only paper can find a watch without ever
+reporting `hand_near_face`, and it does not claim a hand check is loading or active in the status
+strip. The authoring form says the device check runs the hand landmarker for exactly this reason,
+and the candidate brief says a watch is looked for in a small close-up of their wrist while their
+hands are in view. No watch accuracy is claimed: the wrist path is a mechanism, not a measured
+detector, and `docs/memory.md` still forbids describing earbud or smartwatch detection as working.
+
+**Mouth movement is documented where it is referenced.** ADR-030 was cited from the monitor, the
+service vocabulary and the tests but had never been written up; it now records the pixel-motion
+measurement, the dominance rule that separates talking from a head turn, the disclosed per-tier
+dwell, and the reasons the cue can never spend the allowance.
+
+**The lecturer's timeline now shows the measurement, not just the event name.** "Second device
+detected" left a reviewer without the one thing that makes it actionable: *which* device, at what
+confidence, and whether the read came from the wrist close-up or the weaker whole-frame path.
+Each camera/model entry now carries a compact line built from the stored details — device category,
+model confidence, read region, agreeing-scan count, how long a cue was held, and for mouth motion
+how much more the mouth band moved than the forehead band. Only known keys are rendered; a
+snapshot, a bbox or an unrecognised value is never dumped into the panel.
+
+##### Verification this phase
+
+```
+frontend: npx tsc -b --noEmit                    → clean
+frontend: npm run lint                           → 0 errors (15 pre-existing purity warnings)
+frontend: npm run build                          → exit 0
+signals:  node scripts/check-integrity-signals.ts → 50/50 checks passed
+signals:  node scripts/check-hand-voice-monitoring.ts → 42/42 checks passed
+signals:  node scripts/check-face-monitoring.ts   → all checks passed
+backend:  ruff check campusflow scripts tests     → All checks passed
+backend:  pytest -q                               → 95 passed, 2 skipped
+```
+
+The student-config leak canary in `test_authorization_matrix.py` was the one failure the full suite
+surfaced: it enumerates the exact disclosed key set, and `mouth_monitoring_enabled` was missing from
+it. The key is a disclosure the candidate is entitled to, so the canary's allowlist was extended
+rather than the projection narrowed. A `second_device_detected` observation carrying
+`category: smartwatch` and `region: wrist` was added to the weak-cue parametrisation, which proves
+the wrist read travels to the lecturer's timeline with its detail intact, raises the review flag,
+and leaves the allowance, lock state and attempt status untouched.
+
+### Fix — `start.bat` refused to bootstrap after an additive model change
+
+**Symptom.** `start.bat` fell back to SQLite (Docker not running), then died inside the seeder with
+`sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such column: exam_attempts.delivery_variant`,
+so no backend or frontend ever started.
+
+**Cause — two defects, both in `scripts/bootstrap.py`.**
+
+1. `Base.metadata.create_all` creates missing *tables* only. A database seeded before the randomized
+   delivery work already had `exam_attempts`, so the new `delivery_variant` column was never added and
+   every query naming it failed. The docstring called this step "idempotent", which it was not.
+2. The SQLite URL was relative (`sqlite+aiosqlite:///./campusflow.db`). `start.bat` runs bootstrap with
+   the repository root as its working directory while uvicorn runs with `backend/`, so the seed wrote
+   `<repo>/campusflow.db` and the server served `backend/campusflow.db` — two files that had drifted
+   apart (10 vs 11 users, 3 vs 7 attempts), neither of which the app could fully use.
+
+**Fix.** The SQLite path is absolute and anchored to the repository root; bootstrap adopts an existing
+legacy `backend/campusflow.db` when the root file is absent (nothing is deleted). After `create_all`,
+`apply_schema` runs `reconcile_sqlite_schema`, which diffs the file against the model metadata and
+applies logged `ALTER TABLE … ADD COLUMN` / `CREATE INDEX IF NOT EXISTS` statements. A declaration it
+cannot reconcile additively (dropped or retyped column, `NOT NULL` without a default) stops bootstrap
+with the remediation in the message instead of failing later inside a seed query.
+
+**Verified.** `python scripts/bootstrap.py` → exit 0, `schema reconciled in place, added:
+exam_attempts.delivery_variant`, then a full seed. Second run → "SQLite schema already matches", still
+exit 0, so the step is genuinely idempotent now. Uvicorn started against the healed file on a scratch
+port: `/api/health` 200, both demo logins 200, `/exams` returns the two scheduled exams with all 14
+disclosed config keys, `/exams/{id}/attempts` and `/exams/{id}/public` 200. `ruff check` on the file
+reports the same 18 pre-existing findings as `HEAD` (skeleton `# noqa` block, one blind except, one
+`subprocess.run` without `check`) and no new ones; the exam test modules pass (3 passed).
+
+### Fix — the boot splash could outlive the app it covers
+
+**Symptom.** On `http://localhost:5173` the landing page was painted and interactive in the DOM, but
+the branded splash stayed at full opacity on top of it. Nothing could be clicked: `elementFromPoint`
+over the "Sign in to your portal" button returned an element inside `#boot`.
+
+**Cause.** `releaseBootScreen` in `main.tsx` was started from a double `requestAnimationFrame` so the
+first paint gate would not be measured pre-paint. This renderer produced no frames at all
+(`requestAnimationFrame` never fired; timers did), so the release never even began — and the splash
+has no other exit path. Every frame-less context has the same failure: occluded window, headless
+capture, embedded webview.
+
+**Fix.** The paint poll now starts synchronously; the `requestAnimationFrame` gate is gone. The poll
+still waits for `#root` to have children before dismissing, which was the only real safeguard against
+revealing a blank page, so the handover timing is unchanged (1.8 s visible + 0.42 s fade).
+
+**Verified in the running stack.** After a reload `#boot` is absent, the hero button receives clicks,
+`/login` accepts `admin@campusflow.edu`, and the dashboard renders "Welcome back, System
+Administrator" against the healed database; `/exams` lists both seeded papers and a managed exam
+opens. `npm run build` exit 0; `npm run lint` 0 errors (15 pre-existing purity warnings).
+
+### Phase 24 — Every confirmed cue spends the ladder, and nothing ships switched off
+
+The integrity engine now behaves the way the candidate is told it behaves: seven warnings, every
+confirmed camera cue charging one, and the seventh stopping the paper (ADR-032, superseding the
+advisory classification above).
+
+**The allowance is the contract.** `hand_near_face`, `voice_detected`, `mouth_movement_detected`,
+`second_device_detected`, `looking_away`, `face_not_visible`, `multiple_faces_detected`,
+`camera_obstructed` and `camera_off` each increment `proctor_violations_count`, raise the review
+flag, and return a warning that names the behaviour and the count ("Warning 2 of 7 — your
+microphone heard sustained talking"). At the authored allowance under the `remove` policy the
+attempt moves to `locked_violation`; the candidate requests a reopen and only a lecturer's unlock
+changes the status.
+
+**Nothing is off unless an author turns it off.** `DEFAULT_HAND_MONITORING` and
+`_resolve_device_detection` now default to on, alongside face, mouth and audio. Before this, a paper
+that authored nothing ran face checks only: a phone held up to the lens produced no device scan and
+no hand-at-face reading, which is precisely the case that reported "I am talking with a phone in
+shot and nothing happens".
+
+**The debounce no longer swallows repeats of a confirmed cue.** The server's three-second
+duplicate-signal collapse still applies to browser signals, where a doubled listener is real noise.
+A confirmed camera cue is exempt: the client already paid the dwell, resets its episode after each
+report, and a candidate who keeps talking or keeps the phone up has to keep climbing the ladder.
+
+**The seeder repairs an older local database.** `scripts/seed.py` and the demo exam now bring an
+existing row's integrity profile up to what this build enforces (seven warnings, every cue on)
+rather than leaving a stale five-warning config that no longer matches the code.
+
+##### Verification this phase
+
+```
+backend:  pytest -q                                   → 96 passed, 2 skipped
+frontend: npx tsc -b                                  → clean
+frontend: npm run build                               → exit 0
+bootstrap: python scripts/bootstrap.py                → schema reconciled, demo data seeded
+api:      GET /exams/{id}/public (student)            → max_violations 7, all five cues true
+```
+
+The tests that encoded the advisory contract were rewritten rather than loosened:
+`test_camera_cues_warn_and_raise_a_review`, `test_hand_near_face_reaches_the_lock_and_only_lecturer_reopens`,
+`test_face_and_head_direction_signals_are_counted_and_reviewable` and
+`test_camera_off_episodes_each_cost_one_warning` now assert the counted ladder, and the default test
+asserts every cue is on for an exam that authored nothing.
+
+### Fix — the presentation reads as a product, and the student exams page stays quiet
+
+The deployment chapter still looked like an open-source install guide: a copyable terminal on a
+"production host", a "Run it" nav item, and a FAQ answer that listed three commands. It now presents
+what happens when the institution goes live — the supervised stack, migrations at start, the single
+TLS listener, retention and backups — with no command line, no copy button and no suggested host.
+The nav item is "Deployment", the hero CTA is "See how it deploys", and the public test counts now
+match the suite (98 collected, 96 passed, 2 skipped).
+
+The student exams page was issuing two forbidden question-bank requests: the scheduling form's
+`useQuestionBanks()` hook was mounted for every visitor even though the form itself is staff-only.
+The hook now takes an `enabled` option and the page passes the same role check that hides the form,
+so the console stays clean and no 403 is generated.
+
+The integrity signal harness had one stale assertion: it hard-coded the old 3 s mouth dwell while the
+monitor's disclosed fallback is 1.5 s. It now derives the bound from `MOUTH_MONITOR_CONFIG`, so it
+still fails if a report lands before the configured dwell, and passes 50/50.
+
+**Verified.** `python scripts/bootstrap.py` (fallback path, no args) → schema matched, seed exit 0;
+`pytest -q` → 96 passed, 2 skipped; `ruff check .` → clean; `alembic heads` → one head; `npx tsc -b`
+→ clean; `npm run lint` → 0 errors; `npm run build` → exit 0; the three integrity harnesses →
+50/50, 42/42, all face checks; the running stack served the signed-out landing page with no console
+errors, the sign-in notice as a highlighted status box, and the student exams page with no failed
+question-bank request.
+
+### Fix — every demo click starts a new sitting
+
+A demo session reused the demo student's previous attempt, so after one sitting reached the seventh
+integrity warning every later "Take demo exam" answered **423 locked** and displayed the previous
+candidate's stopped screen. `demo_login` now clears that student's attempts for the demo exam before
+it mints the session (`reset_demo_attempts` in `domain/exams/demo.py`); the next start creates
+attempt 1 with a full clock and a zero warning count. `test_demo_login_clears_the_previous_sitting_for_a_fresh_one`
+reproduces the locked state, asserts the 423, then asserts the reset, the new attempt number and the
+fresh clock. The exams board now uses one shared launcher (`frontend/src/features/exams/demo.ts`), which clears the
+cached profile and performs a document navigation so the previous identity's auth and query state
+cannot leak into the paper. The demo endpoints remain mounted only when `DEBUG=true`; a production
+deployment answers 404 for them, so the public landing page deliberately does not advertise or call
+the demo, and the exams-board button is rendered only when the Vite `DEV` flag is set. Two stale
+landing claim was corrected instead: the suite is **99** collected / **97 passed, 2 skipped** after
+the new regression test. A later pass found the permission figure still hard-coded as **67** in the
+hero card; it is now **26**, matching the catalogue.
+
+**Verified.** `pytest tests/test_demo_exam_and_integrity_vocab.py` → 12 passed; the full suite → 97
+passed, 2 skipped; live `POST /exams/demo/login` followed by `POST /exams/{id}/start` twice in a row
+→ two different attempts, zero violations and a full 1200-second clock; `npm run build` → clean;
+`npm run lint` → 0 errors (15 pre-existing warnings).
+
+### Fix — a stopped demo restarts itself, and the candidate brief is a TL;DR
+
+The stopped screen still assumed an institution: after the seventh warning it asked the reviewer to
+wait for a lecturer to approve a reopen, in a demo that contains no lecturer. The demo is now marked
+in the candidate payload (`demo` on `ExamStudentConfig` and `ExamDeliveryResponse`, derived from the
+demo exam's config), and a stopped demo renders "Start a fresh demo": one press calls the same
+launcher as the exams board, clears the old attempt and opens a new brief. The automatic
+15-second reopen poll is skipped for the demo; a real paper keeps the lecturer gate, the request
+button and the poll unchanged. `test_demo_login_clears_the_previous_sitting_for_a_fresh_one` now
+also asserts the flag on both the delivery and the public brief, and the exact-key projection test
+in `test_authorization_matrix.py` names `demo` explicitly.
+
+The assessment brief's integrity card was long enough to push the camera check and the Begin button
+below the fold. It now opens with a four-line summary — camera on, allowance, on-device checks with
+no audio stored, retention — and the per-check disclosure (thresholds, microphone, mouth, evidence)
+lives behind one expander. The page is `max-w-3xl` with tighter padding; at 1280×900 the whole brief,
+camera check and Begin button fit without scrolling. No disclosure was removed. The student tour's
+assessment-brief capture was re-shot from the running build so the landing page does not show the
+old five-warning layout and copy.
+
+**Verified.** `pytest tests/test_demo_exam_and_integrity_vocab.py` → 12 passed; `pytest tests/test_authorization_matrix.py`
+→ passed; full suite → 97 passed, 2 skipped (99 collected); `ruff check .` → clean; `npx tsc -b` →
+clean; `npm run build` → exit 0; browser run of the demo → stopped screen shows "Start a fresh demo",
+pressing it lands on a fresh 20-minute brief, the database holds zero demo attempts afterwards, and
+`history.length` is 1 with no `window.open` call. The brief page measured 818 px in an 818 px
+viewport; the expanded disclosure was checked in the DOM. Screenshot: `student-11-exam-brief.webp`
+re-captured (1440×900, WebP).
+
+The same audit caught a second landing inaccuracy: the integrity chapter still split camera cues into
+"counts toward the disclosed allowance" (browser and presence signals) and "evidence for a human,
+never a penalty" (phone, hand, voice), which ADR-032 had made false. All confirmed cues are now in
+the counted list, the second column describes what the lecturer receives instead, and the paragraph
+says truthfully that a warning's still is attached while nothing is streamed and no audio is stored.
+
+### Fix — ten warnings, a ten-second gap, and the warning made visible
+
+The allowance is now **ten** by default (`DEFAULT_MAX_VIOLATIONS`), authored per exam between 1 and
+20. More importantly, a counted warning no longer leads straight into the next one: the attempt
+stores `last_warning_at` and `record_proctoring_event` refuses to count another warning until
+`PROCTORING_WARNING_COOLDOWN_SECONDS` (10) has elapsed. Signals inside the gap are still appended to
+the trail, annotated `suppressed_by_cooldown` with the seconds remaining, and a camera cue inside the
+gap still raises the lecturer's review flag — it just does not spend the ladder. The gap is disclosed
+in the brief and the delivery payload as `warning_cooldown_seconds`; reopening an attempt clears the
+timestamp. A migration adds the column (`b7c8d9e0f1a2`), and the demo/seed rows are repaired to ten.
+
+The landing page's integrity chapter now shows the two halves of that contract: the real candidate
+paper (`student-12-exam-attempt.webp`, in a browser frame, with the server clock and navigator) beside
+a faithful warning card — “Warning 8 of 10”, the cue that raised it, the remaining count, the
+ten-second gap, and the acknowledge action. The warning card is product markup rather than a
+screenshot, so its copy tracks the implementation. The assessment-brief capture was re-shot at ten
+warnings and the new 10-second chip, and the page was checked for overflow at 1280×900.
+
+`README.md` and the tests badge now state the real suite figures (97 passed, 2 skipped; 99 in the
+suite), and the architecture, decisions (ADR-034), memory and progress documents describe the new
+cooldown and its test seam.
+
+**Verified.** Live demo API: first `tab_switch` → count 1 and “Warning 1 of 10”; an immediate
+`window_blur` → count still 1 and no warning; after 11 seconds a `fullscreen_exit` → count 2 and
+“Warning 2 of 10”. `pytest` focused files → 29 passed; full suite → 97 passed, 2 skipped (99
+collected); `ruff check .` → clean; `npm run build` → success; `npm run lint` → 0 errors (15
+pre-existing warnings); the brief page fits in one 1280×900 viewport and the live landing page shows
+the paper and warning card.
+
+### Final pass — suite figures, the README captures and the tab question
+
+The demo-regression test brought the suite to **100 collected: 98 passed, 2 skipped**, so the figures
+that are visible to a reader were brought forward: the tests badge (`98 Passing`), the landing page's
+test counter and CI ledger, and the README's verification block. `docs/images/11-assessment.png` was
+regenerated from the re-shot candidate brief so the README no longer illustrates the old long-form,
+five-warning screen.
+
+The "two tabs" report was checked against the running app rather than guessed at. There is no
+`window.open` in `frontend/src`; the demo launcher performs exactly one same-document navigation
+(`location.replace`), and pressing "Take demo exam" on the exams board changed that tab's URL and
+left the tab count unchanged. The shared preview browser already carried one background CampusFlow
+tab at `#screens` from an earlier capture; that is browser state, not a navigation the product
+performs. A real paper keeps its reopen flow; only the demo restarts itself (ADR-033).
+
+**Verified after the copy changes.** `pytest` full suite → 98 passed, 2 skipped (100 collected);
+`npm run build` → exit 0; `npm run lint` → 0 errors (15 pre-existing warnings); the demo launcher
+landed on the brief in the same tab; the brief at 1440×900 measured **823 px** against an 818 px
+viewport (one short scroll, no overflow of the integrity summary), with the ten-warning and
+ten-second chips rendered from the server's payload.

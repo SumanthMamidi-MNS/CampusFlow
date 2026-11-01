@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/core/auth/hooks';
-import apiClient, { ACCESS_TOKEN_KEY } from '@/core/api/client';
+import { startDemoSitting } from '../demo';
 import { useCourseOfferings } from '@/features/courses/api';
 import { useQuestionBanks } from '@/features/question-banks/api';
 import { useCreateExam, useExams, useGenerateExamQuestionsAfterCreate } from '../api';
@@ -11,7 +11,17 @@ import {
   toGeneratePayload,
   type RandomPaperValue,
 } from '../random-paper';
-import type { ExamCreateInput, ExamStatus, ExamType, ExamWarningPolicy } from '../types';
+import {
+  INTEGRITY_DWELL_MS,
+  SENSITIVITY_LABEL,
+} from '../types';
+import type {
+  ExamCreateInput,
+  ExamIntegritySensitivity,
+  ExamStatus,
+  ExamType,
+  ExamWarningPolicy,
+} from '../types';
 import {
   AlertCircle,
   BookOpen,
@@ -37,24 +47,31 @@ export function ExamsList() {
   const { user } = useAuth();
   const isFacultyOrAdmin = user && ['admin', 'super_admin', 'faculty', 'exam_controller'].some((r) => user.roles.includes(r));
 
-  // One-click demo: provisions/uses only purpose-built demo objects and signs
-  // the caller in as the dedicated demo student, so it can never touch
-  // institutional data.
+  // The demo router is mounted only in a DEBUG backend (see main.py); a
+  // production build must not offer a button that would answer 404. `DEV` is
+  // the Vite build-time flag, so the production bundle carries neither the
+  // control nor the illusion that the endpoint exists.
+  const demoAvailable = import.meta.env.DEV;
+
+  // One-click demo: provisions/uses only purpose-built demo objects, signs the
+  // caller in as the dedicated demo student, and starts a clean sitting. The
+  // launcher performs a full navigation so the previous identity never lingers
+  // in this tab's auth or query state.
   const [isDemoStarting, setIsDemoStarting] = useState(false);
   const startDemoExam = async () => {
+    // The button is disabled while starting, but React's state update is not
+    // synchronous: a double click in the same tick must not mint two sessions.
+    if (isDemoStarting) return;
     setIsDemoStarting(true);
     setListError(null);
     try {
-      const res = await apiClient.post('/exams/demo/login');
-      localStorage.setItem(ACCESS_TOKEN_KEY, res.data.data.access_token);
-      navigate(`/exams/${res.data.data.exam_id}/take`, { replace: true });
+      await startDemoSitting();
     } catch (err: any) {
       setListError(
         err.response?.data?.error?.message ||
           err.message ||
           'Could not start the demo examination. Please try again.'
       );
-    } finally {
       setIsDemoStarting(false);
     }
   };
@@ -76,7 +93,8 @@ export function ExamsList() {
   const [endWindow, setEndWindow] = useState('');
   const [instructions, setInstructions] = useState('');
   const [proctoringEnabled, setProctoringEnabled] = useState(true);
-  const [maxViolations, setMaxViolations] = useState<number>(5);
+  const [faceMonitoring, setFaceMonitoring] = useState(true);
+  const [maxViolations, setMaxViolations] = useState<number>(10);
   // What reaching the tolerance does. Removal stays the default so a new exam
   // behaves exactly like the ones already on the platform.
   const [warningPolicy, setWarningPolicy] = useState<ExamWarningPolicy>('remove');
@@ -85,6 +103,17 @@ export function ExamsList() {
   // behaviour they were authored with, since the server default is off.
   const [deviceDetection, setDeviceDetection] = useState(true);
   const [obstructionSeconds, setObstructionSeconds] = useState(4);
+  // The per-exam integrity profile (ADR-029). `standard` is what every paper
+  // authored before the setting existed already ran at, so the default never
+  // tightens an assessment silently; hand and voice default off because each
+  // analyses more of the candidate's own room than a face count does.
+  const [integritySensitivity, setIntegritySensitivity] =
+    useState<ExamIntegritySensitivity>('standard');
+  const [handMonitoring, setHandMonitoring] = useState(false);
+  const [audioMonitoring, setAudioMonitoring] = useState(false);
+  // On with the camera, like face monitoring: it measures motion in the frames
+  // the face check already reads and records no audio at all.
+  const [mouthMonitoring, setMouthMonitoring] = useState(true);
   const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [showResultsImmediately, setShowResultsImmediately] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -125,8 +154,12 @@ export function ExamsList() {
   }, [startWindow, endWindow]);
 
   const selectedOffering = offerings?.find((o) => o.id === offeringId);
+  // The list only feeds the staff-only scheduling form, so a candidate's view
+  // must not request it: the endpoint is correctly forbidden to them and the
+  // failed request would surface as a console error on the exams page.
   const { data: syllabusBanks } = useQuestionBanks(
-    selectedOffering?.course_id ? { course_id: selectedOffering.course_id } : undefined
+    selectedOffering?.course_id ? { course_id: selectedOffering.course_id } : undefined,
+    { enabled: Boolean(isFacultyOrAdmin) }
   );
 
   const createExamMutation = useCreateExam();
@@ -166,10 +199,15 @@ export function ExamsList() {
       instructions: instructions.trim() || undefined,
       config: {
         proctoring_enabled: proctoringEnabled,
-        max_violations: Number(maxViolations) || 5,
+        max_violations: Number(maxViolations) || 10,
         warning_policy: warningPolicy,
         device_detection_enabled: deviceDetection,
         obstruction_threshold_seconds: Number(obstructionSeconds) || 4,
+        integrity_sensitivity: integritySensitivity,
+        face_monitoring_enabled: faceMonitoring,
+        hand_monitoring_enabled: handMonitoring,
+        audio_monitoring_enabled: audioMonitoring,
+        mouth_monitoring_enabled: mouthMonitoring,
         shuffle_questions: shuffleQuestions,
         show_results_immediately: showResultsImmediately,
         max_attempts: 1,
@@ -276,18 +314,20 @@ export function ExamsList() {
               <Plus className="h-4 w-4" /> Schedule Exam
             </button>
           )}
-          <button
-            onClick={startDemoExam}
-            disabled={isDemoStarting}
-            className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 shadow-xs transition-colors shrink-0 disabled:opacity-50"
-            title="Signs you into the demo student account and opens a ready practice paper"
-          >
-            {isDemoStarting ? 'Preparing…' : (
-              <>
-                <Sparkles className="h-4 w-4" /> Take demo exam
-              </>
-            )}
-          </button>
+          {demoAvailable && (
+            <button
+              onClick={startDemoExam}
+              disabled={isDemoStarting}
+              className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 shadow-xs transition-colors shrink-0 disabled:opacity-50"
+              title="Signs you into the demo student account and opens a ready practice paper"
+            >
+              {isDemoStarting ? 'Preparing…' : (
+                <>
+                  <Sparkles className="h-4 w-4" /> Take demo exam
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -780,8 +820,76 @@ export function ExamsList() {
                       On-device device check (phones, earbuds, watches)
                       <span className="mt-0.5 block text-[11px] text-slate-500">
                         Analyses the candidate’s camera picture inside their own browser. A
-                        probable device is recorded for your review — it never fails them
-                        automatically and it uses none of their warning allowance.
+                        confirmed device raises a warning the candidate sees and spends one of
+                        their warnings; it never fails them by itself, and the observation is
+                        recorded for your review. A watch is read from a close-up of the wrist,
+                        so this check also runs the hand landmarker; it does not report hands
+                        unless the hand-at-face check below is on.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={faceMonitoring}
+                      onChange={(e) => setFaceMonitoring(e.target.checked)}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      Face and head-direction check
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        Presence, a head turned away and a second face. This is the baseline
+                        check on every proctored paper; turning it off is disclosed to the
+                        candidate as “camera on, no presence check”.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={handMonitoring}
+                      onChange={(e) => setHandMonitoring(e.target.checked)}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      Hand-at-face check
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        Catches the pattern of reading from a phone held below the shot or a
+                        sheet raised to eye level. It raises a warning the candidate sees,
+                        spends one of their warnings, and is recorded for your review.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={audioMonitoring}
+                      onChange={(e) => setAudioMonitoring(e.target.checked)}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      Second-voice check (microphone)
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        Sees a second person who never enters the frame. Only loudness and shape
+                        are measured on the candidate’s own device — <strong>no audio is
+                        recorded, stored or transmitted</strong>. Review evidence only.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={mouthMonitoring}
+                      onChange={(e) => setMouthMonitoring(e.target.checked)}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      Talking / mouth-movement check
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        Notices a candidate reading an answer aloud to someone off-camera, or
+                        repeating a dictation, while their face stays forward. It measures
+                        movement in the camera picture — <strong>no speech is recognised and no
+                        audio is captured</strong>. Review evidence only, never a violation.
                       </span>
                     </span>
                   </label>
@@ -800,7 +908,11 @@ export function ExamsList() {
                       onChange={(e) => setMaxViolations(Number(e.target.value))}
                       className="w-24 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
                     />
-                    <p className="mt-1 text-[11px] text-slate-500">Between 1 and 20 events.</p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Between 1 and 20 events. After a warning is counted, the next cannot be
+                      counted for 10 seconds; signals inside that gap are recorded without
+                      spending another warning.
+                    </p>
                   </div>
                   <div>
                     <label htmlFor="obstruction-seconds" className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -818,6 +930,38 @@ export function ExamsList() {
                     <p className="mt-1 text-[11px] text-slate-500">
                       Continuous stillness before the candidate is warned. Between 2 and 30
                       seconds; disclosed to them before they start.
+                    </p>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="integrity-sensitivity"
+                      className="block text-[11px] font-semibold text-slate-600 mb-1"
+                    >
+                      Integrity sensitivity
+                    </label>
+                    <select
+                      id="integrity-sensitivity"
+                      value={integritySensitivity}
+                      onChange={(e) =>
+                        setIntegritySensitivity(e.target.value as ExamIntegritySensitivity)
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
+                    >
+                      {(['relaxed', 'standard', 'strict'] as ExamIntegritySensitivity[]).map(
+                        (tier) => (
+                          <option key={tier} value={tier}>
+                            {SENSITIVITY_LABEL[tier]}
+                          </option>
+                        )
+                      )}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {SENSITIVITY_LABEL[integritySensitivity]} — head turned away for{' '}
+                      {INTEGRITY_DWELL_MS[integritySensitivity].turn / 1000}s, out of frame for{' '}
+                      {INTEGRITY_DWELL_MS[integritySensitivity].absence / 1000}s, a hand at the
+                      face for {INTEGRITY_DWELL_MS[integritySensitivity].hand / 1000}s, a second
+                      voice for {INTEGRITY_DWELL_MS[integritySensitivity].voice / 1000}s. These
+                      exact figures are shown to the candidate before they start.
                     </p>
                   </div>
                   <div>

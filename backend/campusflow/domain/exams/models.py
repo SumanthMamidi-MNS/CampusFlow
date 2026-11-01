@@ -115,8 +115,19 @@ class ExamAttempt(BaseModel):
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
     browser_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Attempt-specific question and option ordering. Option labels remain the
+    # canonical answer-key identifiers; the JSON stores only their display order.
+    delivery_variant: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     proctor_flags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     proctor_violations_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # When the candidate's most recent warning was counted. The event endpoint
+    # refuses to count another warning until the disclosed cooldown has elapsed;
+    # a null value means the next counted signal starts a fresh ladder. Stored
+    # on the attempt rather than derived from the event trail so a suppressed
+    # event cannot be mistaken for the last warning.
+    last_warning_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # A candidate has at most one row per attempt number. Duplicate rows were
     # possible before this constraint (Wave 2 reported `attempt_number = 1`

@@ -9,7 +9,8 @@ Makes a fresh checkout runnable in one command. Safe to run repeatedly:
    falls back to a local SQLite file so the application still starts on a
    machine without Docker. Use ``--no-fallback`` to fail instead.
 3. Applies the schema — Alembic migrations for PostgreSQL, metadata ``create_all``
-   for SQLite (the migrations target PostgreSQL).
+   plus an additive column/index reconciliation for SQLite (the migrations target
+   PostgreSQL, and ``create_all`` never alters a table that already exists).
 4. Runs the demo seeder, which is idempotent and only inserts what is missing.
 
 Usage (from the repository root or from backend/)::
@@ -37,7 +38,13 @@ ENV_EXAMPLE_PATH = BACKEND_DIR / ".env.example"
 
 PLACEHOLDER_SECRET = "change-me-in-production-use-a-strong-random-secret"
 DEFAULT_PG_URL = "postgresql+asyncpg://campusflow:campusflow@localhost:5432/campusflow"
-SQLITE_URL = "sqlite+aiosqlite:///./campusflow.db"
+# Absolute, anchored to the repository root. A relative URL is resolved against
+# whatever directory the process happens to run in: ``start.bat`` bootstraps from
+# the root while uvicorn runs with ``backend/`` as its working directory, so a
+# relative path silently seeds one file and serves another.
+SQLITE_PATH = (REPO_ROOT / "campusflow.db").resolve()
+SQLITE_URL = f"sqlite+aiosqlite:///{SQLITE_PATH.as_posix()}"
+LEGACY_SQLITE_PATHS = ((BACKEND_DIR / "campusflow.db").resolve(),)
 
 
 def log(message: str) -> None:
@@ -129,6 +136,104 @@ async def resolve_database_url(*, force_sqlite: bool, allow_fallback: bool) -> t
     return SQLITE_URL, True
 
 
+def adopt_legacy_sqlite_file() -> None:
+    """Move a database created by the old relative URL to the canonical path.
+
+    Before the URL was anchored, a bootstrap run from ``backend/`` wrote
+    ``backend/campusflow.db``. Adopting it keeps that demo data instead of
+    silently starting from an empty file. Nothing is deleted.
+    """
+    if SQLITE_PATH.exists():
+        return
+    for legacy in LEGACY_SQLITE_PATHS:
+        if legacy.exists() and legacy.stat().st_size > 0:
+            import shutil
+
+            shutil.copy2(legacy, SQLITE_PATH)
+            log(f"adopted existing {legacy.name} at {legacy.parent.name}/ into {SQLITE_PATH.name}")
+            return
+
+
+def _sqlite_reconcile_plan(sync_conn: object) -> tuple[list[str], list[str], list[str]]:
+    """Diff the SQLite file against the model metadata.
+
+    Returns ``(statements, added_columns, unsafe)``: additive ``ALTER TABLE ...
+    ADD COLUMN`` and ``CREATE INDEX`` statements that can be applied in place,
+    the columns they add, and declarations that cannot be reconciled additively
+    (so the caller fails loudly instead of serving a schema that lies).
+    """
+    import sqlalchemy as sa
+    from campusflow.bedrock.db.base import Base
+
+    inspector = sa.inspect(sync_conn)
+    existing_tables = set(inspector.get_table_names())
+    statements: list[str] = []
+    added: list[str] = []
+    unsafe: list[str] = []
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue  # create_all already made it, column set included
+        present = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present:
+                continue
+            type_sql = sync_conn.dialect.type_compiler.process(column.type, type_expression=column)
+            parts = [f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {type_sql}']
+            default_sql = None
+            if column.server_default is not None:
+                default_sql = str(column.server_default.arg)
+                parts.append(f"DEFAULT {default_sql}")
+            if not column.nullable:
+                if default_sql is None:
+                    unsafe.append(f"{table.name}.{column.name} is NOT NULL without a default")
+                    continue
+                parts.append("NOT NULL")
+            statements.append(" ".join(parts))
+            added.append(f"{table.name}.{column.name}")
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        known = {index["name"] for index in inspector.get_indexes(table.name)}
+        for index in table.indexes:
+            if index.name in known:
+                continue
+            columns = ", ".join(f'"{column.name}"' for column in index.columns)
+            statements.append(
+                f'CREATE INDEX IF NOT EXISTS "{index.name}" ON "{table.name}" ({columns})'
+            )
+    return statements, added, unsafe
+
+
+def reconcile_sqlite_schema() -> None:
+    """Add columns and indexes the metadata declares but the file lacks."""
+    from campusflow.bedrock.db.session import engine
+
+    async def run() -> tuple[list[str], list[str]]:
+        async with engine.begin() as conn:
+            statements, added, unsafe = await conn.run_sync(_sqlite_reconcile_plan)
+            if unsafe:
+                raise SystemExit(
+                    "[bootstrap] ERROR: the SQLite file predates a change that cannot be "
+                    "applied in place:\n  "
+                    + "\n  ".join(unsafe)
+                    + f"\n[bootstrap]        Delete {SQLITE_PATH} and rerun to rebuild it, "
+                    "or point DATABASE_URL at PostgreSQL."
+                )
+            for statement in statements:
+                await conn.exec_driver_sql(statement)
+            return statements, added
+
+    statements, added = asyncio.run(run())
+    if added:
+        log(f"schema reconciled in place, added: {', '.join(added)}")
+    elif statements:
+        log(f"schema reconciled in place ({len(statements)} indexes)")
+    else:
+        log("SQLite schema already matches the model metadata")
+
+
 def apply_schema(is_sqlite: bool) -> None:
     """Create or migrate the schema."""
     if is_sqlite:
@@ -157,6 +262,7 @@ def apply_schema(is_sqlite: bool) -> None:
 
         asyncio.run(create_all())
         log("schema created from model metadata (SQLite)")
+        reconcile_sqlite_schema()
         return
 
     result = subprocess.run(
@@ -205,6 +311,10 @@ def main() -> int:
     database_url, is_sqlite = asyncio.run(
         resolve_database_url(force_sqlite=args.sqlite, allow_fallback=not args.no_fallback)
     )
+
+    if is_sqlite:
+        adopt_legacy_sqlite_file()
+        log(f"SQLite database: {SQLITE_PATH}")
 
     # Environment variables outrank the .env file in pydantic-settings, so this
     # pins the resolved database for every module imported from here on.

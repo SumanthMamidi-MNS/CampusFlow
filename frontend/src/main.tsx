@@ -88,6 +88,12 @@ function releaseBootScreen() {
   const boot = document.getElementById('boot');
   if (!boot) return;
 
+  // The poll starts from a timer, never from a frame callback. An occluded
+  // window, a headless capture or an embedded webview can go without frames
+  // for its whole lifetime — a double-rAF gate there never runs, and the
+  // splash then covers a fully rendered application forever instead of for
+  // 1.8 s. Timers keep running in those contexts; the poll itself waits for
+  // React's first paint, so dropping the frame gate reveals nothing early.
   const waitForPaint = window.setInterval(() => {
     const painted = (document.getElementById('root')?.childElementCount ?? 0) > 0;
     if (!painted) return;
@@ -97,6 +103,4 @@ function releaseBootScreen() {
   }, BOOT_PAINT_POLL_MS);
 }
 
-// Double rAF: the first frame schedules, the second fires once the browser is
-// about to present — so the poll below never measures the pre-paint window.
-requestAnimationFrame(() => requestAnimationFrame(releaseBootScreen));
+releaseBootScreen();

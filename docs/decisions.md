@@ -388,9 +388,10 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
   clears both markers, so an actioned review stops looking unreviewed in the queue.
 * **Consequences:** The policy is now a disclosure rather than a hidden switch — the candidate
   brief and the live integrity banner both state which consequence applies, and a mid-paper change
-  by faculty takes effect on the next recorded event. `camera_obstructed` keeps consuming a warning
-  under both policies: the alternative (evidence-only) was put to the product owner with D-13 and
-  declined, which is also why the four-second threshold still reports it as a warning.
+  by faculty takes effect on the next recorded event. Which *events* spend the allowance is a
+  separate question, settled by ADR-029: every camera- and microphone-derived signal is review-only
+  and the allowance covers browser/page telemetry alone, so an obstruction or a lost feed is named
+  as a technical observation (the four-second threshold still reports it) without charging it.
   The flag is also **actionable**: `GET /exams/{id}/attempts` derives
   `flagged_for_review`/`review_flagged_at` from the flag list through `review_flag_state` (one
   reader for both the screen and the queue filter) and accepts `flagged_only=true`, and the
@@ -522,9 +523,10 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
     the window. The daily retention job erases `details.snapshot` from `camera_snapshot` events
     older than it and stamps `details.evidence_purged_at`. Type, timestamp and severity survive, so
     the timeline still proves a frame existed and records when it was erased.
-  - **0 means keep, never erase-now.** A retention of 0 leaves frames alone; the purge is a no-op.
-    The alternative reading ("delete everything before today") is exactly the mistake a careless
-    operator would make.
+  - **A non-positive setting cannot switch erasure off.** `0` (or any negative value) falls back to
+    the finite 90-day default rather than meaning "keep forever"; the reading "delete everything
+    before today" is exactly the mistake a careless operator would make, so neither extreme is
+    reachable from configuration.
   - **The window is institutional, not per-exam.** It is a data-protection policy, not an
     authoring choice, so it lives in settings and is applied uniformly.
   - **It is disclosed.** The value travels to the candidate with the exam
@@ -535,7 +537,8 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
 * **Consequences:** The production stack runs the purge daily in its own service, and
   `scripts/purge_proctoring_evidence.py` can be run by hand (safe). `tests/test_proctoring_security.py`
   pins the boundary: an expired frame loses its image, a recent frame keeps it, a non-evidence
-  event is untouched, a second run is a no-op and 0 is a no-op. Device-detection evidence that
+  event is untouched, a second run is a no-op and a non-positive window purges on the default.
+  Device-detection evidence that
   includes a snapshot is covered by the same rule because the purge keys on the event vocabulary,
   not on which feature created the frame.
 
@@ -604,11 +607,14 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
     throttled tab from manufacturing away time. A persisting condition is re-reported every
     twenty seconds, so a blink, a glance or a dropped frame is never an event, and ten minutes
     unobserved is not one event either.
-  - **They consume the allowance.** Unlike a modelled *device* observation (ADR-024, review
-    evidence only), these are measurements of the candidate's own presence, so `looking_away`,
-    `face_not_visible` and `multiple_faces_detected` count against the disclosed `max_violations`
-    exactly as leaving the paper does. A camera outage is now reported on the same escalation
-    cadence rather than once per outage.
+  - **They are review-only observations.** `looking_away`, `face_not_visible`,
+    `multiple_faces_detected`, camera outages and obstruction are recorded with context and raised
+    for faculty review, but they do not consume the browser/page-event `max_violations` allowance,
+    lock the attempt or auto-submit. Face and camera models have no validated per-signal error rates
+    on live exam footage; technical issues, lighting, disability and ordinary movement can all
+    trigger them. The candidate is told that the paper is covered during a confirmed condition,
+    while their answers and timer remain safe. A camera outage is re-reported every 20 s while it
+    persists so the timeline shows duration without treating each report as a new violation.
   - **The allowance is disclosed before the first event.** `max_violations` is part of the
     candidate's brief, and the delivery payload carries the count already recorded, so a resumed
     attempt shows `n / m` from its first frame. The number is visible in the header chip and
@@ -623,9 +629,11 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
     unobserved.
   - **Failure is disclosed, never simulated.** If the model cannot load, the self-view strip says
     `Face check: unavailable`; the pipeline never renders a protection that is not running.
-* **Consequences:** The strongest cheat the browser can see is now detected within seconds and
-  costs the candidate their allowance; hiding for the rest of the hour costs an event every
-  twenty seconds, and flickering back no longer resets the timer. Accepted limits, stated to
+* **Consequences:** The browser can record tab, focus, fullscreen and clipboard events against
+  the disclosed browser/page-event allowance. Camera observations—including face presence, head
+  direction, obstruction and devices—are review-only; a confirmed face condition temporarily covers
+  the question but does not spend that allowance or decide guilt. Continued absence is re-reported
+  every twenty seconds, and flickering back no longer resets the dwell. Accepted limits, stated to
   candidates and reviewers rather than hidden: a candidate who turns their whole body and screen
   keeps a frontal face, the check runs in the candidate's own client and so is a deterrent rather
   than a tamper-proof observer, and poor lighting or glare can make a face unmeasurable — which
@@ -688,3 +696,151 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
   webcam, a quiet speaker at distance is not detected, and neither new cue carries an accuracy
   figure we could publish. The hand landmarker adds a ~3 MB model fetch once per session, loaded
   lazily and reported as `unavailable` when it cannot load rather than presented as protection.
+
+### ADR-030: Mouth Movement Is Measured as Pixel Motion, Never as Speech
+
+* **Status:** Accepted (2026-10-30)
+* **Context:** Every other camera cue in the engine is a position measurement — where the head is,
+  where a hand is, whether a device is in the shot. Speaking moves none of them: the head stays
+  forward, the hands stay clear, the phone stays out of frame, and with `audio_monitoring_enabled`
+  off the microphone is not consulted either. A candidate repeating an answer aloud for someone
+  behind the camera, or reading back a dictated answer, produced no event at all. The two honest
+  ways to close that were speech recognition (which records the candidate's room and is exactly
+  the privacy line this project does not cross) or face landmarks (`@mediapipe/tasks-vision`, a
+  second model download per proctored paper for a cue whose benign causes are constant).
+* **Decision:**
+  - **Measure motion, not speech.** For each sample the mouth band and a forehead reference band
+    of the same face are reduced to mean luma per pixel; the change since the previous sample is
+    the mean absolute difference. Talking moves the mouth band far more than the forehead; a head
+    turn, a lean or a nod moves both about equally. The signal is therefore *dominance*, not raw
+    motion: a reading counts only when `mouthMotion >= MOUTH_MOTION_MIN` **and**
+    `mouthMotion >= MOUTH_DOMINANCE * referenceMotion` (0.02 and 1.8), which is what stops a
+    candidate shifting in their chair from reading as one who is talking.
+  - **No audio, no clip, no transcript.** Nothing is recognised, transcribed or kept; the event
+    carries two motion numbers, a dominance ratio and a duration. `audio_active` records whether
+    the voice check independently heard something at the same moment — corroboration for a
+    reviewer, never an input to the decision.
+  - **Dwell is authored and disclosed, and pauses do not reset it.** `INTEGRITY_DWELL_MS.mouth`
+    (relaxed 4.5 s, standard 3 s, strict 2 s) is sent with the brief and the delivery; the client
+    adopts it. Speech is *made* of pauses, so observed motion accumulates across them and only a
+    `recoveryMs` of stillness ends the episode. A continuing episode re-reports no more often than
+    `escalationMs`, so ten minutes of talking is a handful of entries, not a full timeline.
+  - **Observation tier, on with the camera.** `mouth_movement_detected` joins
+    `MOUTH_OBSERVATION_EVENT_TYPES`, so it is recorded with its evidence frame, raises the faculty
+    review flag, shows the candidate a neutral reminder and never consumes the allowance, locks or
+    auto-submits. It defaults on with face monitoring (`DEFAULT_MOUTH_MONITORING = True`) because it
+    reads frames the face check already reads and adds no capture of its own.
+* **Consequences:** The talk-aloud path now produces a reviewable signal where it previously
+  produced silence, at a few hundred bytes of arithmetic per sample and no new model. Accepted
+  limits, stated to candidates: it cannot distinguish talking from chewing, yawning, drinking,
+  laughing or a sneeze; a candidate who speaks with little lip movement, or who is off to the side
+  of the frame, is not detected; heavy compression smears small motion, so quiet movement can fall
+  below the threshold. No accuracy figure is claimed, which is why the cue can never spend the
+  allowance.
+
+### ADR-031: The Wrist Crop That Finds a Watch Is Supplied Independently of the Hand Check
+
+* **Status:** Accepted (2026-10-30)
+* **Context:** ADR-024 shipped wearable detection through MobileNet, and measurement later showed
+  that path to be effectively inert: a watch at exam distance is a few thousand pixels of a 480 px
+  frame, so the whole-frame classifier never cleared its bar (the only mapped outputs were 0.07 and
+  0.03). The fix was a close-up: the hand landmarker's wrist point and hand span define a crop that
+  contains mostly wrist, and classifying that crop is what makes a watch findable at all. But the
+  wrist point came from the hand-at-face loop, which only runs when an author enabled
+  `hand_monitoring_enabled` — off by default, and off on most papers. So a paper with device
+  detection on and hand monitoring off could never produce the crop, and smartwatch detection was
+  still inert in exactly the configuration most papers use.
+* **Decision:** The hand landmarker loop runs when **either** `hand_monitoring_enabled` **or**
+  `device_detection_enabled` is authored. Its wrist crops feed the device scan either way; the
+  hand-at-face monitor is only fed when `hand_monitoring_enabled` is true, and the loop returns
+  immediately after publishing the crops when it is not. The hand check's own status states are
+  likewise only set when that check is authored, so a device-only paper never shows "hand check:
+  active" for a check it did not enable.
+* **Consequences:** A smartwatch is now reachable on a paper that never asked to watch hands, and a
+  hand-only paper is unchanged. The cost is one more lazy model fetch on device-enabled papers,
+  which already load TensorFlow models; a blocked model host leaves the wearable read on the weaker
+  whole-frame path and the device scan still reports phones. Supplying a crop is not an observation:
+  no `hand_near_face` event can be produced by a loop that exists only to find a watch, and the
+  candidate brief says the watch is looked for in a small close-up of the wrist while the hands are
+  in view. **This is a mechanism, not a measured detector.** No labelled watch footage exists in
+  this repository and COCO carries no watch ground truth, so the wrist path ships with no accuracy
+  figure and the old warning stands: do not describe earbud or smartwatch detection as working until
+  it has been measured on real footage. A watch on the far arm, worn above the sleeve line, or out
+  of frame remains undetected.
+
+### ADR-032: A Confirmed Cue Spends a Warning, and Every Cue Ships Switched On
+
+* **Status:** Accepted (2026-10-30) — supersedes the "observation tier" classification in ADR-024,
+  ADR-028 and ADR-030, and the off-by-default switches in ADR-029.
+* **Context:** The observation tier was built so a model could never punish a candidate, and it did
+  that job too well. Every camera cue — a hand at the face, a phone in shot, sustained talking, mouth
+  movement — was recorded for review and charged nothing, so a candidate who ignored the advisory
+  could hold a phone to the lens for the whole paper and see their counter sit still. Two of the
+  four detectors were also off unless an author turned them on, and the assessments nobody
+  configured were exactly the ones where a raised phone used to pass unrecorded. The product's
+  disclosed contract was already "seven warnings, then a stop only a lecturer can lift"; a signal
+  that never touches that ladder is indistinguishable, from the candidate's seat, from a detector
+  that does not work.
+* **Decision:** Every confirmed cue spends exactly one of the disclosed warnings, on the same ladder
+  as a tab switch, and the seventh stops the paper under the `remove` policy. `hand_monitoring_enabled`,
+  `mouth_monitoring_enabled` and `device_detection_enabled` default on, `audio_monitoring_enabled`
+  stays on, and an author may still switch any one of them off. The server no longer applies its
+  duplicate-signal debounce to confirmed camera cues: the client has already paid the dwell and
+  resets its episode after reporting, so a repeat is a new episode, not a doubled listener. Browser
+  signals keep the debounce.
+* **Consequences:** The candidate is told which behaviour was seen and which warning it was ("Warning
+  3 of 7 — a phone, earbuds or a watch was visible to your camera"), the lecturer still receives the
+  measurement and the review flag, and the path back into the paper is unchanged: the candidate
+  requests, only a lecturer may reopen. The cost is more warnings on ordinary behaviour, and that
+  cost is deliberate and disclosed — a cough, a scratch or a stretch may spend a warning, which is
+  why the candidate can explain it and the lecturer controls whether the attempt continues. The
+  accuracy caveat stands: none of these cues is a measured detector on exam footage, so each one is
+  a warning a human weighs, never a verdict.
+
+### ADR-033: The Demo May Restart Itself; a Real Paper May Not
+
+* **Status:** Accepted (2026-11-01).
+* **Context:** The integrity stop is deliberately one-way for an institution: after the disclosed
+  allowance, only a lecturer can reopen the attempt, and the candidate sees a request screen while
+  they wait. The demo paper runs the same policy, so a reviewer who reached seven warnings landed on
+  a screen that asked them to wait for a lecturer who does not exist in the demo. The demo exists to
+  show the product in a few minutes, not to strand the reviewer in its most restrictive state.
+* **Decision:** `demo_login` discards the demo student's attempts for the demo exam before minting a
+  session, and the candidate payload carries a `demo` boolean (in `ExamStudentConfig` and
+  `ExamDeliveryResponse`; never in a staff projection). When a demo attempt is stopped, the candidate
+  screen replaces the lecturer-request flow with "Start a fresh demo", which calls the same launcher
+  as the exams board. A real paper keeps the reopen flow, the automatic re-check and the lecturer
+  gate unchanged.
+* **Consequences:** Every demo click — the exams-board button or the stopped screen — is a new
+  attempt 1 with a full clock and zero warnings. Restarting from one tab deletes
+  the demo attempt another tab may still be holding; that is acceptable for a single-purpose demo
+  account and is the reason the state is explicitly disposable. `demo` is a bare marker, not an
+  answer or a grading internal, and the exact-key assertion on the candidate config still guards the
+  projection.
+
+### ADR-034: Ten Warnings, and a Ten-Second Gap Between Counted Ones
+
+* **Status:** Accepted (2026-11-01) — raises the default allowance from ADR-032's seven and adds the
+  cooldown; the ADR-032 decision that every confirmed cue spends a warning is unchanged.
+* **Context:** The warning ladder was correct but too fast in practice. A single sustained
+  condition — a face out of frame, a phone left in shot, a stalled monitor — could emit several
+  events in a second, so a candidate could reach the stop before reading the first warning, and the
+  candidate experience looked like a burst rather than a ladder. The product also asked for a larger
+  default: ten visible warnings before the paper stops.
+* **Decision:** `DEFAULT_MAX_VIOLATIONS` is **10**, and an exam may still author any value from 1 to
+  20. `PROCTORING_WARNING_COOLDOWN_SECONDS` is **10**: when a warning is counted, the attempt stamps
+  `last_warning_at`, and for the next ten seconds a further signal is written to the append-only
+  trail with `counted: false`, `suppressed_by_cooldown: true` and the seconds remaining, but cannot
+  increment `proctor_violations_count`. A suppressed camera cue still raises the lecturer's review
+  flag, because it is evidence; it just does not spend the ladder. The gap is server-side, disclosed
+  as `warning_cooldown_seconds` in the candidate brief and delivery payload, and cleared when a
+  lecturer reopens the attempt. It is stored on the attempt rather than derived from the trail so a
+  suppressed observation can never be mistaken for the last warning.
+* **Consequences:** A candidate sees one warning at a time and the next can only arrive after they
+  have had ten seconds to read it. A burst now produces one count plus a fully recorded timeline,
+  which is the honest shape of the event. The cost is that a genuinely new condition arriving inside
+  the gap is not counted, so the lecturer's timeline and the counter can differ; the suppression
+  annotation makes that difference legible instead of hiding it. Tests run with the cooldown
+  disabled by an autouse seam and one dedicated test turns it back on, so the rest of the suite
+  still exercises the ladder without sleeping. Existing exams keep an explicitly authored value
+  until the seeder repairs the demo rows; the default for an exam that authored nothing is now ten.

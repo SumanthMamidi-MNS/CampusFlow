@@ -41,6 +41,8 @@ from campusflow.domain.exams.service import (
     publish_exam_results,
     record_proctoring_event,
     remove_question_from_exam,
+    request_attempt_resume,
+    resume_request_state,
     review_flag_state,
     save_answers_batch,
     start_or_resume_attempt,
@@ -288,6 +290,7 @@ async def list_exam_attempts_endpoint(
         name = f"{att.student.first_name} {att.student.last_name}" if att.student else None
         email = att.student.email if att.student else None
         is_flagged, flagged_at = review_flag_state(att)
+        resume_requested, resume_requested_at = resume_request_state(att)
         summaries.append(
             ExamAttemptSummary(
                 id=att.id,
@@ -304,6 +307,8 @@ async def list_exam_attempts_endpoint(
                 proctor_violations_count=att.proctor_violations_count,
                 flagged_for_review=is_flagged,
                 review_flagged_at=flagged_at,
+                resume_requested=resume_requested,
+                resume_requested_at=resume_requested_at,
             ).model_dump(mode="json")
         )
     return success_response(summaries)
@@ -407,6 +412,32 @@ async def export_exam_results_endpoint(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/exams/{exam_id}/resume-request")
+async def request_attempt_resume_endpoint(
+    exam_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:take")),
+):
+    """The candidate asks their lecturer to reopen the attempt they were stopped from.
+
+    Nothing is reopened here: the response says the request was recorded and the
+    attempt is still locked. The lecturer approves it through ``unlock``, which is
+    the only route that changes the status.
+    """
+    attempt = await request_attempt_resume(
+        db=db, exam_id=exam_id, student_user=current_user
+    )
+    return success_response({
+        "attempt_id": str(attempt.id),
+        "status": attempt.status,
+        "resume_requested": True,
+        "message": (
+            "Your lecturer has been asked to reopen this attempt. You will be "
+            "returned to the paper automatically once they approve it."
+        ),
+    })
 
 
 @router.post("/exams/{exam_id}/attempts/{attempt_id}/unlock")

@@ -7,8 +7,8 @@ kept only for the institution's configured window
 
 Only the image is erased. The event row keeps its type, timestamp and severity,
 so the reviewer's timeline still shows that a frame existed and records when it
-was erased. A retention of ``0`` keeps frames indefinitely and is a no-op — it is
-never read as "delete everything".
+was erased. A non-positive retention setting falls back to the finite 90-day
+default; it cannot disable erasure.
 
 Usage (from the backend directory):
 
@@ -36,6 +36,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from campusflow.bedrock.config.settings import get_settings  # noqa: E402
 from campusflow.bedrock.db.session import async_session_factory, engine  # noqa: E402
+from campusflow.domain.exams.schemas import DEFAULT_EVIDENCE_RETENTION_DAYS  # noqa: E402
 from campusflow.domain.exams.service import purge_proctoring_evidence  # noqa: E402
 
 
@@ -43,8 +44,11 @@ async def run(retention_days: int | None) -> int:
     settings = get_settings()
     days = settings.proctoring_evidence_retention_days if retention_days is None else retention_days
     if days <= 0:
-        print("evidence retention is disabled (retention_days=0); nothing to erase")
-        return 0
+        days = DEFAULT_EVIDENCE_RETENTION_DAYS
+        print(
+            f"non-positive evidence retention configured; using finite "
+            f"{DEFAULT_EVIDENCE_RETENTION_DAYS}-day default"
+        )
 
     try:
         async with async_session_factory() as session:

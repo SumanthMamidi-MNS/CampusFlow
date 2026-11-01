@@ -181,12 +181,14 @@ async def test_review_policy_flags_the_attempt_and_lets_the_candidate_continue(c
     assert first["warning_policy"] == "review"
     assert first["is_locked"] is False
     assert first["status"] == "in_progress"
-    assert "reminder" in first["warning"].lower()
+    assert "warning 1 of 3" in first["warning"].lower()
+    assert "flagged for your lecturer's review" in first["warning"].lower()
 
     second = await _event(client, seeded, attempt_id, "window_blur")
     assert second["violations_count"] == 2
     assert second["is_locked"] is False
-    assert "second assessment-integrity reminder" in second["warning"].lower()
+    assert "warning 2 of 3" in second["warning"].lower()
+    assert "1 warning(s) left" in second["warning"].lower()
 
     # Third event reaches the disclosed tolerance: flagged, not removed.
     third = await _event(client, seeded, attempt_id, "fullscreen_exit")
@@ -322,12 +324,13 @@ async def test_removal_policy_stays_the_default_for_exams_that_never_chose(clien
     first = await _event(client, seeded, attempt_id)
     assert first["warning_policy"] == "remove"
     assert first["is_locked"] is False
-    assert "allowance remaining" in first["warning"].lower()
+    assert "warning 1 of 2" in first["warning"].lower()
+    assert "1 warning(s) left" in first["warning"].lower()
 
     second = await _event(client, seeded, attempt_id, "fullscreen_exit")
     assert second["is_locked"] is True
     assert second["status"] == "locked_violation"
-    assert "removed from this examination" in second["warning"].lower()
+    assert "examination stopped" in second["warning"].lower()
 
     attempt = (
         await db_session.execute(
@@ -416,11 +419,12 @@ async def test_authoring_refuses_an_integrity_policy_the_engine_cannot_honour(cl
 
 @pytest.mark.asyncio
 async def test_device_observation_raises_review_and_never_a_failure(client, db_session):
-    """A modelled device is an observation for a human, not a verdict (ADR-024).
+    """A modelled device is a counted warning *and* a review, never a verdict.
 
-    The detector is browser-side and can be wrong, so the server must record what
-    was seen, ask faculty to look, and leave the candidate's allowance and attempt
-    state exactly as they were.
+    The detector is browser-side and can be wrong, so the server records what was
+    seen, asks faculty to look, and warns the candidate — but it never ends the
+    attempt on its own below the tolerance (ADR-024, warning policy updated: a
+    camera cue spends the allowance exactly like a tab switch).
     """
     seeded = await _seed_assessment(
         db_session,
@@ -465,13 +469,14 @@ async def test_device_observation_raises_review_and_never_a_failure(client, db_s
     assert observation.status_code == 200, observation.text
     status = observation.json()["data"]
 
-    # The whole point: no allowance consumed, nothing submitted, still working.
-    assert status["violations_count"] == 0
+    # A confirmed device is a warning the candidate is told about, the attempt
+    # keeps running, and the observation still lands in the review queue.
+    assert status["violations_count"] == 1
     assert status["is_locked"] is False
     assert status["auto_submitted"] is False
     assert status["status"] == "in_progress"
-    assert "allowance was used" in status["warning"].lower()
-    assert "no allowance" in status["warning"].lower()
+    assert "warning 1 of 5" in status["warning"].lower()
+    assert "phone" in status["warning"].lower()
 
     attempt = (
         await db_session.execute(
@@ -480,7 +485,7 @@ async def test_device_observation_raises_review_and_never_a_failure(client, db_s
     ).scalar_one()
     await db_session.refresh(attempt)
     assert attempt.status == "in_progress"
-    assert attempt.proctor_violations_count == 0
+    assert attempt.proctor_violations_count == 1
     assert "flagged_for_review" in attempt.proctor_flags
 
     # Faculty can find it in the review queue, and the evidence frame was kept.
@@ -512,7 +517,8 @@ async def test_device_observation_raises_review_and_never_a_failure(client, db_s
     ).scalars().all()
     assert len(audits) == 1
 
-    # A second, different device signal does not multiply the flag or the audit.
+    # A second device episode is a second warning — the candidate ignored the
+    # first — but it does not multiply the review flag or the audit entry.
     second = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=seeded["headers"]["student"],
@@ -522,8 +528,11 @@ async def test_device_observation_raises_review_and_never_a_failure(client, db_s
             "details": {"category": "earbuds", "confidence": 0.72, "model": "mobilenet"},
         },
     )
+    # Confirmed camera cues are not debounced server-side: a candidate who keeps
+    # the phone up has to keep climbing the ladder, or the ladder is decorative.
     assert second.status_code == 200, second.text
-    assert second.json()["data"]["violations_count"] == 0
+    assert second.json()["data"]["violations_count"] == 2
+    assert second.json()["data"]["is_locked"] is False
     after = (
         await db_session.execute(
             select(AuditLog).where(
@@ -552,3 +561,122 @@ async def test_device_observation_raises_review_and_never_a_failure(client, db_s
         },
     )
     assert saved.status_code == 200, saved.text
+
+
+@pytest.mark.asyncio
+async def test_stopped_candidate_may_ask_but_only_the_lecturer_reopens(client, db_session):
+    """After the last warning the paper stops, and asking is not permission.
+
+    The candidate can press "request to continue" on the lock screen; the server
+    records the request and leaves the attempt locked. Only the lecturer's unlock
+    (teaching scope) turns the status back to ``in_progress`` and clears the
+    pending request.
+    """
+    seeded = await _seed_assessment(db_session, tag="ASK", max_violations=2, policy="remove")
+    attempt_id = await _begin(client, seeded, "browser_resume_request")
+
+    await _event(client, seeded, attempt_id)
+    locked = await _event(client, seeded, attempt_id, "fullscreen_exit")
+    assert locked["is_locked"] is True
+    assert locked["status"] == "locked_violation"
+
+    asked = await client.post(
+        f"/api/v1/exams/{seeded['exam'].id}/resume-request",
+        headers=seeded["headers"]["student"],
+    )
+    assert asked.status_code == 200, asked.text
+    body = asked.json()["data"]
+    assert body["resume_requested"] is True
+    # Asking changes nothing about the lock: the candidate is still outside.
+    assert body["status"] == "locked_violation"
+
+    # The lecturer's queue shows whose paper is waiting, and since when.
+    listed = await client.get(
+        f"/api/v1/exams/{seeded['exam'].id}/attempts",
+        headers=seeded["headers"]["faculty"],
+    )
+    assert listed.status_code == 200, listed.text
+    row = next(a for a in listed.json()["data"] if a["id"] == attempt_id)
+    assert row["resume_requested"] is True
+    assert row["resume_requested_at"] is not None
+    assert row["status"] == "locked_violation"
+
+    # Approval is the only thing that reopens the attempt.
+    approved = await client.post(
+        f"/api/v1/exams/{seeded['exam'].id}/attempts/{attempt_id}/unlock",
+        headers=seeded["headers"]["faculty"],
+        json={"reason": "Approved after speaking with the candidate."},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["data"]["status"] == "in_progress"
+
+    after = await client.get(
+        f"/api/v1/exams/{seeded['exam'].id}/attempts",
+        headers=seeded["headers"]["faculty"],
+    )
+    row = next(a for a in after.json()["data"] if a["id"] == attempt_id)
+    assert row["resume_requested"] is False
+    assert row["resume_requested_at"] is None
+
+    # Requesting a resume on a running attempt is refused, not silently ignored.
+    again = await client.post(
+        f"/api/v1/exams/{seeded['exam'].id}/resume-request",
+        headers=seeded["headers"]["student"],
+    )
+    assert again.status_code == 409, again.text
+
+    # And a candidate cannot request a resume on somebody else's attempt.
+    other = await client.post(
+        f"/api/v1/exams/{seeded['exam'].id}/resume-request",
+        headers=seeded["headers"]["faculty"],
+    )
+    assert other.status_code == 403, other.text
+
+
+@pytest.mark.asyncio
+async def test_a_counted_warning_opens_a_ten_second_gap(client, db_session, monkeypatch):
+    """A burst cannot empty the allowance: the next warning waits ten seconds.
+
+    The candidate sees one warning at a time. A second signal inside the gap is
+    still written to the lecturer's timeline, with the suppression recorded, but
+    the counter does not move. After the disclosed gap the next signal counts.
+    """
+    from campusflow.domain.exams import service as exams_service
+
+    monkeypatch.setattr(exams_service, "PROCTORING_WARNING_COOLDOWN_SECONDS", 10)
+    seeded = await _seed_assessment(db_session, tag="GAP", max_violations=10, policy="remove")
+    attempt_id = await _begin(client, seeded, "browser_warning_gap")
+
+    first = await _event(client, seeded, attempt_id)
+    assert first["violations_count"] == 1
+    assert "warning 1 of 10" in first["warning"].lower()
+
+    # Same sitting, a different signal, three seconds later at most: recorded,
+    # not counted, and no second modal.
+    second = await _event(client, seeded, attempt_id, "window_blur")
+    assert second["violations_count"] == 1
+    assert second["warning"] is None
+
+    timeline = await client.get(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=seeded["headers"]["faculty"],
+    )
+    assert timeline.status_code == 200, timeline.text
+    events = timeline.json()["data"]
+    assert [event["event_type"] for event in events] == ["tab_switch", "window_blur"]
+    assert events[1]["details"]["suppressed_by_cooldown"] is True
+    assert events[1]["details"]["counted"] is False
+    assert events[1]["details"]["cooldown_seconds_remaining"] >= 1
+
+    # Ten seconds pass (backdated rather than slept): the next signal counts.
+    attempt = (
+        await db_session.execute(
+            select(ExamAttempt).where(ExamAttempt.id == uuid.UUID(attempt_id))
+        )
+    ).scalar_one()
+    attempt.last_warning_at = datetime.now(UTC) - timedelta(seconds=11)
+    await db_session.commit()
+
+    third = await _event(client, seeded, attempt_id, "fullscreen_exit")
+    assert third["violations_count"] == 2
+    assert "warning 2 of 10" in third["warning"].lower()

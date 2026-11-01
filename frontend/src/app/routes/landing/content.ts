@@ -30,7 +30,7 @@ export const NAV = [
   { label: 'Screens', href: '#screens' },
   { label: 'Workflow', href: '#workflow' },
   { label: 'Integrity', href: '#integrity' },
-  { label: 'Run it', href: '#run' },
+  { label: 'Deployment', href: '#deployment' },
   { label: 'Proof', href: '#proof' },
 ] as const;
 
@@ -45,8 +45,8 @@ export const MARQUEE = [
 
 export const STATS = [
   { figure: '1', label: 'server', note: 'API · database · sandbox · proxy' },
-  { figure: '6', label: 'roles', note: 'one 67-permission catalogue' },
-  { figure: '94', label: 'backend tests', note: 'in the suite · CI runs PostgreSQL' },
+  { figure: '6', label: 'roles', note: 'one 26-permission catalogue' },
+  { figure: '100', label: 'backend tests', note: 'in the suite · CI runs PostgreSQL' },
   { figure: '0', label: 'SaaS deps', note: 'no sign-up, no vendor' },
 ] as const;
 
@@ -272,7 +272,7 @@ export const MODULES: Module[] = [
     title: 'The layer everything else rests on',
     kicker: 'Sessions · permissions · audit trail',
     summary:
-      'Six roles over a 67-permission catalogue, short-lived access tokens with rotating refresh cookies, and an append-only record of every consequential action.',
+      'Six roles over a 26-permission catalogue, short-lived access tokens with rotating refresh cookies, and an append-only record of every consequential action.',
     bullets: [
       'JWT access tokens, rotating refresh cookies (httpOnly, SameSite=Strict), and per-IP rate limits on credential endpoints.',
       'Bulk user import, role assignment, password reset request and reset, and deactivation instead of deletion.',
@@ -311,7 +311,7 @@ export const CAPABILITIES = [
   'Institution, course and student analytics',
   'Append-only audit trail',
   'Notifications with per-user preferences',
-  'Six roles over 67 permissions',
+  'Six roles over 26 permissions',
   'Docker Compose production stack with TLS',
 ] as const;
 
@@ -516,20 +516,20 @@ export const SECURITY: Rule[] = [
 
 export const INTEGRITY_FACTS = [
   { figure: '3', label: 'sensitivity tiers — relaxed, standard, strict — authored per paper' },
-  { figure: '1–20', label: 'integrity events tolerated, set on the paper' },
+  { figure: '10', label: 'warnings by default, authored per paper between 1 and 20' },
+  { figure: '10 s', label: 'minimum gap between counted warnings; signals inside it are still logged' },
   { figure: '90 days', label: 'default camera-evidence retention, disclosed to candidates' },
   { figure: '0', label: 'answer keys reachable from a candidate payload' },
 ] as const;
 
 /**
- * The integrity signals a paper can run with, split by what they are allowed to
- * do (ADR-029).
+ * What a paper records, and what the lecturer receives (ADR-029, ADR-032).
  *
- * The split is the honest part and the reason it is on the page: browser events
- * and the two presence measurements can be counted against a disclosed
- * allowance, while a model's guess about a hand, a voice or a phone is only ever
- * evidence for a human. A reviewer reading this should be able to tell which is
- * which without opening the code.
+ * Every confirmed cue — browser event or camera measurement — spends exactly one
+ * of the disclosed warnings. None of them is a verdict on its own: each warning
+ * also carries what was seen and, for a camera cue, a still, and a person
+ * decides. The split is between the ladder and the evidence, not between
+ * "counted" and "advisory", because the advisory tier no longer exists.
  */
 export const INTEGRITY_CUES = [
   {
@@ -541,14 +541,19 @@ export const INTEGRITY_CUES = [
       'Two or more faces at the desk',
       'Camera stopped or obstructed past the authored grace',
       'Clipboard and context-menu attempts, window resize, network change',
+      'A probable phone, earbuds or smartwatch in the camera picture',
+      'A hand held at the face past the dwell \u2014 reading off something in the hand',
+      'A sustained second voice or talking-shaped mouth movement',
     ],
   },
   {
-    tier: 'evidence for a human, never a penalty' as const,
+    tier: 'what the lecturer reviews' as const,
     items: [
-      'A probable phone, earbuds or smartwatch in the camera picture',
-      'A hand held at the face past the dwell \u2014 reading off something in the hand',
-      'A second voice, sustained, from the candidate\u2019s own microphone',
+      'The warning as the candidate saw it, with the cue that raised it',
+      'A still frame attached to a confirmed camera warning',
+      'The full event timeline for the sitting, kept after frames expire',
+      'The disclosed ladder \u2014 how many warnings, and what the last one does',
+      'A human decision: a cue can be mistaken and never fails a candidate by itself',
     ],
   },
 ] as const;
@@ -582,13 +587,8 @@ export const ARCHITECTURE: ArchitectureLayer[] = [
   },
 ];
 
-export const INSTALL = `cp .env.production.example .env          # set POSTGRES_PASSWORD and JWT_SECRET_KEY
-docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml exec backend \\
-  python scripts/provision_admin.py --email you@example.edu --password 'at least 12 characters'`;
-
 export const BOOT_SEQUENCE = [
-  'Compose interpolates `.env` and starts PostgreSQL, Redis, the Piston sandbox and the API.',
+  'One supervised Compose project starts PostgreSQL, Redis, the Piston sandbox and the API.',
   'Migrations run at start; the API stays unhealthy until the schema is at head.',
   'The SPA is built and served by Caddy, the only service bound to the host.',
   'The evidence-retention job erases frames past the configured window, every day.',
@@ -597,8 +597,8 @@ export const BOOT_SEQUENCE = [
 
 export const VERIFICATION = [
   { dir: 'backend', command: 'ruff check .', result: 'clean' },
-  { dir: 'backend', command: 'pytest -q · SQLite', result: '92 passed, 2 skipped' },
-  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: 'CI · the same 94' },
+  { dir: 'backend', command: 'pytest -q · SQLite', result: '98 passed, 2 skipped' },
+  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: 'CI · the same 100' },
   { dir: 'frontend', command: 'npm run lint', result: '0 errors' },
   { dir: 'frontend', command: 'npm run build', result: 'success' },
 ];
@@ -1041,7 +1041,7 @@ export const FAQ = [
   },
   {
     q: 'How long does deployment take?',
-    a: 'Three commands on a host with Docker Engine, Compose v2 and free ports 80/443: copy the production env file, bring the stack up, then provision the first Campus Lead. Migrations run at start, so the first sign-in works immediately afterwards.',
+    a: 'It is a single supervised stack on the college’s host: the API, PostgreSQL, the sandbox and the web server come up together, migrations run at start, and the first Campus Lead is provisioned before handover. The first sign-in works as soon as the stack is healthy.',
   },
   {
     q: 'Does it need a GPU, or a proctoring vendor?',

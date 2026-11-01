@@ -5,17 +5,16 @@ import {
   ArrowRight,
   Check,
   ChevronRight,
-  ClipboardCopy,
-  Copy,
   ExternalLink,
   Minus,
   Pause,
   Play,
   Plus,
+  ShieldAlert,
   ShieldCheck,
 } from 'lucide-react';
 import { BrandMark } from '@/core/components/brand/BrandMark';
-import { Counter, Reveal, Typewriter, Words } from './motion';
+import { Counter, Reveal, Words } from './motion';
 import {
   useActiveSection,
   useInView,
@@ -31,7 +30,6 @@ import {
   CAPABILITIES,
   DISCONNECTED,
   FAQ,
-  INSTALL,
   INTEGRITY_CUES,
   INTEGRITY_FACTS,
   LIMITS,
@@ -63,7 +61,9 @@ import './landing.css';
  *
  * Everything degrades: `prefers-reduced-motion` shows the finished state,
  * coarse pointers get no tilt, and no content is hidden behind an animation.
- * Nothing here calls the API — the page must paint without a session.
+ * Nothing here calls the API — the page must paint without a session, and the
+ * demo endpoints are a DEBUG-only affordance that a production deployment does
+ * not mount.
  */
 
 const SHELL = 'mx-auto w-full max-w-[1180px] px-6 lg:px-8';
@@ -77,7 +77,7 @@ const CHAPTERS = [
   { id: 'journey', label: 'Examination' },
   { id: 'roles', label: 'Roles' },
   { id: 'integrity', label: 'Integrity' },
-  { id: 'run', label: 'Run it' },
+  { id: 'deployment', label: 'Deployment' },
   { id: 'proof', label: 'Proof & limits' },
   { id: 'faq', label: 'Questions' },
 ];
@@ -359,7 +359,7 @@ function HeroStage() {
             <div className="cf-float-slow flex items-center gap-2.5 rounded-2xl border border-white/15 bg-[#12112f]/92 px-3 py-2 shadow-[0_20px_44px_-22px_rgba(0,0,0,0.8)] backdrop-blur">
               <BrandMark className="h-7 w-7" />
               <span className="pr-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-indigo-100/70">
-                67 permissions
+                26 permissions
               </span>
             </div>
           </div>
@@ -1144,7 +1144,7 @@ function Integrity() {
           ))}
         </dl>
 
-        <div className="mt-8 grid gap-px overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.08] sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-8 grid gap-px overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.08] sm:grid-cols-2 lg:grid-cols-5">
           {INTEGRITY_FACTS.map((fact) => (
             <div key={fact.figure} className="bg-slate-950 px-6 py-5">
               <p className="text-[26px] font-semibold tracking-tight text-white">{fact.figure}</p>
@@ -1187,12 +1187,97 @@ function Integrity() {
           ))}
         </div>
 
+        <div className="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1.04fr)_minmax(0,0.96fr)] lg:items-center lg:gap-8">
+          <Reveal y={20}>
+            <figure className="overflow-hidden rounded-2xl border border-white/10 bg-[#0d0c26] shadow-[0_30px_70px_-40px_rgba(0,0,0,0.9)]">
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="flex gap-1.5" aria-hidden>
+                    <span className="h-2 w-2 rounded-full bg-white/15" />
+                    <span className="h-2 w-2 rounded-full bg-white/15" />
+                    <span className="h-2 w-2 rounded-full bg-white/15" />
+                  </span>
+                  <span className="text-[10.5px] font-medium text-slate-400">
+                    CS201 Weekly Quiz · candidate view
+                  </span>
+                </div>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-300">
+                  <span className="h-1 w-1 rounded-full bg-emerald-400" aria-hidden="true" /> Live
+                </span>
+              </div>
+              <img
+                src="/tour/student/student-12-exam-attempt.webp"
+                alt="Timed paper in progress with the server-owned countdown, a question navigator, autosave and flag for review"
+                loading="lazy"
+                className="block w-full bg-white"
+              />
+              <figcaption className="border-t border-white/10 px-4 py-3 text-[11.5px] leading-relaxed text-slate-400">
+                <span className="font-semibold text-slate-200">The paper, running.</span> The
+                server owns the clock, answers autosave, and the navigator shows what is still
+                unanswered. A camera check is required before this clock starts on a proctored
+                sitting.
+              </figcaption>
+            </figure>
+          </Reveal>
+
+          <Reveal delay={90} y={20}>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-300">
+                What a warning looks like
+              </p>
+              <h3 className="mt-2 text-[22px] font-semibold tracking-tight text-white sm:text-[25px]">
+                The cue, the count, and the next step — before the paper continues.
+              </h3>
+              <p className="mt-3 max-w-md text-[13px] leading-relaxed text-slate-400">
+                A warning covers the paper until the candidate acknowledges it. The tenth stops
+                the sitting; only a lecturer can reopen it. The stated gap is part of the
+                disclosure, so a burst of one condition cannot walk the whole ladder in a second.
+              </p>
+
+              <div className="mt-5 overflow-hidden rounded-2xl border border-rose-400/30 bg-[#1a0d18] p-1.5 shadow-[0_26px_60px_-30px_rgba(244,63,94,0.45)]">
+                <div className="flex items-center justify-between gap-3 rounded-t-xl bg-gradient-to-r from-rose-600 to-rose-500 px-4 py-3 text-white">
+                  <p className="flex items-center gap-2 text-[10.5px] font-extrabold uppercase tracking-[0.14em]">
+                    <ShieldAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Integrity warning recorded
+                  </p>
+                  <span className="rounded-md bg-white/15 px-2 py-0.5 text-[11px] font-bold tabular-nums">
+                    8 / 10
+                  </span>
+                </div>
+                <div className="rounded-b-xl bg-white p-4 text-slate-800 sm:p-5">
+                  <p className="text-[17px] font-semibold tracking-tight text-slate-900">
+                    Warning 8 of 10
+                  </p>
+                  <p className="mt-2 text-[12.5px] leading-relaxed text-slate-600">
+                    Your face was not visible to the camera. <strong>2 warnings left</strong>{' '}
+                    before this sitting stops; only your lecturer can reopen it. If this was a
+                    fault on your side, tell them now.
+                  </p>
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600">
+                    After a counted warning, another cannot be counted for{' '}
+                    <strong className="text-slate-800">10 seconds</strong>. Signals inside that
+                    gap are still recorded for your lecturer, without spending another warning.
+                  </div>
+                  <div className="mt-4 rounded-lg bg-[#1438ff] px-4 py-2.5 text-center text-[12.5px] font-semibold text-white">
+                    I understand — continue the paper
+                  </div>
+                  <p className="mt-2 text-center text-[10.5px] text-slate-500">
+                    The warning stays on screen until acknowledged.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+
         <Reveal delay={120}>
           <p className="mt-8 max-w-3xl text-[13px] leading-relaxed text-slate-400">
-            Every camera cue runs inside the candidate’s own browser: frames are measured and
-            discarded, nothing is streamed, and no audio is ever recorded or transmitted. The tier
-            a paper runs at, every threshold it implies and every cue it switches on are shown to
-            the candidate before they start. The last two hardening waves came from auditing the
+            Every camera cue runs inside the candidate’s own browser: the picture is measured
+            there and only a confirmed warning’s still is attached for the lecturer — nothing is
+            streamed, and no audio is ever recorded or transmitted. Every confirmed cue costs one
+            warning, on the same ladder as leaving the paper. The tier a paper runs at, every
+            threshold it implies and every cue it switches on are shown to the candidate before
+            they start. The last two hardening waves came from auditing the
             running stack rather than the test suite: candidate sessions could read answer keys and
             cohort gradebooks, six directory routes had no gate, and a department filter fell
             through to an unscoped query. Each defect, its reproduction and its fix is recorded in
@@ -1205,32 +1290,17 @@ function Integrity() {
 }
 
 /**
- * The product tour, as a deck.
+ * The deployment chapter.
  *
- * The screens sit in a real 3D coverflow: the chosen one is flat and lit, and
- * its neighbours stand back on either side, angled away with depth on the Z
- * axis. Arrow keys, the two controls or the strip below all move the deck, and
- * every screen stays mounted, so a switch is a transform rather than a load.
- *
- * On a narrow screen the neighbours tuck almost entirely behind the active
- * screen: the deck still moves, but the reading width belongs to one shot.
+ * The product is presented, not handed out: this section states the delivery
+ * model and the layers it is built from, and shows what happens when the
+ * institution goes live — without turning the public page into an install
+ * guide. There is no terminal, no copyable command and no suggested host.
  */
-function Run() {
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(INSTALL);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
-    } catch {
-      setCopied(false);
-    }
-  };
-
+function Deployment() {
   return (
     <section
-      id="run"
+      id="deployment"
       className="scroll-mt-24 border-y border-slate-200/70 bg-slate-50/70 py-20 sm:py-28"
     >
       <div className={SHELL}>
@@ -1241,10 +1311,6 @@ function Run() {
           body="campusflow.bedrock — config, database, auth, RBAC, audit, storage, mail, runner — never imports from campusflow.domain. Domains cooperate through service interfaces rather than each other’s tables, and the college runs the whole system as a single supervised Compose project on one server."
         />
 
-        {/* `min-w-0` on both children is load-bearing: the terminal's longest
-            command line would otherwise set a min-content width for the whole
-            single-column grid, which on a phone widens the page instead of
-            scrolling inside the terminal. */}
         <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.92fr)] lg:gap-10">
           <Reveal y={30} className="min-w-0">
             <div>
@@ -1281,42 +1347,18 @@ function Run() {
           </Reveal>
 
           <Reveal delay={90} y={30} className="min-w-0">
-            <div>
-              <div className="overflow-hidden rounded-[24px] border border-slate-800 bg-slate-900 shadow-[0_30px_70px_-40px_rgba(15,23,42,0.9)]">
-                <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.03] px-5 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-white/15" />
-                      <span className="h-2 w-2 rounded-full bg-white/15" />
-                      <span className="h-2 w-2 rounded-full bg-white/15" />
-                    </span>
-                    <span className="text-[11px] font-medium text-slate-400">production host</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={copy}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[10.5px] font-medium text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-                  >
-                    {copied ? (
-                      <>
-                        <ClipboardCopy className="h-3 w-3 text-emerald-400" aria-hidden="true" />
-                        Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3 w-3" aria-hidden="true" />
-                        Copy
-                      </>
-                    )}
-                  </button>
-                </div>
-                <Typewriter text={INSTALL} />
-              </div>
+            <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_26px_60px_-46px_rgba(15,23,42,0.5)] sm:p-7">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Go-live, in order
+              </p>
+              <h3 className="mt-2 text-[17px] font-semibold tracking-tight text-slate-900">
+                What deployment does
+              </h3>
 
-              <ol className="mt-5 space-y-2.5">
+              <ol className="mt-5 space-y-3.5">
                 {BOOT_SEQUENCE.map((step, index) => (
                   <li key={step} className="flex gap-3">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] font-semibold tabular-nums text-slate-500">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 text-[10px] font-semibold tabular-nums text-indigo-700">
                       {index + 1}
                     </span>
                     <span className="text-[12.5px] leading-relaxed text-slate-600">{step}</span>
@@ -1324,10 +1366,10 @@ function Run() {
                 ))}
               </ol>
 
-              <p className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 text-[12.5px] leading-relaxed text-slate-600">
-                <span className="font-semibold text-slate-800">Planning the cutover?</span> TLS,
-                backups and a verified restore, evidence retention, upgrades and troubleshooting are
-                all covered by the deployment runbook that ships with the instance.
+              <p className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-[12.5px] leading-relaxed text-slate-600">
+                <span className="font-semibold text-slate-800">Delivered, not downloaded.</span>{' '}
+                The college owns the instance and its data. TLS, backups with a verified restore,
+                evidence retention, upgrades and troubleshooting are documented for its IT team.
               </p>
             </div>
           </Reveal>
@@ -1855,10 +1897,10 @@ export function LandingPage() {
                       <ArrowRight className="cf-arrow-slide h-4 w-4" aria-hidden="true" />
                     </button>
                     <a
-                      href="#run"
+                      href="#deployment"
                       className="group inline-flex items-center rounded-xl border border-slate-200 bg-white/80 px-6 py-3 text-[14px] font-semibold text-slate-700 shadow-xs backdrop-blur transition-colors hover:border-slate-300 hover:text-slate-900"
                     >
-                      Read the deployment runbook
+                      See how it deploys
                     </a>
                   </div>
                   <p className="mt-4 text-[12.5px] text-slate-500">
@@ -2145,8 +2187,8 @@ export function LandingPage() {
         {/* ── 07 · Integrity & security ────────────────────────────────── */}
         <Integrity />
 
-        {/* ── 08 · Run it ──────────────────────────────────────────────── */}
-        <Run />
+        {/* ── 08 · Deployment ─────────────────────────────────────────── */}
+        <Deployment />
 
         {/* ── 09 · Proof & limits ──────────────────────────────────────── */}
         <Proof />

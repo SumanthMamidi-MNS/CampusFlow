@@ -56,8 +56,9 @@ class Settings(BaseSettings):
     # Camera evidence frames are personal data (a downscaled still of the
     # candidate). The institution sets how long they are kept; older frames are
     # erased from the integrity trail by the retention job, while the event row
-    # itself (what happened, when, how severe) is kept for review. 0 retains
-    # frames indefinitely and is reported as such rather than purging everything.
+    # itself (what happened, when, how severe) is kept for review. Non-positive
+    # values fall back to the finite application default; frames never persist
+    # indefinitely because of an unset or mistaken zero value.
     proctoring_evidence_retention_days: int = 90
 
     model_config = SettingsConfigDict(

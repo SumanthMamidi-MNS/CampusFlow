@@ -15,12 +15,14 @@ import {
   Minimize2,
   Send,
   ShieldAlert,
+  RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '@/core/auth/hooks';
 import { PageLoading } from '@/core/components/ui/loading';
 import {
   useExamBrief,
   useRecordProctoringEvent,
+  useRequestExamResume,
   useSaveExamAnswers,
   useStartExam,
   useSubmitExam,
@@ -31,15 +33,43 @@ import type {
   ExamWarningPolicy,
   SaveAnswerPayload,
 } from '../types';
+import { startDemoSitting } from '../demo';
 import {
   DEVICE_MODEL_CONFIG,
   DeviceConfirmationTracker,
   analyseFrame,
   frameForAnalysis,
   loadDeviceModels,
+  wristCropFromNormalised,
   type DeviceModels,
   type DeviceObservation,
+  type WristPoint,
 } from '../device-detection';
+import {
+  FACE_MONITOR_CONFIG,
+  FaceMonitor,
+  loadFaceDetector,
+  type DetectedFace,
+  type FaceCondition,
+  type FaceDetector,
+} from '../face-monitoring';
+import {
+  HandMonitor,
+  loadHandLandmarker,
+  type HandLandmarker,
+  type HandScene,
+} from '../hand-monitoring';
+import {
+  MouthMonitor,
+  classifyMouthFrame,
+  extractRegion,
+  mouthRegions,
+} from '../mouth-monitoring';
+import {
+  VoiceMonitor,
+  createVoiceAnalyser,
+  readAudioFrame,
+} from '../voice-monitoring';
 
 type AnswerState = Record<string, { answer_data: any; flagged_for_review: boolean }>;
 
@@ -52,8 +82,6 @@ const SNAPSHOT_INTERVAL_MS = 60_000;
 // Camera liveness is polled because browsers can drop a track (device unplug,
 // permission revoked by the OS) without a page event.
 const CAMERA_WATCHDOG_MS = 5_000;
-// A warning pulses for this long, then settles into the persistent red banner.
-const ALARM_VISIBLE_MS = 10_000;
 // Some environments never settle getUserMedia (permission service down, camera
 // held by another application). The candidate must get an actionable message
 // instead of an endless “Requesting camera…”.
@@ -74,7 +102,7 @@ const CAMERA_OBSTRUCTION_AFTER_MS = 4_000;
 // On-device device scan cadence. Three seconds is enough to catch a phone being
 // used while leaving the machine idle between scans, and the confirmation count
 // in `device-detection.ts` means one scan alone can never raise an observation.
-const DEVICE_SCAN_INTERVAL_MS = 3_000;
+const DEVICE_SCAN_INTERVAL_MS = 1_500;
 // One reported observation per category per this window: a phone left on the
 // desk must not become an event every three seconds.
 const DEVICE_REPORT_COOLDOWN_MS = 120_000;
@@ -92,12 +120,42 @@ const MIN_FRAME_HEIGHT = 48;
 // sensor still produces grain) is not mistaken for a dead feed.
 const BLACK_FRAME_LUMA = 4;
 const BLACK_FRAME_SAMPLES = 6;
-// The candidate has this long to return to the paper after leaving it. Inside
-// the window the return is recorded (quick_tab_return) without penalty; the
-// moment it lapses the absence itself is reported as a violation.
-const RETURN_GRACE_SECONDS = 5;
+// One departure from the paper emits two browser events (a tab switch fires
+// both `visibilitychange` and `blur`). Holding them together for this long is
+// what makes one departure cost exactly one warning — it never excuses the
+// departure itself.
+const DEPARTURE_DEDUPE_MS = 1_500;
 // How often a locked candidate re-checks whether faculty have reopened them.
 const LOCK_RECHECK_MS = 15_000;
+// Face and head-direction scan cadence. Faster than the device scan because a
+// head turn is what the candidate does *while* they read someone else's screen;
+// the dwell rules in `face-monitoring.ts` keep the extra frames from becoming
+// extra events.
+const FACE_SCAN_INTERVAL_MS = 700;
+// Hand landmarking is the most expensive per-frame model here (21 points per
+// hand), so it runs on its own slower cadence and only when the exam enables it.
+// A hand held at the face stays there for seconds, which the dwell rules turn
+// into one event; the extra frames would buy nothing.
+const HAND_SCAN_INTERVAL_MS = 1_000;
+// Mouth movement is measured as pixel motion between samples, so it needs a
+// faster clock than the face loop: at 200 ms a jaw moving through a syllable is
+// visible as a change, and the crops are two thumbnail bands, so the cost is a
+// pair of small `getImageData` reads rather than another model.
+const MOUTH_SCAN_INTERVAL_MS = 150;
+// The frame the mouth bands are cut from. 320 px matches the face loop, whose
+// landmarks the bands are positioned from.
+const MOUTH_FRAME_EDGE = 320;
+// Voice is analysed on the analyser's own clock, roughly fifteen times a second:
+// the modulation test needs a real history to separate speech from a steady hum.
+const VOICE_SAMPLE_INTERVAL_MS = 60;
+// The candidate-facing name for each integrity tier (ADR-029). Sent as a value
+// by the server and rendered here, so the label and the seconds the monitors
+// enforce always describe the same setting.
+const SENSITIVITY_LABEL: Record<string, string> = {
+  relaxed: 'relaxed',
+  standard: 'standard',
+  strict: 'strict',
+};
 
 // Every on-screen camera preview is mirrored, so the candidate sees themselves
 // the way a mirror shows them: raise your right hand and the picture raises the
@@ -140,6 +198,12 @@ export function ExamDelivery() {
   // answer keys) is never fetched from the assessment-taking surface.
   const { data: examBrief } = useExamBrief(examId);
   const startMutation = useStartExam(examId);
+  // Asking the lecturer to reopen a stopped attempt. The request is recorded and
+  // the paper stays closed until they approve it — this button never reopens the
+  // exam by itself, which is why its copy is a request and not a resume.
+  const requestResume = useRequestExamResume(examId);
+  const [resumeRequested, setResumeRequested] = useState(false);
+  const [resumeError, setResumeError] = useState('');
 
   const [delivery, setDelivery] = useState<ExamDeliveryData | null>(null);
   const [hasBegun, setHasBegun] = useState(false);
@@ -162,16 +226,19 @@ export function ExamDelivery() {
   const briefVideoRef = useRef<HTMLVideoElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraOffReportedRef = useRef(false);
+  // Set when the microphone was refused but the camera was granted. The voice
+  // check reports itself unavailable rather than silently listening to nothing.
+  const microphoneBlockedRef = useRef(false);
+  // Read through a ref inside `startCamera`, which is memoised: the closure it
+  // captured on the first render predates the exam brief, when the authored
+  // audio flag is still unknown.
+  const audioMonitoringWantedRef = useRef(false);
   // "Camera ready" is only shown when frames are actually being rendered, so
   // the candidate can never sit an exam believing a black tile is their feed.
   // `pictureState` records *why* the picture is not confirmed, so the guidance
   // shown to the candidate matches what the camera is really doing.
   const [framesFlowing, setFramesFlowing] = useState(false);
   const [pictureState, setPictureState] = useState<'waiting' | 'live' | 'black'>('waiting');
-  // Excused absences: leaving the paper starts a visible countdown; returning
-  // inside the grace is excused (and still recorded), the lapse is penalised.
-  const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
-  const returnGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Obstruction evidence: the last frame signature and when it went still.
   const lastFrameSigRef = useRef<string>('');
   const stillSinceRef = useRef<number | null>(null);
@@ -186,8 +253,13 @@ export function ExamDelivery() {
   const deviceTrackerRef = useRef(new DeviceConfirmationTracker(DEVICE_MODEL_CONFIG.confirmations));
   const deviceReportedAtRef = useRef<Record<string, number>>({});
   const deviceScanCountRef = useRef(0);
+  // Face monitoring bookkeeping: the loaded detector and the dwell/escalation
+  // state machine. The machine holds no timers — it takes a clock — so it is
+  // testable off-camera.
+  const faceDetectorRef = useRef<FaceDetector | null>(null);
+  const faceMonitorRef = useRef(new FaceMonitor(FACE_MONITOR_CONFIG));
 
-  // ── Integrity state: violation counter, red warning, lockout ─────────────
+  // ── Integrity state: browser-event counter, review notice and lockout ─────
   const [violations, setViolations] = useState(0);
   // Device-scan state is explicit rather than implied: the candidate can see
   // whether the analysis is actually running, and faculty can tell an
@@ -196,7 +268,41 @@ export function ExamDelivery() {
     'off'
   );
   const [maxViolations, setMaxViolations] = useState(0);
-  const [alarm, setAlarm] = useState<string | null>(null);
+  // Face monitoring is explicit for the same reason the device scan is: the
+  // candidate can see whether it is actually running, and an unavailable model
+  // is never silently presented as protection that exists.
+  const [faceScan, setFaceScan] = useState<'off' | 'loading' | 'active' | 'unavailable'>('off');
+  // Hand-at-face and voice monitoring are separate switches again, each with
+  // its own explicit state for the same reason: the candidate can tell a check
+  // that is running from one whose model never loaded (ADR-029).
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const handMonitorRef = useRef(new HandMonitor());
+  const handFacesRef = useRef<DetectedFace[]>([]);
+  // The size the face loop last analysed, so its keypoints can be rescaled onto
+  // the hand loop's frame before the two are compared.
+  const handFrameSizeRef = useRef({ width: 1, height: 1 });
+  const [handScan, setHandScan] = useState<'off' | 'loading' | 'active' | 'unavailable'>('off');
+  // The wrists the hand loop last saw, in normalised coordinates. The device scan
+  // reads them to classify the wrist itself: a watch is far too small for a
+  // whole-frame classifier to name, so the hand landmarker supplies the crop that
+  // makes the watch findable at all.
+  const handWristsRef = useRef<WristPoint[]>([]);
+  // Mouth movement is measured, never modelled: no audio, no lips model, no
+  // transcript. Its state is exposed like the other checks so the candidate can
+  // tell a running check from one that never started (ADR-030).
+  const mouthMonitorRef = useRef(new MouthMonitor());
+  const [mouthScan, setMouthScan] = useState<'off' | 'active' | 'waiting' | 'unavailable'>('off');
+  const voiceMonitorRef = useRef(new VoiceMonitor());
+  const voiceAnalyserRef = useRef<ReturnType<typeof createVoiceAnalyser>>(null);
+  const [voiceScan, setVoiceScan] = useState<'off' | 'loading' | 'active' | 'unavailable'>('off');
+  // The confirmed condition, not the instantaneous one: only away time that has
+  // reached its dwell covers the paper. A single dropped frame must never hide
+  // the question, and glancing back for a moment must not dismiss the cover.
+  const [faceGate, setFaceGate] = useState<FaceCondition | null>(null);
+  const [alarm, setAlarm] = useState<{
+    message: string;
+    category: 'browser_signal' | 'camera_observation' | 'evidence';
+  } | null>(null);
   const [locked, setLocked] = useState(false);
   const [lockDetail, setLockDetail] = useState('');
   // The consequence of reaching the tolerance is server-authoritative: the
@@ -220,6 +326,27 @@ export function ExamDelivery() {
   const deviceDetectionEnabled =
     delivery?.device_detection_enabled ??
     examBrief?.config?.device_detection_enabled === true;
+  // The per-exam integrity profile (ADR-029). Face monitoring defaults on (it is
+  // the baseline presence check every proctored paper already had); hand and
+  // audio default off, because each analyses more of the candidate's own room
+  // than a face count does and must be authorised on purpose.
+  const sensitivity =
+    delivery?.integrity_sensitivity ?? examBrief?.config?.integrity_sensitivity ?? 'standard';
+  const dwellMs = delivery?.dwell_ms ?? examBrief?.config?.dwell_ms ?? {};
+  const faceMonitoringEnabled =
+    delivery?.face_monitoring_enabled ?? examBrief?.config?.face_monitoring_enabled !== false;
+  const handMonitoringEnabled =
+    delivery?.hand_monitoring_enabled ?? examBrief?.config?.hand_monitoring_enabled === true;
+  const audioMonitoringEnabled =
+    delivery?.audio_monitoring_enabled ?? examBrief?.config?.audio_monitoring_enabled === true;
+  // Mouth movement rides on the camera frames the face check already reads and
+  // records nothing new, so its un-authored default is on with the camera rather
+  // than off like hand/audio. `!== false` is the server's own default, mirrored.
+  const mouthMonitoringEnabled =
+    delivery?.mouth_monitoring_enabled ?? examBrief?.config?.mouth_monitoring_enabled !== false;
+  useEffect(() => {
+    audioMonitoringWantedRef.current = audioMonitoringEnabled;
+  }, [audioMonitoringEnabled]);
   const obstructionThresholdSeconds =
     delivery?.obstruction_threshold_seconds ??
     examBrief?.config?.obstruction_threshold_seconds ??
@@ -227,6 +354,57 @@ export function ExamDelivery() {
   // Institutional retention for the still frames this session captures (D-2).
   const evidenceRetentionDays =
     delivery?.evidence_retention_days ?? examBrief?.config?.evidence_retention_days ?? 90;
+  // The disclosed gap between counted warnings. Server-owned, so the brief and
+  // the delivery screen cannot promise a different gap from the one enforced.
+  const warningCooldownSeconds =
+    delivery?.warning_cooldown_seconds ??
+    examBrief?.config?.warning_cooldown_seconds ??
+    10;
+  // The demonstration paper is the one assessment a candidate may restart
+  // without staff: asking a lecturer to reopen it is a dead end in a demo that
+  // has no lecturer. Everything else keeps the real reopen flow.
+  const isDemo = Boolean(delivery?.demo ?? examBrief?.config?.demo);
+  const [demoRestarting, setDemoRestarting] = useState(false);
+  const [demoRestartError, setDemoRestartError] = useState('');
+  const restartDemo = async () => {
+    setDemoRestarting(true);
+    setDemoRestartError('');
+    try {
+      await startDemoSitting();
+    } catch (err: any) {
+      setDemoRestartError(
+        apiError(
+          err,
+          'Could not start a fresh demo. Return to the examination list and try again.'
+        )
+      );
+      setDemoRestarting(false);
+    }
+  };
+
+  // Adopt the paper's disclosed dwell tier once, so every monitor enforces the
+  // seconds the candidate was told about rather than the constants compiled into
+  // the modules. Values are re-applied when a resumed attempt arrives with a
+  // changed tier; a partial payload leaves the defaults in place.
+  useEffect(() => {
+    if (dwellMs.turn || dwellMs.absence) {
+      faceMonitorRef.current.setDwell({ turn: dwellMs.turn, absence: dwellMs.absence });
+    }
+    if (dwellMs.hand) handMonitorRef.current.setDwell(dwellMs.hand);
+    if (dwellMs.voice) voiceMonitorRef.current.setDwell(dwellMs.voice);
+    if (dwellMs.mouth) mouthMonitorRef.current.setDwell(dwellMs.mouth);
+  }, [dwellMs.turn, dwellMs.absence, dwellMs.hand, dwellMs.voice, dwellMs.mouth]);
+
+  // The brief discloses the allowance before the attempt exists, so the
+  // candidate reads the number before their first event, not after it. Once the
+  // attempt starts, the delivery payload and every proctoring response replace
+  // it with the server's own counters.
+  useEffect(() => {
+    const disclosed = examBrief?.config?.max_violations;
+    if (typeof disclosed === 'number' && disclosed > 0) {
+      setMaxViolations((current) => (current > 0 ? current : disclosed));
+    }
+  }, [examBrief]);
 
   const attemptId = delivery?.attempt_id || '';
   const saveAnswers = useSaveExamAnswers(attemptId);
@@ -331,9 +509,20 @@ export function ExamDelivery() {
 
     setCameraState('starting');
     setPictureState('waiting');
-    const request = navigator.mediaDevices.getUserMedia({
+    // The voice check analyses the *same* stream's audio track, so the
+    // microphone has to be requested together with the camera. A video-only
+    // stream has no audio track at all, which is why talking used to produce
+    // nothing while the screen claimed a voice check was listening.
+    const constraints: MediaStreamConstraints = {
       video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-      audio: false,
+      audio: audioMonitoringWantedRef.current,
+    };
+    const request = navigator.mediaDevices.getUserMedia(constraints).catch(async (err) => {
+      // A refused microphone must never cost the candidate their camera: the
+      // paper still runs and the voice check honestly reports unavailable.
+      if (!constraints.audio) throw err;
+      microphoneBlockedRef.current = true;
+      return navigator.mediaDevices.getUserMedia({ ...constraints, audio: false });
     });
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     // `gaveUp` is set only by the timeout. The release below must fire on the
@@ -545,7 +734,10 @@ export function ExamDelivery() {
                   signature: sig,
                 },
               }).catch(() => undefined);
-              setAlarm('Camera covered or blocked? Your view has been still for a while. Uncover the camera so your presence stays visible.');
+              setAlarm({
+                message: 'Camera covered or blocked? Your view has been still for a while. Uncover the camera so your presence stays visible.',
+                category: 'camera_observation',
+              });
             }
           } else {
             if (obstructionReportedRef.current) {
@@ -575,6 +767,79 @@ export function ExamDelivery() {
   }, [cameraState, hasBegun, attemptId, framesFlowing]);
 
   const cameraReady = cameraState === 'on' && framesFlowing && pictureState === 'live';
+
+  // ── Observation gate ───────────────────────────────────────────────────────
+  // While the pipeline cannot see the candidate the paper is *covered*. A red
+  // banner alone leaves the question readable, so a candidate whose camera is
+  // off, whose head is turned to someone else's screen, or who has company in
+  // frame keeps everything they came for. Covering the paper removes that
+  // payoff and makes the state impossible to mistake; the timer keeps running,
+  // answers stay saved, and the cover lifts the moment observation returns.
+  //
+  // Only the *confirmed* condition covers the paper: away time must reach its
+  // dwell, and it accumulates across a flicker back, so a blink cannot cost a
+  // mark and a glance cannot dismiss the cover either.
+  const integrityBlock: { title: string; body: string; tone: 'rose' | 'amber' } | null = (() => {
+    if (!proctoringEnabled || !hasBegun) return null;
+    if (cameraState !== 'on') {
+      return {
+        tone: 'rose',
+        title: 'Your camera is off',
+        body: 'This assessment requires a live camera. Your paper is covered until your picture returns — answers already given are saved.',
+      };
+    }
+    if (pictureState === 'black') {
+      return {
+        tone: 'rose',
+        title: 'Your camera is not showing a picture',
+        body: 'The lens is covered, closed or disabled. Uncover it and face the camera to bring your paper back.',
+      };
+    }
+    if (faceMonitoringEnabled && faceGate) {
+      if (faceGate === 'turned_left' || faceGate === 'turned_right') {
+        return {
+          tone: 'amber',
+          title: 'Face the screen to continue',
+          body: 'A sustained head turn was observed. Your question is temporarily covered while you return to the screen; this camera observation does not use your browser-event allowance.',
+        };
+      }
+      if (faceGate === 'multiple_faces') {
+        return {
+          tone: 'amber',
+          title: 'One candidate should be in view',
+          body: 'More than one face remained in view. Your question is temporarily covered while the camera view clears; this camera observation is for lecturer review, not a verdict.',
+        };
+      }
+      if (faceGate === 'no_face') {
+        return {
+          tone: 'amber',
+          title: 'Move into the camera view',
+          body: 'Your face was not visible for the required dwell. Your question is temporarily covered until the camera can observe you again; this does not use your browser-event allowance.',
+        };
+      }
+    }
+    return null;
+  })();
+
+  // One honest disclosure instead of a running commentary. If a check could not
+  // start at all, the candidate and the invigilator both need to know — but
+  // nothing else about the detectors belongs on this panel.
+  const monitoringUnavailable =
+    faceScan === 'unavailable' ||
+    handScan === 'unavailable' ||
+    mouthScan === 'unavailable' ||
+    voiceScan === 'unavailable' ||
+    (deviceDetectionEnabled && deviceScan === 'unavailable');
+
+  // The rule in one sentence, built from the values the server enforces rather
+  // than hard-coded: the authored warnings, then the paper stops until a lecturer
+  // reopens it (or, under the review policy, it is flagged and continues).
+  const violationRule =
+    maxViolations > 0
+      ? warningPolicyFromServer === 'review'
+        ? `This sitting allows ${maxViolations} warnings. At the ${maxViolations}th the attempt is flagged for your lecturer's review and you keep going.`
+        : `This sitting allows ${maxViolations} warnings. The ${maxViolations}th stops the paper; only your lecturer can reopen it.`
+      : '';
 
   // Keep the enforced obstruction threshold in step with the authored value.
   useEffect(() => {
@@ -625,16 +890,28 @@ export function ExamDelivery() {
       const frame = frameForAnalysis(video, analysisCanvas);
       if (!frame) return;
 
-      // The wearable classifier rides along on every third scan: it costs a
-      // second full model pass, and earbuds on a desk do not appear and vanish
-      // within seconds the way a phone being picked up does.
-      const includeWearables = deviceScanCountRef.current % 3 === 0;
+      // The wearable classifier rides along on every second scan: it costs a
+      // second full model pass, but earbuds are exactly the cue that went
+      // unnoticed, so waiting three scans for them was too slow.
+      const includeWearables = deviceScanCountRef.current % 2 === 0;
       deviceScanCountRef.current += 1;
+
+      // The wrists the hand landmarker last saw, as crops of this frame. Without
+      // them the wearable read is a whole-frame guess, which is why a watch was
+      // previously close to invisible: at exam distance it is a few thousand
+      // pixels of a 480 px frame. The crops are normalised, so the two loops can
+      // analyse different frame sizes without disagreeing.
+      const wrists = includeWearables
+        ? handWristsRef.current
+            .map((wrist) => wristCropFromNormalised(wrist, frame.width, frame.height))
+            .filter((crop): crop is [number, number, number, number] => crop !== null)
+        : [];
 
       let found: DeviceObservation[] = [];
       try {
         found = await analyseFrame(deviceModelsRef.current, frame, DEVICE_MODEL_CONFIG, {
           includeWearables,
+          wrists,
         });
       } catch {
         return; // a failed scan is not evidence of anything
@@ -648,13 +925,17 @@ export function ExamDelivery() {
       deviceReportedAtRef.current[confirmed.category] = Date.now();
 
       // Reported through the shared path, so the frame goes with the observation
-      // (faculty see what the model saw) and the server's neutral reminder is
-      // shown to the candidate. The server records it as evidence and raises a
-      // review — no allowance is consumed and the attempt continues.
+      // (faculty see what the model saw) and the warning names the device. The
+      // server records it as evidence, raises a review, and spends one warning
+      // (ADR-032); the attempt continues unless the allowance is reached.
       await reportEventRef.current?.('second_device_detected', 'medium', {
         category: confirmed.category,
         confidence: Number(confirmed.confidence.toFixed(3)),
         model: confirmed.model,
+        // `wrist` means the classifier was shown the wrist itself and named what
+        // it saw there; `frame` is the weaker whole-frame read. A reviewer can
+        // weigh the two differently, which a single confidence number cannot say.
+        region: confirmed.region ?? 'frame',
         confirmations: confirmed.confirmations,
         bbox: confirmed.bbox ? confirmed.bbox.map((n) => Math.round(n)) : undefined,
         analysed_frame: { width: frame.width, height: frame.height },
@@ -669,6 +950,433 @@ export function ExamDelivery() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasBegun, proctoringEnabled, deviceDetectionEnabled, cameraState, framesFlowing]);
+
+  // ── On-device face and head-direction monitoring ───────────────────────────
+  // The only signal that answers "are you still looking at your own paper?".
+  // Like the device scan it runs entirely on this machine and loads its model
+  // lazily; a blocked model host leaves it *unavailable* — stated on screen —
+  // rather than silently pretending the check is running. Dwell and escalation
+  // live in `FaceMonitor`, never here, so the rules cannot drift between the
+  // screen that shows the state and the code that reports it.
+  useEffect(() => {
+    if (!hasBegun || !proctoringEnabled || !faceMonitoringEnabled) {
+      setFaceScan('off');
+      return;
+    }
+    if (cameraState !== 'on' || !framesFlowing) {
+      faceMonitorRef.current.reset();
+      setFaceGate(null);
+      return;
+    }
+
+    let cancelled = false;
+    // A private canvas: the evidence capture and the device scan each own one,
+    // and a shared canvas would let one loop clear another's frame mid-read.
+    const analysisCanvas = document.createElement('canvas');
+
+    const run = async () => {
+      if (cancelled || submittedRef.current) return;
+
+      if (!faceDetectorRef.current) {
+        setFaceScan('loading');
+        try {
+          faceDetectorRef.current = await loadFaceDetector();
+        } catch {
+          if (!cancelled) setFaceScan('unavailable');
+          return;
+        }
+        if (cancelled) return;
+        setFaceScan('active');
+      }
+
+      const video = pipVideoRef.current || briefVideoRef.current;
+      if (!video) return;
+      // 320 px is comfortably above the model's 192 px input and far below the
+      // camera's native size: the angle relies on ratios, so resolution beyond
+      // this buys nothing and costs a frame copy.
+      const frame = frameForAnalysis(video, analysisCanvas, 320);
+      if (!frame) return;
+
+      let faces: DetectedFace[];
+      try {
+        faces = await faceDetectorRef.current.estimateFaces(frame, {
+          // The evidence frame is unmirrored, so keypoint directions are the
+          // candidate's own once `estimateHeadPose` negates the offset.
+          flipHorizontal: false,
+        });
+      } catch {
+        return; // a failed scan is not evidence of anything
+      }
+      if (cancelled) return;
+
+      // Hand-to-face compares against the face this loop just found, so the two
+      // measurements agree on where the head is. Stored with the size it was
+      // measured at, because the hand loop analyses a different-sized frame.
+      handFacesRef.current = faces;
+      handFrameSizeRef.current = { width: frame.width, height: frame.height };
+
+      const monitor = faceMonitorRef.current;
+      const signals = monitor.observe(
+        { faces, frameWidth: frame.width, frameHeight: frame.height },
+        Date.now()
+      );
+      setFaceGate(monitor.gate);
+
+      for (const signal of signals) {
+        // Same reporting path as every other integrity signal, so the evidence
+        // frame, the candidate's warning and the server-side allowance all
+        // behave identically.
+        await reportEventRef.current?.(signal.eventType, signal.severity, {
+          ...signal.details,
+          model: 'mediapipe-face-mesh',
+          analysed_frame: { width: frame.width, height: frame.height },
+        });
+      }
+    };
+
+    const handle = setInterval(run, FACE_SCAN_INTERVAL_MS);
+    void run();
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBegun, proctoringEnabled, faceMonitoringEnabled, cameraState, framesFlowing]);
+
+  // ── On-device hand-at-face monitoring ──────────────────────────────────────
+  // The cue for reading off a phone held below the shot or a sheet raised to
+  // eye level: face present, camera alive, head mostly forward, but a hand sits
+  // at the face. Observation tier on the server, so it raises a review and never
+  // spends the allowance (ADR-029). The face landmarks come from the same
+  // detector the face loop already runs, so the two measurements agree on where
+  // the head is instead of guessing separately.
+  //
+  // The same landmarker supplies the wrist crops the device scan classifies for a
+  // watch (ADR-031), so it runs when *either* feature is authored. Supplying a
+  // crop is not an observation: the hand-at-face monitor below is only ever fed
+  // when this paper enabled it, so a device-only paper can find a smartwatch
+  // without ever reporting a hand, and a hand-only paper behaves exactly as it
+  // did before.
+  const handLoopNeeded = handMonitoringEnabled || deviceDetectionEnabled;
+  useEffect(() => {
+    if (!hasBegun || !proctoringEnabled || !handLoopNeeded) {
+      setHandScan('off');
+      handWristsRef.current = [];
+      handMonitorRef.current.reset();
+      return;
+    }
+    if (cameraState !== 'on' || !framesFlowing) {
+      handMonitorRef.current.reset();
+      handWristsRef.current = [];
+      return;
+    }
+
+    let cancelled = false;
+
+    const run = async () => {
+      if (cancelled || submittedRef.current) return;
+
+      if (!handLandmarkerRef.current) {
+        // The scan state is the hand check's own disclosure. A loop running only
+        // to supply wrist crops must not claim a hand check is loading or active.
+        if (handMonitoringEnabled) setHandScan('loading');
+        try {
+          handLandmarkerRef.current = await loadHandLandmarker();
+        } catch {
+          if (!cancelled && handMonitoringEnabled) setHandScan('unavailable');
+          return;
+        }
+        if (cancelled) return;
+        if (handMonitoringEnabled) setHandScan('active');
+      }
+
+      const video = pipVideoRef.current || briefVideoRef.current;
+      if (!video) return;
+
+      let result: { hands: HandScene['hands']; width: number; height: number };
+      try {
+        result = await handLandmarkerRef.current.detect(video);
+      } catch {
+        return; // a failed scan is not evidence of anything
+      }
+      if (cancelled || !result.width) return;
+
+      // The wrist of each tracked hand, normalised, for the device scan's watch
+      // crop. Point 0 is the wrist and point 9 the middle knuckle, so their
+      // distance is a resolution-independent measure of how big this hand is on
+      // screen — which is what makes a fixed-size crop scale with the candidate.
+      handWristsRef.current = result.hands
+        .filter((hand) => hand.points.length > 9)
+        .map((hand) => {
+          const wrist = hand.points[0];
+          const knuckle = hand.points[9];
+          return {
+            x: wrist.x / result.width,
+            y: wrist.y / result.height,
+            span: Math.hypot(knuckle.x - wrist.x, knuckle.y - wrist.y) / result.width,
+          };
+        })
+        .filter((wrist) => wrist.span > 0.01);
+
+      // The device scan has its crops now. Everything below is the hand-at-face
+      // observation, which this paper may not have authored: a hand loop running
+      // only to feed a watch crop must never record a hand event.
+      if (!handMonitoringEnabled) {
+        handMonitorRef.current.reset();
+        return;
+      }
+
+      // The face the last face scan saw. Scale its keypoints onto this frame: the
+      // two loops analyse the same video at different sizes, so a landmark read
+      // in one canvas would otherwise be compared in the wrong units.
+      const scaleX = result.width / handFrameSizeRef.current.width;
+      const scaleY = result.height / handFrameSizeRef.current.height;
+      const face = handFacesRef.current[0]
+        ? {
+            keypoints: handFacesRef.current[0].keypoints.map((point) => ({
+              x: point.x * scaleX,
+              y: point.y * scaleY,
+            })),
+            box: handFacesRef.current[0].box
+              ? {
+                  width: handFacesRef.current[0].box.width * scaleX,
+                  height: handFacesRef.current[0].box.height * scaleY,
+                }
+              : undefined,
+          }
+        : null;
+
+      // Without a face reference the geometry says nothing, so the monitor keeps
+      // its episode open rather than counting a measurement it cannot make.
+      if (!face) {
+        return;
+      }
+
+      const monitor = handMonitorRef.current;
+      const signal = monitor.observe(
+        { hands: result.hands, face, frameWidth: result.width, frameHeight: result.height },
+        Date.now()
+      );
+
+      if (signal) {
+        await reportEventRef.current?.(signal.eventType, signal.severity, {
+          ...signal.details,
+          model: 'mediapipe-hand-landmarker',
+          analysed_frame: { width: result.width, height: result.height },
+        });
+      }
+    };
+
+    const handle = setInterval(run, HAND_SCAN_INTERVAL_MS);
+    void run();
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hasBegun,
+    proctoringEnabled,
+    handLoopNeeded,
+    handMonitoringEnabled,
+    cameraState,
+    framesFlowing,
+  ]);
+
+  // ── On-device mouth-movement monitoring ────────────────────────────────────
+  // Speaking is the one cheating path that barely moves anything: the head is
+  // forward, the hands are clear, the phone is out of shot and the microphone may
+  // be off. The mouth band does move, and so does nothing else — which is the
+  // whole measurement (`mouth-monitoring.ts`). It runs on pixels, not audio and
+  // not a second model, so it costs two thumbnail crops every 200 ms; the bands
+  // are positioned from the face the face loop just found rather than from a
+  // detector of its own, so the two checks always agree on where the face is.
+  // Counted on the server like every confirmed cue: a warning the candidate
+  // sees, plus a review flag (ADR-032).
+  useEffect(() => {
+    if (!hasBegun || !proctoringEnabled || !mouthMonitoringEnabled) {
+      setMouthScan('off');
+      mouthMonitorRef.current.reset();
+      return;
+    }
+    if (!faceMonitoringEnabled) {
+      // The bands are positioned from the face the face check found. Without it
+      // there is nowhere to look, and saying "active" while nothing is measured
+      // would be exactly the false assurance the status strip exists to prevent.
+      setMouthScan('unavailable');
+      mouthMonitorRef.current.reset();
+      return;
+    }
+    if (cameraState !== 'on' || !framesFlowing) {
+      mouthMonitorRef.current.reset();
+      setMouthScan('waiting');
+      return;
+    }
+
+    let cancelled = false;
+    // Its own canvas: the device scan, the evidence capture and this loop each
+    // own one, so no loop can clear a frame another is reading.
+    const analysisCanvas = document.createElement('canvas');
+    let previousMouth: Float32Array | null = null;
+    let previousReference: Float32Array | null = null;
+    setMouthScan('active');
+
+    const readBand = (
+      frame: HTMLCanvasElement,
+      rect: { x: number; y: number; width: number; height: number }
+    ): Float32Array | null => {
+      const context = frame.getContext('2d', { willReadFrequently: true });
+      if (!context) return null;
+      try {
+        const pixels = context.getImageData(rect.x, rect.y, rect.width, rect.height);
+        return extractRegion(
+          { data: pixels.data, width: rect.width, height: rect.height },
+          { x: 0, y: 0, width: rect.width, height: rect.height }
+        );
+      } catch {
+        // A tainted or detached canvas is not evidence of anything.
+        return null;
+      }
+    };
+
+    const run = () => {
+      if (cancelled || submittedRef.current) return;
+      const video = pipVideoRef.current || briefVideoRef.current;
+      if (!video) return;
+      const frame = frameForAnalysis(video, analysisCanvas, MOUTH_FRAME_EDGE);
+      if (!frame) return;
+
+      // The face the face loop last measured, rescaled onto this canvas. Both
+      // loops draw the same video at the same edge, but the face loop's size is
+      // the authority: reading it here in its own pixels would be a unit error.
+      const scaleX = frame.width / Math.max(1, handFrameSizeRef.current.width);
+      const scaleY = frame.height / Math.max(1, handFrameSizeRef.current.height);
+      const source = handFacesRef.current[0];
+      const face: DetectedFace | null = source
+        ? {
+            keypoints: source.keypoints.map((point) => ({
+              name: point.name,
+              x: point.x * scaleX,
+              y: point.y * scaleY,
+            })),
+            box: source.box
+              ? {
+                  xMin: source.box.xMin * scaleX,
+                  yMin: source.box.yMin * scaleY,
+                  width: source.box.width * scaleX,
+                  height: source.box.height * scaleY,
+                }
+              : undefined,
+          }
+        : null;
+
+      const regions = mouthRegions(face, frame.width, frame.height);
+      if (!regions) {
+        // No measurable face: the reading is unmeasurable, which neither adds
+        // time nor ends the episode. Dropping the baseline stops a stale crop
+        // from being differenced against a new position when the face returns.
+        previousMouth = null;
+        previousReference = null;
+        mouthMonitorRef.current.observe(
+          classifyMouthFrame(null, null, null, null),
+          Date.now(),
+          { audioActive: voiceMonitorRef.current.elapsedMs > 0 }
+        );
+        return;
+      }
+
+      const mouth = readBand(frame, regions.mouth);
+      const reference = readBand(frame, regions.reference);
+      const reading = classifyMouthFrame(previousMouth, mouth, previousReference, reference);
+      previousMouth = mouth;
+      previousReference = reference;
+
+      const signal = mouthMonitorRef.current.observe(reading, Date.now(), {
+        // Two independent cues agreeing is stronger evidence for a reviewer. It
+        // changes no decision: a silent second person off-camera still has to be
+        // caught by the camera alone.
+        audioActive: voiceMonitorRef.current.elapsedMs > 0,
+      });
+
+      if (signal) {
+        void reportEventRef.current?.(signal.eventType, signal.severity, {
+          ...signal.details,
+          model: 'pixel-mouth-motion',
+          analysed_frame: { width: frame.width, height: frame.height },
+        });
+      }
+    };
+
+    const handle = setInterval(run, MOUTH_SCAN_INTERVAL_MS);
+    run();
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBegun, proctoringEnabled, mouthMonitoringEnabled, faceMonitoringEnabled, cameraState, framesFlowing]);
+
+  // ── On-device voice monitoring ─────────────────────────────────────────────
+  // The only signal that can see a second person who never enters the frame.
+  // The analyser reuses the call element's own stream, so the candidate is not
+  // prompted twice and the camera is not contended for; frames are read as
+  // numbers and discarded, so nothing is recorded. A sustained voice raises a
+  // review and spends one warning (ADR-032) — headphones included, because the
+  // analyser measures the room through the microphone, not the earpiece.
+  useEffect(() => {
+    if (!hasBegun || !proctoringEnabled || !audioMonitoringEnabled) {
+      setVoiceScan('off');
+      return;
+    }
+    const stream = streamRef.current;
+    if (!stream) {
+      // Not an error: the stream may not exist yet. The loop re-runs when the
+      // camera state changes, which is when a stream becomes available.
+      setVoiceScan('loading');
+      return;
+    }
+    // No audio track (the microphone was refused, or the browser handed back a
+    // video-only stream) means there is nothing to analyse. Saying "listening"
+    // here would be the exact false assurance this check exists to avoid.
+    if (microphoneBlockedRef.current || stream.getAudioTracks().length === 0) {
+      setVoiceScan('unavailable');
+      return;
+    }
+
+    setVoiceScan('loading');
+    const opened = createVoiceAnalyser(stream);
+    if (!opened) {
+      setVoiceScan('unavailable');
+      return;
+    }
+    voiceAnalyserRef.current = opened;
+    setVoiceScan('active');
+
+    const monitor = voiceMonitorRef.current;
+    monitor.reset();
+    let cancelled = false;
+
+    const handle = window.setInterval(() => {
+      if (cancelled || submittedRef.current) return;
+      const frame = readAudioFrame(opened.analyser);
+      const signal = monitor.observe(frame, Date.now());
+      if (signal) {
+        void reportEventRef.current?.(signal.eventType, signal.severity, {
+          ...signal.details,
+          model: 'web-audio-rms',
+          recorded: false,
+        });
+      }
+    }, VOICE_SAMPLE_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+      voiceAnalyserRef.current = null;
+      opened.dispose();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBegun, proctoringEnabled, audioMonitoringEnabled, cameraState]);
 
   /** Drop the current camera and ask for it again (used by recovery controls). */
   const restartCamera = useCallback(async () => {
@@ -721,8 +1429,17 @@ export function ExamDelivery() {
         return;
       }
       setDelivery(data);
+      // A resumed attempt must show the true n / m immediately, not 0 until the
+      // candidate happens to trigger another event.
+      if (typeof data.violations_count === 'number') setViolations(data.violations_count);
+      if (typeof data.max_violations === 'number' && data.max_violations > 0) {
+        setMaxViolations(data.max_violations);
+      }
       setLocked(false);
       setLockDetail('');
+      // A reopened attempt has no request pending any more.
+      setResumeRequested(false);
+      setResumeError('');
       setRemainingSeconds(data.remaining_seconds);
       const restored: AnswerState = {};
       Object.entries(data.saved_answers || {}).forEach(([qid, saved]: [string, any]) => {
@@ -930,7 +1647,7 @@ export function ExamDelivery() {
           );
           return;
         }
-        if (res.warning) setAlarm(res.warning);
+        if (res.warning) setAlarm({ message: res.warning, category: res.event_category ?? 'browser_signal' });
         if (res.auto_submitted) {
           submittedRef.current = true;
           localStorage.removeItem(`exam_answers_${attemptId}`);
@@ -953,20 +1670,17 @@ export function ExamDelivery() {
   // While locked, re-check on a cadence so the candidate does not have to
   // hammer the button after their lecturer reopens the attempt.
   useEffect(() => {
-    if (!locked) return;
+    if (!locked || isDemo) return;
     const handle = setInterval(() => {
       beginAttempt();
     }, LOCK_RECHECK_MS);
     return () => clearInterval(handle);
-  }, [locked, beginAttempt]);
+  }, [locked, isDemo, beginAttempt]);
 
-  // The pulsing red warning settles into the persistent red banner after a
-  // beat, so a violation is impossible to miss when it happens.
-  useEffect(() => {
-    if (!alarm) return;
-    const handle = setTimeout(() => setAlarm(null), ALARM_VISIBLE_MS);
-    return () => clearTimeout(handle);
-  }, [alarm]);
+  // A warning is never on a timer. It covers the paper until the candidate
+  // acknowledges it, because a banner that fades on its own is a banner that
+  // gets missed — and the count it carries is the rule the sitting is judged
+  // by. Ten at most by default, so acknowledging is never busy-work.
 
   // Periodic camera frame for the instructor's trail. Evidence only: a frame
   // never counts against the candidate's tolerance.
@@ -1009,6 +1723,10 @@ export function ExamDelivery() {
         return;
       }
       if (state === 'on') setCameraState('lost');
+      // One event per outage. A dying feed is a warning like any other — covering
+      // the lens or unplugging the camera is the cheapest way to stop being
+      // watched — but a long hardware fault reports once and stops, so the
+      // candidate is not alarmed on every watchdog tick.
       if (!cameraOffReportedRef.current) {
         cameraOffReportedRef.current = true;
         reportEvent('camera_off', 'high', { reason: 'camera_track_lost' });
@@ -1020,35 +1738,36 @@ export function ExamDelivery() {
   useEffect(() => {
     if (!hasBegun || !proctoringEnabled) return;
 
-    const leaveGrace = () => {
-      // Leaving starts the visible countdown. Returning inside the grace is
-      // excused (recorded, zero penalty); letting the countdown lapse reports
-      // the absence as the violation. The timer is cleared on every return so
-      // the same leave never produces both outcomes.
-      if (returnGraceRef.current) clearTimeout(returnGraceRef.current);
-      setReturnCountdown(RETURN_GRACE_SECONDS);
-      returnGraceRef.current = setTimeout(() => {
-        returnGraceRef.current = null;
-        setReturnCountdown(null);
-        reportEvent('tab_switch', 'medium', { reason: 'left_paper_beyond_grace' });
-      }, RETURN_GRACE_SECONDS * 1000);
+    // Every departure is a warning, counted the moment it happens: minimising
+    // the window, switching tabs, bringing another application in front of this
+    // one. There is no grace period to sit out and no quick-return excuse — the
+    // rule the candidate was shown is a fixed number of warnings, so a departure
+    // spends one and says so immediately.
+    //
+    // A single departure emits two browser events (a tab switch fires both
+    // `visibilitychange` and `blur`), so the marker below collapses the pair into
+    // one warning without excusing the departure itself.
+    let lastDepartureAt = 0;
+    const reportDeparture = (kind: 'tab_switch' | 'window_blur', reason: string) => {
+      const now = Date.now();
+      if (now - lastDepartureAt < DEPARTURE_DEDUPE_MS) return;
+      lastDepartureAt = now;
+      reportEvent(kind, 'medium', {
+        reason,
+        page_hidden: document.hidden,
+        window_focused: document.hasFocus(),
+      });
     };
     const onVisibility = () => {
-      if (document.hidden) {
-        leaveGrace();
-      } else {
-        if (returnGraceRef.current) {
-          clearTimeout(returnGraceRef.current);
-          returnGraceRef.current = null;
-          setReturnCountdown(null);
-          reportEvent('quick_tab_return', 'low');
-        }
-      }
+      // Hidden covers a tab switch and a minimised window alike.
+      if (!document.hidden) return;
+      reportDeparture('tab_switch', 'left_the_paper');
     };
     const onBlur = () => {
+      // An application brought in front leaves the page visible but unfocused.
+      // When the page also hid, `visibilitychange` already counted the departure.
       if (document.hidden) return;
-      if (returnGraceRef.current) return; // visibilitychange already armed it
-      leaveGrace();
+      reportDeparture('window_blur', 'another_application_in_front');
     };
     const isEditableTarget = (node: EventTarget | null): boolean => {
       const el = node as HTMLElement | null;
@@ -1108,16 +1827,8 @@ export function ExamDelivery() {
       document.removeEventListener('paste', onPaste);
       document.removeEventListener('contextmenu', onContextMenu);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
-      if (returnGraceRef.current) clearTimeout(returnGraceRef.current);
     };
   }, [hasBegun, proctoringEnabled, reportEvent]);
-
-  // Tick the visible return countdown once per second.
-  useEffect(() => {
-    if (returnCountdown === null || returnCountdown <= 0) return;
-    const handle = setTimeout(() => setReturnCountdown((n) => (n !== null ? n - 1 : null)), 1000);
-    return () => clearTimeout(handle);
-  }, [returnCountdown]);
 
   // Single source of full-screen entry: on begin (the click that started the
   // attempt is the trusted user gesture the browser requires) and again after a
@@ -1193,9 +1904,92 @@ export function ExamDelivery() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }, [remainingSeconds]);
 
+  // Ask the lecturer to reopen the paper. The answer is deliberately not
+  // "resumed": the server records the request and the attempt stays locked, so
+  // the button reports that the request was sent rather than pretending the
+  // candidate is back in.
+  const askLecturerToReopen = useCallback(async () => {
+    setResumeError('');
+    try {
+      await requestResume.mutateAsync();
+      setResumeRequested(true);
+    } catch (err: any) {
+      // 409 means the attempt is no longer locked. That is good news arriving as
+      // an error, so hand it to the re-check instead of showing a failure.
+      if (err?.response?.status === 409) {
+        void beginAttempt();
+        return;
+      }
+      setResumeError(
+        apiError(err, 'Your request could not be sent. Tell your lecturer directly.')
+      );
+    }
+  }, [requestResume, beginAttempt]);
+
   // ── Render: locked-out / blocked / error / loading states ─────────────────
   const lockedBrief =
     !hasBegun && examBrief?.latest_attempt_status === 'locked_violation';
+
+  // The demo has no lecturer to approve a reopen, so its stopped screen offers
+  // the only thing that can actually continue: a clean sitting. The server
+  // clears the previous demo attempt when this button asks it to.
+  if ((locked || lockedBrief) && isDemo) {
+    return (
+      <div className="min-h-screen bg-rose-950 p-6 flex items-center justify-center">
+        <div className="max-w-md w-full overflow-hidden rounded-xl border-4 border-rose-700 bg-white shadow-2xl">
+          <div className="flex items-center gap-3 bg-rose-600 px-6 py-4 text-white">
+            <AlertTriangle className="h-7 w-7 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-extrabold uppercase tracking-widest">
+                Demo assessment stopped
+              </p>
+              <p className="text-xs font-medium text-rose-100">
+                {maxViolations > 0
+                  ? `${maxViolations} of ${maxViolations} warnings used`
+                  : 'Integrity limit reached'}
+              </p>
+            </div>
+          </div>
+          <div className="space-y-4 p-6 text-sm text-slate-700">
+            <p className="rounded-lg border border-rose-200 bg-rose-50 p-3 font-semibold text-rose-800">
+              That is the demo’s integrity limit working as designed. The paper was not
+              submitted.
+            </p>
+            <p>
+              A real assessment would now need your lecturer to reopen it. This is the demo, so
+              you can start again yourself — a fresh paper, an empty answer sheet and no
+              warnings carried over from this sitting.
+            </p>
+            {demoRestartError && (
+              <p className="rounded-lg border border-rose-200 bg-white p-3 text-xs font-semibold text-rose-700">
+                {demoRestartError}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={restartDemo}
+              disabled={demoRestarting}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-60"
+            >
+              {demoRestarting ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              )}
+              {demoRestarting ? 'Starting a fresh demo…' : 'Start a fresh demo'}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/exams')}
+              className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Return to examinations
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (locked || lockedBrief) {
     return (
@@ -1205,10 +1999,12 @@ export function ExamDelivery() {
             <AlertTriangle className="h-7 w-7 shrink-0" aria-hidden="true" />
             <div>
               <p className="text-sm font-extrabold uppercase tracking-widest">
-                Removed from this examination
+                Assessment stopped
               </p>
               <p className="text-xs font-medium text-rose-100">
-                Assessment-integrity session locked
+                {maxViolations > 0
+                  ? `${maxViolations} of ${maxViolations} warnings used`
+                  : 'Integrity limit reached'}
               </p>
             </div>
           </div>
@@ -1219,17 +2015,50 @@ export function ExamDelivery() {
             </p>
             <ol className="list-decimal space-y-1.5 pl-5 text-sm text-slate-700">
               <li>
-                <strong>Contact your lecturer or exam invigilator now</strong> and ask them to
-                reopen your attempt. They do this from the examination’s Submissions tab
-                (Integrity events → Reopen).
+                <strong>Ask your lecturer to reopen it.</strong> Use the request button below; your
+                lecturer sees the request in this examination’s Submissions tab and approves it
+                from there.
               </li>
               <li>
-                Keep this page open. Once they reopen your attempt, this page returns you to the
-                assessment automatically — your remaining time is credited back for every minute
-                you spent waiting.
+                Keep this page open. Once they approve, this page returns you to the assessment
+                automatically — your remaining time is credited back for every minute you spent
+                waiting.
               </li>
               <li>Your camera must be on again before you can continue.</li>
             </ol>
+
+            <div className="rounded-lg border-2 border-rose-200 bg-rose-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-rose-800">
+                Request to continue
+              </p>
+              <p className="mt-1 text-xs text-rose-900/80">
+                Your request does not reopen the attempt by itself — your lecturer has to approve
+                it.
+              </p>
+              <button
+                type="button"
+                onClick={askLecturerToReopen}
+                disabled={requestResume.isPending || resumeRequested}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-60"
+              >
+                {requestResume.isPending && (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                )}
+                {resumeRequested
+                  ? 'Request sent to your lecturer'
+                  : requestResume.isPending
+                    ? 'Sending your request…'
+                    : 'Ask my lecturer to reopen this attempt'}
+              </button>
+              {resumeRequested && (
+                <p className="mt-2 text-xs font-semibold text-emerald-700">
+                  Request recorded. Your lecturer has to approve it before you can continue.
+                </p>
+              )}
+              {resumeError && (
+                <p className="mt-2 text-xs font-semibold text-rose-700">{resumeError}</p>
+              )}
+            </div>
 
             <div
               className={`rounded-lg border-2 p-4 ${
@@ -1381,14 +2210,14 @@ export function ExamDelivery() {
   if (!hasBegun) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-        <div className="max-w-2xl w-full bg-white rounded-xl border border-slate-200 p-8 shadow-xs">
+        <div className="max-w-3xl w-full bg-white rounded-xl border border-slate-200 p-6 shadow-xs sm:p-7">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">
             Assessment brief
           </p>
           <h1 className="text-xl font-bold text-slate-900 mt-1">
             {examBrief?.title || 'Examination'}
           </h1>
-          <div className="mt-4 space-y-3 text-sm text-slate-600">
+          <div className="mt-3 space-y-2.5 text-sm text-slate-600">
             <p>
               Duration: <strong className="text-slate-900">{examBrief?.duration_minutes ?? '—'} minutes</strong>
               {' · '}
@@ -1400,42 +2229,154 @@ export function ExamDelivery() {
               </p>
             )}
             {proctoringEnabled && (
-              <div className="rounded-lg border-2 border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 space-y-1.5">
-                <p className="flex items-center gap-1.5 font-bold uppercase tracking-wide">
-                  <ShieldAlert className="h-4 w-4" aria-hidden="true" /> Assessment integrity —
-                  camera required
-                </p>
-                <p>
-                  This assessment runs with your <strong>camera on</strong>. Your lecturer sees
-                  your presence and captured frames in the integrity log, alongside browser events
-                  such as leaving this window or full-screen mode. Leaving full-screen, switching
-                  tabs or turning the camera off is recorded.
-                </p>
-                <p>
-                  About once a minute a small still picture is added to that log. The{' '}
-                  <strong>pictures</strong> are deleted automatically{' '}
-                  {evidenceRetentionDays > 0
-                    ? `after ${evidenceRetentionDays} days`
-                    : 'when your institution erases them'}
-                  ; the log entry itself (what happened and when) is kept, so your lecturer can
-                  still review the session after the pictures are gone.
-                </p>
-                <p className="font-semibold">
-                  Recorded events trigger a <span className="text-rose-700">red warning</span> on
-                  your screen.{' '}
-                  {warningPolicy === 'review' ? (
-                    <>
-                      Reaching this assessment's disclosed limit marks your attempt{' '}
-                      <strong>for your lecturer's review</strong>. You are not removed and you may
-                      keep working — an automated signal is never a verdict on its own.
-                    </>
-                  ) : (
-                    <>
-                      Reaching the limit removes you from the examination — only your lecturer can
-                      reopen it.
-                    </>
-                  )}
-                </p>
+              <div className="rounded-xl border-2 border-rose-200 bg-rose-50/80 p-3.5 text-xs text-rose-900">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide">
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> Assessment
+                    integrity
+                  </p>
+                  <span className="rounded-full border border-rose-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold">
+                    Camera on
+                  </span>
+                  <span className="rounded-full border border-rose-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold">
+                    {maxViolations > 0 ? `${maxViolations} warnings max` : 'Warnings recorded'}
+                  </span>
+                  <span className="rounded-full border border-rose-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold">
+                    {warningCooldownSeconds}s between warnings
+                  </span>
+                  <span className="rounded-full border border-rose-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold">
+                    Frames kept{' '}
+                    {evidenceRetentionDays > 0 ? `${evidenceRetentionDays} days` : 'until erased'}
+                  </span>
+                </div>
+                <ul className="mt-2.5 space-y-1 pl-4 text-[11.5px] leading-relaxed marker:text-rose-400 list-disc">
+                  <li>
+                    Your <strong>camera stays on</strong>. Your lecturer can review camera stills
+                    and browser events such as leaving this window or full-screen mode.
+                  </li>
+                  <li>
+                    <strong>On-device checks</strong> —{' '}
+                    {faceMonitoringEnabled ? 'face and head direction' : 'camera presence'}
+                    {deviceDetectionEnabled ? ', prohibited devices' : ''}
+                    {handMonitoringEnabled ? ', hands at the face' : ''}
+                    {mouthMonitoringEnabled && faceMonitoringEnabled ? ', mouth movement' : ''}
+                    {audioMonitoringEnabled ? ' and voice loudness' : ''} run inside this
+                    browser. <strong>No audio is recorded, stored or sent.</strong>
+                  </li>
+                  <li>
+                    Every warning covers the paper until you acknowledge it, and another cannot
+                    be counted for <strong>{warningCooldownSeconds} seconds</strong> — signals in
+                    between are recorded but cost nothing extra. Signals can be mistaken, so
+                    they are never proof of misconduct on their own.
+                  </li>
+                  <li>
+                    {warningPolicy === 'review' ? (
+                      <>
+                        Reaching the limit
+                        {maxViolations > 0 ? ` of ${maxViolations} warnings` : ''} marks your
+                        attempt <strong>for your lecturer’s review</strong>; you keep working.
+                      </>
+                    ) : isDemo ? (
+                      <>
+                        Reaching the limit
+                        {maxViolations > 0 ? ` of ${maxViolations} warnings` : ''} stops the paper
+                        — in the demo you can start a fresh sitting straight away.
+                      </>
+                    ) : (
+                      <>
+                        Reaching the limit
+                        {maxViolations > 0 ? ` of ${maxViolations} warnings` : ''} stops the paper
+                        — only your lecturer can reopen it.
+                      </>
+                    )}
+                  </li>
+                </ul>
+                <details className="group mt-2">
+                  <summary className="cursor-pointer text-[11px] font-semibold text-rose-800 underline decoration-rose-300 underline-offset-2 hover:text-rose-900">
+                    What each check can see — full disclosure
+                  </summary>
+                  <div className="mt-2 space-y-2 border-t border-rose-200 pt-2 text-[11.5px] leading-relaxed">
+                    {faceMonitoringEnabled && (
+                      <p>
+                        <strong>Your face and head direction are checked on your own device</strong>,
+                        frame by frame. No picture leaves your machine for that check — only a
+                        resulting warning (head turned away, no face visible, a second face)
+                        reaches your lecturer with a still frame, and it spends one of your
+                        warnings. This paper runs at the{' '}
+                        <strong>{SENSITIVITY_LABEL[sensitivity]} sensitivity</strong>: turning
+                        fully away from the screen for more than{' '}
+                        {Math.round((dwellMs.turn ?? 2000) / 1000)} seconds, or leaving the frame
+                        for more than {Math.round((dwellMs.absence ?? 3000) / 1000)} seconds,
+                        raises one.
+                      </p>
+                    )}
+                    {handMonitoringEnabled && (
+                      <p>
+                        <strong>Hands are checked on your own device.</strong> If a hand stays at
+                        your face for more than {Math.round((dwellMs.hand ?? 3500) / 1000)}{' '}
+                        seconds — the pattern of reading from something held up to your eyes, a
+                        phone included — it raises a warning you can see and is recorded for your
+                        lecturer to look at. Hands on your desk, your chin, your pen or your
+                        glasses are of no interest to it.
+                      </p>
+                    )}
+                    {audioMonitoringEnabled && (
+                      <p>
+                        <strong>Your microphone is checked for speech in the room.</strong> Only
+                        the loudness and shape of the sound are measured, on your own device, to
+                        notice talking that is sustained for more than{' '}
+                        {Math.round((dwellMs.voice ?? 3500) / 1000)} seconds, headphones or not.{' '}
+                        <strong>No audio is recorded, stored or sent anywhere</strong> — nothing
+                        is kept but the event saying a voice was audible. Coughing, a fan and a
+                        housemate passing through your own room are ordinary; if someone is with
+                        you, ask them to leave.
+                      </p>
+                    )}
+                    {mouthMonitoringEnabled && faceMonitoringEnabled && (
+                      <p>
+                        <strong>Mouth movement is checked on your own device.</strong> If the
+                        mouth band of your picture keeps moving while the rest of your face stays
+                        still for more than {Math.round((dwellMs.mouth ?? 3000) / 1000)} seconds —
+                        the shape of talking, for example reading an answer aloud to someone
+                        off-camera — it raises a warning and is recorded for your lecturer to look
+                        at. <strong>Nothing you say is heard, recognised or stored</strong>: this
+                        measures pixels, not speech, and no audio is captured for it. A cough, a
+                        yawn or a drink may spend a warning; you can explain it to your lecturer,
+                        who decides whether the paper continues.
+                      </p>
+                    )}
+                    <p>
+                      About once a minute a small still picture is added to that log. The{' '}
+                      <strong>pictures</strong> are deleted automatically{' '}
+                      {evidenceRetentionDays > 0
+                        ? `after ${evidenceRetentionDays} days`
+                        : 'when your institution erases them'}
+                      ; the log entry itself (what happened and when) is kept, so your lecturer
+                      can still review the session after the pictures are gone.
+                    </p>
+                    <p>
+                      A warning names what was seen, counts it and stays on your screen until you
+                      acknowledge it — whichever check saw it. After it is counted, no further
+                      warning can be counted for {warningCooldownSeconds} seconds; a signal in
+                      that gap is still recorded for your lecturer but does not spend another
+                      warning.{' '}
+                      {warningPolicy === 'review' ? (
+                        <>
+                          Reaching this assessment’s limit
+                          {maxViolations > 0 ? ` of ${maxViolations} warnings` : ''} marks your
+                          attempt for review; you are not removed and may keep working.
+                        </>
+                      ) : (
+                        <>
+                          Reaching the limit
+                          {maxViolations > 0 ? ` of ${maxViolations} warnings` : ''} stops the
+                          paper; only your lecturer can reopen it, and you can ask them to from
+                          the stopped screen.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </details>
               </div>
             )}
           </div>
@@ -1449,8 +2390,8 @@ export function ExamDelivery() {
               }`}
             >
               <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700">
-                <Camera className="h-4 w-4" aria-hidden="true" /> Camera check — turn this on
-                before the assessment begins
+                <Camera className="h-4 w-4" aria-hidden="true" /> Camera check — turn it on to
+                begin
               </p>
               <div className="mt-3 flex items-start gap-4">
                 <div className="relative aspect-video w-44 shrink-0 overflow-hidden rounded-md border border-slate-300 bg-slate-900">
@@ -1485,18 +2426,16 @@ export function ExamDelivery() {
                 </div>
                 <div className="space-y-2 text-xs text-slate-700">
                   <p>
-                    This is a mirrored view, so it moves the way you do — lift your right
-                    hand and the picture lifts the hand on your right. It stays in the
-                    corner of your screen while you answer, and frames are saved to your
-                    lecturer’s integrity log in the camera’s true orientation.
+                    A mirrored view that stays in the corner while you answer. Frames reach
+                    your lecturer in the camera’s true orientation.
                   </p>
                   {deviceDetectionEnabled && (
                     <p className="rounded-md border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-600">
-                      This assessment checks the camera picture for prohibited devices{' '}
-                      <strong>on your own device</strong>: no video is sent anywhere for that
-                      check. A probable phone, earbuds or smartwatch is recorded for your
-                      lecturer to review — it never fails you by itself, and you can always
-                      ask them to look at it. Put such devices away before you begin.
+                      Looks for prohibited devices{' '}
+                      <strong>on your own device</strong> — no video is sent anywhere. A
+                      probable phone, earbuds or smartwatch (read from a close-up of your
+                      wrist) is logged for your lecturer to review; it never fails you by
+                      itself. Put them away before you begin.
                     </p>
                   )}
                   {cameraReady ? (
@@ -1603,12 +2542,12 @@ export function ExamDelivery() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Pulsing red frame: a recorded violation stays impossible to ignore. */}
+      {/* Pulsing red frame: a counted warning stays impossible to ignore. */}
       {violations > 0 && (
         <div
           aria-hidden="true"
           className={`pointer-events-none fixed inset-0 z-40 ${
-            alarm ? 'border-8 border-rose-600 animate-pulse' : 'border-4 border-rose-500'
+            alarm ? 'animate-pulse border-8 border-rose-600' : 'border-4 border-rose-500'
           }`}
         />
       )}
@@ -1616,23 +2555,28 @@ export function ExamDelivery() {
         {(alarm || violations > 0) && (
           <div
             role="alert"
-            className={`border-b-4 px-4 py-2.5 text-xs ${
+            aria-live="assertive"
+            className={`border-b-4 px-4 py-3 text-sm ${
               alarm
                 ? 'animate-pulse border-rose-700 bg-rose-600 text-white'
                 : 'border-rose-300 bg-rose-50 text-rose-900'
             }`}
           >
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-2 gap-y-1">
-              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
+              <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />
               <span className="font-extrabold uppercase tracking-widest">
-                {alarm ? 'Integrity warning' : 'Integrity warnings recorded'}
+                {maxViolations > 0 ? `Warning ${violations} of ${maxViolations}` : 'Integrity warning'}
               </span>
-              <span className="font-medium">
-                {alarm ||
-                  `${violations} recorded event(s) — your instructor reviews this session.`}
+              <span className="font-semibold">
+                {alarm?.message ||
+                  `${violations} warning(s) recorded. ${
+                    maxViolations > violations
+                      ? `${maxViolations - violations} left before this sitting stops.`
+                      : ''
+                  }`}
               </span>
               {maxViolations > 0 && (
-                <span className="ml-auto rounded-md border border-rose-400 bg-white/15 px-2 py-0.5 font-bold tabular-nums">
+                <span className="ml-auto rounded-md border border-rose-400 bg-white/15 px-2.5 py-1 text-sm font-extrabold tabular-nums">
                   {violations} / {maxViolations}
                 </span>
               )}
@@ -1650,8 +2594,8 @@ export function ExamDelivery() {
                 Camera off — this is recorded
               </span>
               <span className="font-medium">
-                Your assessment requires a live camera. Restore it now to avoid further
-                violations.
+                Your assessment requires a live camera. Restore it to resume observation. This
+                technical camera status does not use your browser-event allowance.
               </span>
               <button
                 onClick={() => startCamera()}
@@ -1698,7 +2642,7 @@ export function ExamDelivery() {
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                     : 'border-rose-300 bg-rose-50 text-rose-700'
                 }`}
-                title="Your camera and browser signals are recorded for your instructor."
+                title="Browser/page events count toward the disclosed allowance; camera/model observations are separate review leads."
               >
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
@@ -1706,7 +2650,12 @@ export function ExamDelivery() {
                   }`}
                   aria-hidden="true"
                 />
-                {cameraReady ? 'Camera + integrity monitoring on' : cameraState === 'on' ? 'Camera picture not confirmed' : 'Camera off — recorded'}
+                {cameraReady ? 'Camera + integrity checks on' : cameraState === 'on' ? 'Camera picture not confirmed' : 'Camera off — review only'}
+                {maxViolations > 0 && (
+                  <span className="ml-1 font-bold tabular-nums">
+                    · {violations}/{maxViolations}
+                  </span>
+                )}
               </span>
             )}
             <div
@@ -1879,30 +2828,54 @@ export function ExamDelivery() {
         </aside>
       </main>
 
-      {/* Return-grace countdown: visible, honoured, honest. Returning inside
-          the grace is recorded but excused; the lapse is what gets reported. */}
-      {returnCountdown !== null && returnCountdown > 0 && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 p-6">
-          <div className="max-w-sm w-full rounded-2xl border-4 border-amber-400 bg-white p-8 text-center shadow-2xl">
-            <p className="text-sm font-extrabold uppercase tracking-widest text-amber-600">
-              Come back to your exam
+      {/* Fullscreen enforcement: after losing fullscreen the paper keeps the
+          candidate's answers visible but greyed out until they re-enter. The
+          browser cannot be forced every time, so ambiguity is removed instead. */}
+      {/* Observation gate: while the pipeline cannot see the candidate the
+          paper is covered rather than merely warned about. Dismissal is not a
+          control — the cover lifts only when observation returns. */}
+      {integrityBlock && (
+        <div
+          className="fixed inset-0 z-[57] flex items-center justify-center bg-slate-900/85 p-6"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="integrity-gate-title"
+        >
+          <div
+            className={`max-w-md w-full rounded-2xl border-4 bg-white p-8 text-center shadow-2xl ${
+              integrityBlock.tone === 'rose' ? 'border-rose-500' : 'border-amber-400'
+            }`}
+          >
+            <ShieldAlert
+              className={`mx-auto h-10 w-10 ${
+                integrityBlock.tone === 'rose' ? 'text-rose-600' : 'text-amber-600'
+              }`}
+              aria-hidden="true"
+            />
+            <p id="integrity-gate-title" className="mt-4 text-lg font-bold text-slate-900">
+              {integrityBlock.title}
             </p>
-            <p className="mt-3 text-6xl font-black tabular-nums text-slate-900" aria-live="polite">
-              {returnCountdown}
+            <p className="mt-2 text-sm text-slate-600">{integrityBlock.body}</p>
+            <p
+              className={`mt-4 rounded-md border px-3 py-2 text-[11px] font-semibold ${
+                integrityBlock.tone === 'rose'
+                  ? 'border-rose-200 bg-rose-50 text-rose-800'
+                  : 'border-amber-200 bg-amber-50 text-amber-900'
+              }`}
+            >
+              {maxViolations > 0
+                ? `${violations} of ${maxViolations} warnings counted on this attempt — screen leaves and camera cues alike.`
+                : 'This session is being recorded.'}
             </p>
-            <p className="mt-3 text-sm text-slate-600">
-              Return to the examination window within{' '}
-              <strong>{returnCountdown} second{returnCountdown === 1 ? '' : 's'}</strong>. Leaving the
-              paper during a live attempt is recorded either way; staying away beyond this
-              grace counts as a violation.
+            {alarm && <p className="mt-3 text-xs font-medium text-rose-700">{alarm.message}</p>}
+            <p className="mt-4 text-[11px] text-slate-500">
+              Your answers are saved and the timer is still running. If your camera is
+              physically broken, tell your invigilator now.
             </p>
           </div>
         </div>
       )}
 
-      {/* Fullscreen enforcement: after losing fullscreen the paper keeps the
-          candidate's answers visible but greyed out until they re-enter. The
-          browser cannot be forced every time, so ambiguity is removed instead. */}
       {proctoringEnabled && hasBegun && !isFullscreen && !fullscreenWarning && (
         <div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 p-6">
           <div className="max-w-md w-full rounded-2xl bg-white p-8 text-center shadow-2xl">
@@ -1966,17 +2939,62 @@ export function ExamDelivery() {
               </div>
             )}
           </div>
-          {proctoringEnabled && deviceDetectionEnabled && (
-            <div className="border-t border-slate-700 bg-slate-900 px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-slate-300">
-              {deviceScan === 'active'
-                ? 'Device check: on this device'
-                : deviceScan === 'loading'
-                  ? 'Device check: loading'
-                  : deviceScan === 'unavailable'
-                    ? 'Device check: unavailable'
-                    : 'Device check: waiting for camera'}
+          {/* The panel shows the candidate their own picture and nothing
+              else. Per-check status text ("face check: …", "mouth check: …")
+              was removed: it narrated the detectors while they loaded and read
+              as instability rather than protection. A warning is the only
+              thing that belongs on this panel; a check that genuinely could
+              not start is still disclosed, once and quietly. */}
+          {proctoringEnabled && monitoringUnavailable && (
+            <div className="border-t border-amber-500/60 bg-amber-500/15 px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-amber-200">
+              Monitoring could not start — tell your invigilator
             </div>
           )}
+        </div>
+      )}
+
+      {/* An unacknowledged warning covers the paper. It is the only screen in
+          the assessment that the candidate cannot work through, which is what
+          makes "warning 3 of 10" a fact they cannot claim not to have seen. */}
+      {alarm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="integrity-warning-title"
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-center gap-2 bg-rose-600 px-6 py-3 text-white">
+              <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <p className="text-sm font-extrabold uppercase tracking-widest">
+                Integrity warning recorded
+              </p>
+              {maxViolations > 0 && (
+                <span className="ml-auto rounded-md bg-white/20 px-2.5 py-1 text-sm font-extrabold tabular-nums">
+                  {violations} / {maxViolations}
+                </span>
+              )}
+            </div>
+            <div className="px-6 py-5">
+              <h2 id="integrity-warning-title" className="text-lg font-bold text-slate-900">
+                {maxViolations > 0 ? `Warning ${violations} of ${maxViolations}` : 'Warning recorded'}
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-slate-700">{alarm.message}</p>
+              {maxViolations > 0 && violationRule && (
+                <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  {violationRule}
+                </p>
+              )}
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setAlarm(null)}
+                className="mt-5 w-full rounded-lg bg-rose-600 px-5 py-3 text-sm font-bold text-white hover:bg-rose-700"
+              >
+                I understand — continue the paper
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

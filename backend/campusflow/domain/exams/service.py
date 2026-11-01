@@ -38,9 +38,18 @@ from campusflow.domain.exams.models import (
     ProctoringEvent,
 )
 from campusflow.domain.exams.schemas import (
+    DEFAULT_AUDIO_MONITORING,
+    DEFAULT_DEVICE_DETECTION,
     DEFAULT_EVIDENCE_RETENTION_DAYS,
+    DEFAULT_FACE_MONITORING,
+    DEFAULT_HAND_MONITORING,
+    DEFAULT_INTEGRITY_SENSITIVITY,
+    DEFAULT_MAX_VIOLATIONS,
+    DEFAULT_MOUTH_MONITORING,
     DEFAULT_OBSTRUCTION_THRESHOLD_SECONDS,
+    DEFAULT_WARNING_COOLDOWN_SECONDS,
     DEFAULT_WARNING_POLICY,
+    INTEGRITY_SENSITIVITIES,
     MAX_OBSTRUCTION_THRESHOLD_SECONDS,
     MIN_OBSTRUCTION_THRESHOLD_SECONDS,
     WARNING_POLICIES,
@@ -62,6 +71,7 @@ from campusflow.domain.exams.schemas import (
     ProctoringEventResponse,
     ProctoringStatusResponse,
     StudentExamResultResponse,
+    integrity_dwell_ms,
 )
 from campusflow.domain.exams.schemas import (
     ExamResponse as ExamResponseSchema,
@@ -122,9 +132,9 @@ async def create_exam(
             "auto_grade": True,
             "show_results_immediately": False,
             "proctoring_enabled": True,
-            "max_violations": 5,
+            "max_violations": DEFAULT_MAX_VIOLATIONS,
             "warning_policy": DEFAULT_WARNING_POLICY,
-            "device_detection_enabled": False,
+            "device_detection_enabled": DEFAULT_DEVICE_DETECTION,
             "obstruction_threshold_seconds": DEFAULT_OBSTRUCTION_THRESHOLD_SECONDS,
         },
         status=payload.status,
@@ -193,9 +203,9 @@ async def create_exam_for_offerings(
         "auto_grade": True,
         "show_results_immediately": False,
         "proctoring_enabled": True,
-        "max_violations": 5,
+        "max_violations": DEFAULT_MAX_VIOLATIONS,
         "warning_policy": DEFAULT_WARNING_POLICY,
-        "device_detection_enabled": False,
+        "device_detection_enabled": DEFAULT_DEVICE_DETECTION,
         "obstruction_threshold_seconds": DEFAULT_OBSTRUCTION_THRESHOLD_SECONDS,
     }
 
@@ -317,12 +327,16 @@ def build_student_exam(exam: Exam, questions_count: int) -> ExamStudentResponse:
         questions_count=questions_count,
         config=ExamStudentConfig(
             proctoring_enabled=bool(config.get("proctoring_enabled", True)),
-            max_attempts=max_attempts,
-            warning_policy=_resolve_warning_policy(exam),
+        max_attempts=max_attempts,
+        max_violations=_resolve_max_violations(exam),
+        warning_cooldown_seconds=PROCTORING_WARNING_COOLDOWN_SECONDS,
+        warning_policy=_resolve_warning_policy(exam),
             device_detection_enabled=_resolve_device_detection(exam),
             obstruction_threshold_seconds=_resolve_obstruction_threshold(exam),
             evidence_retention_days=_evidence_retention_days(),
             show_results_immediately=bool(config.get("show_results_immediately", False)),
+            demo=bool(config.get("demo", False)),
+            **_integrity_narrative(exam),
         ),
     )
 
@@ -1112,14 +1126,91 @@ async def start_or_resume_attempt(
     elapsed = (now - start_time).total_seconds()
     remaining = max(0, int((exam.duration_minutes * 60) - elapsed))
 
-    # Build student delivery questions (without revealing is_correct!)
+    # Build student delivery questions (without revealing is_correct!). Freeze the
+    # randomized mapping on the attempt so an answer saved as a canonical option
+    # label remains gradeable and resumes with exactly the same display order.
+    # The attempt variant, not process-global RNG state, is authoritative when
+    # a candidate refreshes, resumes, or returns after an exam edit.
     if exam.status == "draft" and not await is_exam_staff(db, student_user):
         # Draft examinations are invisible to candidates even inside the window.
         raise NotFoundError("Exam not found")
 
+    config = exam.config or {}
+    shuffle_questions = config.get("shuffle_questions") is True
+    shuffle_options = config.get("shuffle_options") is True
+    variant = dict(attempt.delivery_variant or {})
+    if not variant:
+        # A legacy in-progress attempt may have answers stored only in browser
+        # storage, without a persisted display mapping. Preserve its original
+        # paper on the first post-migration resume; shuffle only attempts created
+        # after this migration, so a saved answer cannot silently change meaning.
+        if active_attempt is not None:
+            shuffle_questions = False
+            shuffle_options = False
+        # Generate an unpredictable per-attempt order once, then persist it; the
+        # UUID is public in the delivery response and must not reveal the RNG seed.
+        rng = random.SystemRandom()
+        question_ids = [str(eq.id) for eq in exam.questions]
+        if shuffle_questions and len(question_ids) > 1:
+            original_question_ids = list(question_ids)
+            rng.shuffle(question_ids)
+            if question_ids == original_question_ids:
+                question_ids = question_ids[1:] + question_ids[:1]
+        option_orders: dict[str, list[str]] = {}
+        for eq in exam.questions:
+            labels = [
+                option.label
+                for option in sorted(eq.question.options, key=lambda option: option.sort_order)
+            ]
+            if shuffle_options and len(labels) > 1:
+                original_labels = list(labels)
+                rng.shuffle(labels)
+                if labels == original_labels:
+                    labels = labels[1:] + labels[:1]
+            option_orders[str(eq.id)] = labels
+        variant = {
+            "shuffle_questions": shuffle_questions,
+            "shuffle_options": shuffle_options,
+            "question_order": question_ids,
+            "option_orders": option_orders,
+            "option_display_to_canonical": {},
+        }
+    else:
+        # The configuration and mappings belong to the attempt: changing the
+        # exam after a candidate begins must not silently change their paper.
+        shuffle_questions = variant.get("shuffle_questions", shuffle_questions) is True
+        shuffle_options = variant.get("shuffle_options", shuffle_options) is True
+        variant.setdefault("question_order", [str(eq.id) for eq in exam.questions])
+        variant.setdefault("option_orders", {})
+        variant.setdefault("option_display_to_canonical", {})
+
+    question_order = variant.get("question_order", [])
+    order_index = {question_id: index for index, question_id in enumerate(question_order)}
+    exam_questions = sorted(
+        exam.questions,
+        key=lambda eq: order_index.get(str(eq.id), len(order_index) + eq.sort_order),
+    )
+    option_orders = variant.get("option_orders", {})
+    display_maps = variant.get("option_display_to_canonical", {})
+
     delivery_questions: list[ExamQuestionStudentDelivery] = []
-    for eq in exam.questions:
+    for eq in exam_questions:
         q = eq.question
+        label_order = option_orders.get(str(eq.id), [])
+        labels_index = {label: index for index, label in enumerate(label_order)}
+        ordered_options = sorted(
+            q.options,
+            key=lambda option: labels_index.get(option.label, len(labels_index) + option.sort_order),
+        )
+        display_labels = (
+            [chr(ord("A") + index) for index in range(len(ordered_options))]
+            if shuffle_options
+            else [option.label for option in ordered_options]
+        )
+        canonical_by_display = dict(
+            zip(display_labels, (option.label for option in ordered_options), strict=True)
+        )
+        display_maps[str(eq.id)] = canonical_by_display
         delivery_questions.append(
             ExamQuestionStudentDelivery(
                 id=eq.id,
@@ -1131,24 +1222,35 @@ async def start_or_resume_attempt(
                 else q.negative_marks,
                 question_type=q.question_type,
                 body=q.body,
-                options=[{"label": o.label, "body": o.body} for o in q.options],
+                options=[
+                    {"label": display_labels[index], "body": option.body}
+                    for index, option in enumerate(ordered_options)
+                ],
             )
         )
 
+    variant["option_display_to_canonical"] = display_maps
+    attempt.delivery_variant = variant
+    await db.commit()
+
     # Saved responses map
     saved_answers: dict[str, dict[str, Any]] = {}
-    if active_attempt and active_attempt.responses:
-        for r in active_attempt.responses:
-            saved_answers[str(r.exam_question_id)] = {
-                "answer_data": r.answer_data,
-                "flagged_for_review": r.flagged_for_review,
-            }
-    elif attempt.responses:
-        for r in attempt.responses:
-            saved_answers[str(r.exam_question_id)] = {
-                "answer_data": r.answer_data,
-                "flagged_for_review": r.flagged_for_review,
-            }
+    saved_responses = active_attempt.responses if active_attempt and active_attempt.responses else attempt.responses
+    for response in saved_responses:
+        answer_data = dict(response.answer_data or {})
+        canonical_to_display = {
+            canonical: display
+            for display, canonical in display_maps.get(str(response.exam_question_id), {}).items()
+        }
+        selected = answer_data.get("selected")
+        if isinstance(selected, list):
+            answer_data["selected"] = [canonical_to_display.get(str(label), label) for label in selected]
+        elif selected is not None:
+            answer_data["selected"] = canonical_to_display.get(str(selected), selected)
+        saved_answers[str(response.exam_question_id)] = {
+            "answer_data": answer_data,
+            "flagged_for_review": response.flagged_for_review,
+        }
 
     return ExamDeliveryResponse(
         attempt_id=attempt.id,
@@ -1161,9 +1263,16 @@ async def start_or_resume_attempt(
         status=attempt.status,
         proctoring_enabled=bool((exam.config or {}).get("proctoring_enabled", True)),
         warning_policy=_resolve_warning_policy(exam),
+        violations_count=attempt.proctor_violations_count,
+        max_violations=_resolve_max_violations(exam),
+        warning_cooldown_seconds=PROCTORING_WARNING_COOLDOWN_SECONDS,
         device_detection_enabled=_resolve_device_detection(exam),
         obstruction_threshold_seconds=_resolve_obstruction_threshold(exam),
         evidence_retention_days=_evidence_retention_days(),
+        demo=bool((exam.config or {}).get("demo", False)),
+        shuffle_questions=shuffle_questions,
+        shuffle_options=shuffle_options,
+        **_integrity_narrative(exam),
         questions=delivery_questions,
         saved_answers=saved_answers,
     )
@@ -1178,7 +1287,10 @@ async def save_answers_batch(
     query = (
         select(ExamAttempt)
         .where(ExamAttempt.id == attempt_id)
-        .options(selectinload(ExamAttempt.exam), selectinload(ExamAttempt.responses))
+        .options(
+            selectinload(ExamAttempt.exam).selectinload(Exam.questions),
+            selectinload(ExamAttempt.responses),
+        )
     )
     res = await db.execute(query)
     attempt = res.scalar_one_or_none()
@@ -1201,20 +1313,60 @@ async def save_answers_batch(
         await submit_attempt(db, attempt_id, student_user, is_auto_submit=True)
         raise HTTPException(status_code=400, detail="Exam time expired. Attempt auto-submitted.")
 
-    # Upsert responses
+    # Normalize the presentation labels back to the question-bank labels before
+    # persisting. Grading remains based on the canonical key, while the candidate
+    # can answer using the labels they actually saw in this attempt variant.
+    variant = attempt.delivery_variant or {}
+    display_maps = variant.get("option_display_to_canonical", {})
+    question_types = {
+        str(eq.id): eq.question.question_type for eq in attempt.exam.questions
+    }
+    allowed_question_ids = {eq.id for eq in attempt.exam.questions}
+
+    # Upsert responses. The browser sends the label it displayed, but only a
+    # displayed label may be translated; accepting any other label would let a
+    # forged canonical answer key bypass a shuffled presentation.
     resp_map = {r.exam_question_id: r for r in attempt.responses}
 
     for item in payload.answers:
+        if item.exam_question_id not in allowed_question_ids:
+            raise HTTPException(status_code=422, detail="Question is not part of this exam.")
+        answer_data = dict(item.answer_data or {})
+        question_id = str(item.exam_question_id)
+        mapping = display_maps.get(question_id, {})
+        selected = answer_data.get("selected")
+        if question_types.get(question_id) == "true_false":
+            # True/false answers are the option body ("true"/"false"), not a
+            # display label. Preserve that established API even when choices are
+            # randomized; translate only when a client explicitly sends a shown label.
+            if isinstance(selected, str) and selected in mapping:
+                answer_data["selected"] = mapping[selected]
+        elif isinstance(selected, list):
+            if mapping and any(str(label) not in mapping for label in selected):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Answer contains an option not shown in this attempt.",
+                )
+            answer_data["selected"] = [mapping.get(str(label), label) for label in selected]
+        elif selected is not None:
+            selected_label = str(selected)
+            if selected_label in mapping:
+                answer_data["selected"] = mapping[selected_label]
+            elif mapping:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Answer contains an option not shown in this attempt.",
+                )
         if item.exam_question_id in resp_map:
             resp = resp_map[item.exam_question_id]
-            resp.answer_data = item.answer_data
+            resp.answer_data = answer_data
             resp.time_spent_seconds += item.time_spent_seconds
             resp.flagged_for_review = item.flagged_for_review
         else:
             resp = ExamResponse(
                 attempt_id=attempt.id,
                 exam_question_id=item.exam_question_id,
-                answer_data=item.answer_data,
+                answer_data=answer_data,
                 time_spent_seconds=item.time_spent_seconds,
                 flagged_for_review=item.flagged_for_review,
             )
@@ -1451,6 +1603,28 @@ def review_flag_state(attempt: ExamAttempt) -> tuple[bool, datetime | None]:
     return flagged, flagged_at
 
 
+def resume_request_state(attempt: ExamAttempt) -> tuple[bool, datetime | None]:
+    """Whether the candidate has asked to continue, and since when.
+
+    Derived in one place for the same reason as the review flag: the lock
+    surface, the lecturer's queue and the unlock path must agree on what a
+    pending request is.
+    """
+    requested = False
+    requested_at: datetime | None = None
+    for flag in attempt.proctor_flags or []:
+        text = str(flag)
+        if text == RESUME_REQUESTED_FLAG:
+            requested = True
+        elif text.startswith(RESUME_REQUESTED_AT_FLAG_PREFIX):
+            raw = text[len(RESUME_REQUESTED_AT_FLAG_PREFIX) :]
+            try:
+                requested_at = normalize_datetime(datetime.fromisoformat(raw))
+            except ValueError:
+                requested_at = None
+    return requested, requested_at
+
+
 async def list_attempts_for_exam(
     db: AsyncSession,
     exam_id: uuid.UUID,
@@ -1661,9 +1835,22 @@ async def get_student_exam_result(
     for r in attempt.responses:
         eq = r.exam_question
         q = eq.question
-        correct_summary = (
-            ", ".join(o.label for o in q.options if o.is_correct) if q.options else None
-        )
+        canonical_correct = [o.label for o in q.options if o.is_correct]
+        option_display_to_canonical = (attempt.delivery_variant or {}).get(
+            "option_display_to_canonical", {}
+        ).get(str(eq.id), {})
+        correct_summary = ", ".join(
+            option_display_to_canonical.get(label, label) for label in canonical_correct
+        ) or None
+        answer_data = dict(r.answer_data or {})
+        canonical_to_display = {
+            canonical: display for display, canonical in option_display_to_canonical.items()
+        }
+        selected = answer_data.get("selected")
+        if isinstance(selected, list):
+            answer_data["selected"] = [canonical_to_display.get(str(label), label) for label in selected]
+        elif selected is not None:
+            answer_data["selected"] = canonical_to_display.get(str(selected), selected)
 
         response_details.append(
             {
@@ -1672,7 +1859,7 @@ async def get_student_exam_result(
                 "question_type": q.question_type,
                 "question_body": q.body,
                 "max_marks": eq.marks_override if eq.marks_override is not None else q.marks,
-                "answer_data": r.answer_data,
+                "answer_data": answer_data,
                 "marks_awarded": r.marks_awarded,
                 "is_auto_graded": r.is_auto_graded,
                 "feedback": r.feedback,
@@ -1753,8 +1940,6 @@ async def list_attempt_responses(
 # auto-submits the attempt rather than locking the candidate out. Faculty can
 # review the timeline and authorise a resumed attempt when a record is disputed.
 
-DEFAULT_MAX_VIOLATIONS = 5
-
 # Small tolerance so a candidate whose clock is a little ahead of the server
 # is not blocked from a legitimately-open exam window.
 START_WINDOW_EARLY_TOLERANCE_SECONDS = 60
@@ -1777,16 +1962,49 @@ PROCTORING_EVENT_TYPES = frozenset(
         "context_menu",
         "ip_change",
         "camera_snapshot",  # evidence frame; never a violation
-        "camera_off",  # the required camera stopped mid-attempt
+        "camera_off",  # the required camera stopped mid-attempt; review only
         # Camera fields a frame whose pixels never change (laptop lid down,
         # finger over the lens, a phone held in front of the camera). The
-        # candidate gets the four-second grace the policy allows before this
-        # is reported; it is evidence for the lecturer, never a verdict.
+        # candidate gets the authored grace before this is reported; it is an
+        # observation for the lecturer, never a verdict or allowance event.
         "camera_obstructed",
         # A phone/second device was detected in camera view. Same privacy
         # stance: observable signal for faculty review, never an automatic
         # cheating verdict.
         "second_device_detected",
+        # Face and head-direction monitoring, measured on the candidate's own
+        # device from the required camera picture (frontend/src/features/
+        # exams/face-monitoring.ts). All three are dwell-gated there: a glance,
+        # a blink or a frame drop is never an event, so the angle, direction and
+        # measured dwell travel with the event for the reviewer.
+        #
+        # Turning away from the paper is the cheating path the other signals
+        # cannot see — the camera is alive, the tab is focused, and the
+        # candidate is reading someone else's screen.
+        "looking_away",
+        # Nothing recognisable as a face for the disclosed dwell: the seat is
+        # empty, the candidate sat out of view, or the lens is blocked.
+        "face_not_visible",
+        # Two or more faces in the frame: someone else is at the desk.
+        "multiple_faces_detected",
+        # A hand held at or over the face for the disclosed dwell. This is the
+        # signal for reading off a phone held below the shot or a crib sheet
+        # raised to eye level: the face is present, the camera is alive, and the
+        # candidate is visibly occupied with something in their hand (ADR-029).
+        # Observation tier only — see HAND_AUDIO_OBSERVATION_EVENT_TYPES.
+        "hand_near_face",
+        # A second voice, sustained, picked up by the candidate's own device for
+        # the disclosed dwell: someone is reading answers out of frame. Detected
+        # from the audio track only, never recorded or transcribed here
+        # (ADR-029). Observation tier only.
+        "voice_detected",
+        # Talking-shaped mouth motion sustained while the candidate faces the
+        # paper: repeating an answer aloud for someone off-frame, or reading back
+        # what was dictated. This is measured as pixel motion in the mouth band
+        # that the forehead band does not share (frontend/src/features/exams/
+        # mouth-monitoring.ts) — never speech recognition, never audio, never a
+        # transcript. Observation tier only (ADR-030).
+        "mouth_movement_detected",
         # The candidate returned to the assessment within the 5-second grace
         # after leaving it. Disclosed, deliberate good behaviour — recorded
         # for the timeline but never a violation.
@@ -1809,10 +2027,41 @@ NON_VIOLATION_EVENT_TYPES = frozenset(
 
 # A modelled device observation (ADR-024). The detector runs in the candidate's
 # own browser and can be wrong — a phone-shaped case, a reflection, a poster on
-# the wall — so an observation is recorded as evidence and raises a faculty
-# review instead of consuming the allowance or failing anybody. A human decides;
-# the platform never converts a model prediction into a verdict.
+# the wall — so the client requires repeated agreeing scans before it reports
+# one, and the event names which scan produced it. Once reported it spends one
+# unit of the disclosed allowance like any other confirmed cue (D-31): the
+# candidate sees exactly which warning it was, and only a lecturer can reopen an
+# attempt that the allowance stopped.
 DEVICE_OBSERVATION_EVENT_TYPES = frozenset({"second_device_detected"})
+
+# Cues from the candidate's own camera and microphone. Each is confirmed on the
+# client (a sustained dwell, or several agreeing scans) before it is reported,
+# and each spends one unit of the allowance (D-31). The alternative this
+# replaced — recording them as review-only — meant a candidate could talk, hold
+# a phone to the lens and keep earphones in while the screen said nothing.
+HAND_AUDIO_OBSERVATION_EVENT_TYPES = frozenset({"hand_near_face", "voice_detected"})
+
+# Mouth motion and the device model are named separately so the audit trail and
+# the lecturer's timeline record which model produced the observation.
+MOUTH_OBSERVATION_EVENT_TYPES = frozenset({"mouth_movement_detected"})
+
+# Every signal derived from camera or microphone input. They are classified as
+# `camera_observation` for the timeline — a reviewer should know a model saw it —
+# but they are counted, not advisory: the warning ladder below treats them like
+# any browser signal, because a warning the candidate never sees is not a
+# warning.
+CAMERA_OBSERVATION_EVENT_TYPES = frozenset(
+    {
+        "camera_off",
+        "camera_obstructed",
+        "second_device_detected",
+        "looking_away",
+        "face_not_visible",
+        "multiple_faces_detected",
+        *HAND_AUDIO_OBSERVATION_EVENT_TYPES,
+        *MOUTH_OBSERVATION_EVENT_TYPES,
+    }
+)
 
 # A single frame is downscaled client-side; this ceiling only stops a hostile
 # client from using the proctoring trail as unbounded blob storage.
@@ -1827,10 +2076,33 @@ LOCKED_AT_FLAG_PREFIX = "locked_at:"
 FLAGGED_FOR_REVIEW_FLAG = "flagged_for_review"
 REVIEW_FLAGGED_AT_FLAG_PREFIX = "review_flagged_at:"
 
+# A candidate stopped at the tolerance may ask to continue. The request is a
+# flag, not a state of its own: the attempt stays locked and the paper stays
+# closed until a lecturer approves it, so asking can never be the same thing as
+# being allowed back in.
+RESUME_REQUESTED_FLAG = "resume_requested"
+RESUME_REQUESTED_AT_FLAG_PREFIX = "resume_requested_at:"
+
 # Repeated identical signals inside this window are one event, not many: a
 # flickering focus change or a doubled listener must not exhaust the candidate's
 # allowance and misrepresent the record.
 PROCTORING_EVENT_DEDUPE_SECONDS = 3
+
+# The disclosed gap between counted warnings (D-31). A signal that arrives inside
+# it is still written to the trail — the lecturer should see everything the
+# candidate did — but it cannot spend another warning. The clock starts when a
+# warning is counted, not when the candidate dismisses it, so a burst of one
+# sustained condition cannot walk the whole ladder before the first modal is read.
+PROCTORING_WARNING_COOLDOWN_SECONDS = DEFAULT_WARNING_COOLDOWN_SECONDS
+
+
+def _proctoring_event_category(event_type: str) -> str:
+    """Classify an event by source for candidate notices and the faculty timeline."""
+    if event_type == "camera_snapshot":
+        return "evidence"
+    if event_type in CAMERA_OBSERVATION_EVENT_TYPES:
+        return "camera_observation"
+    return "browser_signal"
 
 
 def _resolve_max_violations(exam: Exam) -> int:
@@ -1857,24 +2129,67 @@ def _resolve_warning_policy(exam: Exam) -> str:
 def _resolve_device_detection(exam: Exam) -> bool:
     """Whether this assessment runs on-device device detection (ADR-024).
 
-    Off unless the exam says otherwise: no assessment authored before the
-    feature existed starts analysing camera pixels because of an upgrade.
+    On unless the exam says otherwise (D-31): a phone held up to the camera is the
+    behaviour this feature exists to catch, and an assessment that never authored
+    the switch is not evidence that its invigilators wanted it off. A boolean the
+    author actually set always wins, including an explicit ``false``.
     """
-    return (exam.config or {}).get("device_detection_enabled") is True
+    return _resolve_monitor_flag(exam, "device_detection_enabled", DEFAULT_DEVICE_DETECTION)
+
+
+def _resolve_integrity_sensitivity(exam: Exam) -> str:
+    """The dwell tier this paper is run at (ADR-029).
+
+    ``standard`` is the behaviour every earlier assessment already had, so an
+    unrecognised or absent value changes nothing for a cohort mid-term.
+    """
+    raw = (exam.config or {}).get("integrity_sensitivity")
+    return raw if raw in INTEGRITY_SENSITIVITIES else DEFAULT_INTEGRITY_SENSITIVITY
+
+
+def _resolve_monitor_flag(exam: Exam, key: str, default: bool) -> bool:
+    """One per-exam camera cue switch, defaulting to the un-authored value."""
+    raw = (exam.config or {}).get(key)
+    return raw if isinstance(raw, bool) else default
+
+
+def _integrity_narrative(exam: Exam) -> dict[str, Any]:
+    """Everything the candidate surface must disclose before the paper starts.
+
+    One helper so the staff view, the candidate brief and the delivery payload
+    cannot drift apart on what an exam actually monitors (ADR-029).
+    """
+    sensitivity = _resolve_integrity_sensitivity(exam)
+    return {
+        "integrity_sensitivity": sensitivity,
+        "face_monitoring_enabled": _resolve_monitor_flag(
+            exam, "face_monitoring_enabled", DEFAULT_FACE_MONITORING
+        ),
+        "hand_monitoring_enabled": _resolve_monitor_flag(
+            exam, "hand_monitoring_enabled", DEFAULT_HAND_MONITORING
+        ),
+        "audio_monitoring_enabled": _resolve_monitor_flag(
+            exam, "audio_monitoring_enabled", DEFAULT_AUDIO_MONITORING
+        ),
+        "mouth_monitoring_enabled": _resolve_monitor_flag(
+            exam, "mouth_monitoring_enabled", DEFAULT_MOUTH_MONITORING
+        ),
+        "dwell_ms": integrity_dwell_ms(exam.config),
+    }
 
 
 def _evidence_retention_days() -> int:
-    """The institution's evidence-retention window, disclosed to candidates.
+    """The institution's finite evidence-retention window, disclosed to candidates.
 
     Read from settings rather than the exam: retention is an institutional policy
-    for personal data, not a per-paper choice. A negative value would be
-    nonsensical, so it is treated as "keep" (0) rather than purging on capture.
+    for personal data, not a per-paper choice. Non-positive or invalid values use
+    the finite default, never "keep forever".
     """
     try:
         days = int(get_settings().proctoring_evidence_retention_days)
     except (TypeError, ValueError):
         return DEFAULT_EVIDENCE_RETENTION_DAYS
-    return max(0, days)
+    return days if days > 0 else DEFAULT_EVIDENCE_RETENTION_DAYS
 
 
 def _resolve_obstruction_threshold(exam: Exam) -> int:
@@ -1894,10 +2209,10 @@ def _resolve_obstruction_threshold(exam: Exam) -> int:
     return raw
 
 
-# Only these events carry a stored image. The vocabulary lives next to the
-# purge so a future evidence-bearing event cannot be added without deciding how
-# long it is kept.
-PROCTORING_EVIDENCE_EVENT_TYPES = frozenset({"camera_snapshot"})
+# Any accepted event may carry a frame in `details.snapshot` (including
+# browser events captured while the camera is on). Expire by the event
+# vocabulary, then inspect the JSON payload, so retention cannot silently miss
+# images attached to a newly added event type.
 EVIDENCE_PURGED_AT_KEY = "evidence_purged_at"
 
 
@@ -1914,20 +2229,20 @@ async def purge_proctoring_evidence(
     still shows that a frame was captured, when, and when it was erased. Nothing
     else about the attempt is touched.
 
-    ``retention_days <= 0`` means \"keep frames\" and is a no-op — it must never
-    be read as \"delete everything before today\". The caller (the retention job)
-    owns the schedule; this function only does the work and audits it.
+    ``retention_days <= 0`` falls back to the finite institutional default;
+    captured images are never retained indefinitely because a zero-value config
+    must not disable a personal-data safeguard.
     """
     if retention_days <= 0:
-        return {"frames_erased": 0, "events_examined": 0}
+        retention_days = DEFAULT_EVIDENCE_RETENTION_DAYS
 
     purged_at = normalize_datetime(now or get_utc_now())
     cutoff = purged_at - timedelta(days=retention_days)
+    # Select all expired event rows, not a hard-coded subset of event names:
+    # reportEvent may attach a frame to any signal, and a future event type must
+    # inherit retention automatically rather than leave an image behind forever.
     result = await db.execute(
-        select(ProctoringEvent).where(
-            ProctoringEvent.timestamp < cutoff,
-            ProctoringEvent.event_type.in_(PROCTORING_EVIDENCE_EVENT_TYPES),
-        )
+        select(ProctoringEvent).where(ProctoringEvent.timestamp < cutoff)
     )
     events = list(result.scalars().all())
 
@@ -1960,46 +2275,58 @@ async def purge_proctoring_evidence(
     return {"frames_erased": frames_erased, "events_examined": len(events)}
 
 
-def _integrity_warning(policy: str, violations: int, max_violations: int) -> str:
-    """The disclosed warning ladder for a recorded event below the tolerance.
+def _camera_observation_message(event_type: str) -> str:
+    """One short sentence naming what a confirmed camera/mic cue actually saw.
 
-    The removal policy keeps its original single notice. The review policy walks
-    the ladder the product brief specifies — reminder, recovery guidance,
-    explanation, then a warning that further incidents may require review — so a
-    candidate always knows which consequence is still ahead of them, and whether
-    the fault is theirs to fix.
+    Kept separate from the ladder so the count and the observation read as one
+    notice ("Warning 3 of 7 — a phone-shaped object was visible to your camera"),
+    rather than the candidate having to work out which warning caused `3`.
+    """
+    if event_type in DEVICE_OBSERVATION_EVENT_TYPES:
+        return "A phone, earbuds or a watch was visible to your camera"
+    if event_type == "hand_near_face":
+        return "a hand was held at your face"
+    if event_type == "voice_detected":
+        return "your microphone heard sustained talking"
+    if event_type in MOUTH_OBSERVATION_EVENT_TYPES:
+        return "your camera saw sustained mouth movement"
+    if event_type == "camera_off":
+        return "your camera feed stopped"
+    if event_type == "camera_obstructed":
+        return "your camera picture was blocked or frozen"
+    if event_type == "looking_away":
+        return "your head was turned away from the paper"
+    if event_type == "face_not_visible":
+        return "your face was not visible to the camera"
+    return "more than one face was visible to your camera"
+
+
+def _integrity_warning(
+    policy: str,
+    violations: int,
+    max_violations: int,
+    observation_detail: str | None = None,
+) -> str:
+    """The disclosed warning ladder: which warning this is, and what is left.
+
+    Every warning states the count and the remaining allowance, because a
+    candidate cannot comply with a rule they cannot see being applied (D-31). A
+    camera cue adds the one clause that says what was observed, so the count is
+    never mysterious. The consequence sentence differs by policy: `remove` ends
+    the sitting at the threshold and needs a lecturer to reopen it, `review`
+    flags the attempt and lets the candidate keep going.
     """
     remaining = max(0, max_violations - violations)
-    if policy == WARNING_POLICY_REMOVE:
-        return (
-            "Assessment-integrity notice: an off-screen activity was recorded. "
-            f"{remaining} of {max_violations} allowance remaining before this session "
-            "is locked and your lecturer must authorise your return."
-        )
-    if violations <= 1:
-        return (
-            "Assessment-integrity reminder: something outside the paper was recorded — "
-            "for example leaving full screen or switching away. Please stay on this page "
-            "and keep the examination window in full screen."
-        )
-    if violations == 2:
-        return (
-            "Second assessment-integrity reminder: the same kind of activity was recorded "
-            "again. Close other tabs and applications, keep this window in full screen, and "
-            f"check that your camera is unobstructed. {remaining} recorded event(s) remain "
-            "before this attempt is flagged for review."
-        )
-    if violations == 3:
-        return (
-            "Recurring integrity event: this activity is written to your attempt's integrity "
-            "timeline, which your lecturer can review. If a technical fault is causing it, "
-            "tell your lecturer now. "
-            f"{remaining} recorded event(s) remain before this attempt is flagged for review."
-        )
+    detail = f" {observation_detail}." if observation_detail else ""
+    consequence = (
+        "the session will stop and only your lecturer can authorise you to continue"
+        if policy == WARNING_POLICY_REMOVE
+        else "this attempt will be flagged for your lecturer's review"
+    )
     return (
-        "Final integrity reminder: further recorded events will flag this attempt for your "
-        "lecturer's review. You are not removed and your answers stay saved, but the review "
-        "is recorded against this session."
+        f"Warning {violations} of {max_violations}.{detail} "
+        f"{remaining} warning(s) left before {consequence}. "
+        "If this was caused by a fault on your side, tell your lecturer now."
     )
 
 
@@ -2137,22 +2464,34 @@ async def record_proctoring_event(
         details = dict(details or {})
         details["client_timestamp"] = normalize_datetime(payload.timestamp).isoformat()
 
-    # Collapse duplicate signals: the same event repeated inside the debounce
-    # window is noise (a flickering focus change, a doubled listener), not a new
-    # violation, so it is acknowledged without consuming the allowance.
-    recent_res = await db.execute(
-        select(ProctoringEvent.timestamp)
-        .where(
-            ProctoringEvent.attempt_id == attempt.id,
-            ProctoringEvent.event_type == payload.event_type,
+    # Collapse duplicate browser signals: the same page event repeated inside the
+    # debounce window is noise (a flickering focus change, a doubled listener),
+    # not a new violation, so it is acknowledged without consuming the allowance.
+    #
+    # A confirmed camera cue is exempt. It has already paid its dwell on the
+    # candidate's own device, and the behaviour it describes — talking, holding a
+    # phone to the lens, a watch in shot — continues for as long as the candidate
+    # chooses; swallowing the second one would leave a candidate who ignores the
+    # first warning with a screen that has stopped reacting. The monitors reset
+    # after each report, so a cue arriving again is a new episode, not a repeat.
+    recent_res = (
+        await db.execute(
+            select(ProctoringEvent.timestamp)
+            .where(
+                ProctoringEvent.attempt_id == attempt.id,
+                ProctoringEvent.event_type == payload.event_type,
+            )
+            .order_by(desc(ProctoringEvent.timestamp))
+            .limit(1)
         )
-        .order_by(desc(ProctoringEvent.timestamp))
-        .limit(1)
+        if payload.event_type not in CAMERA_OBSERVATION_EVENT_TYPES
+        else None
     )
-    last_at = recent_res.scalar_one_or_none()
+    last_at = recent_res.scalar_one_or_none() if recent_res is not None else None
     if last_at is not None:
         since = (now - normalize_datetime(last_at)).total_seconds()
         if 0 <= since < PROCTORING_EVENT_DEDUPE_SECONDS:
+            category = _proctoring_event_category(payload.event_type)
             return ProctoringStatusResponse(
                 violations_count=attempt.proctor_violations_count,
                 max_violations=max_violations,
@@ -2161,6 +2500,7 @@ async def record_proctoring_event(
                 is_locked=False,
                 status=attempt.status,
                 warning=None,
+                event_category=category,
             )
 
     # Record the event in the append-only proctoring trail.
@@ -2173,9 +2513,8 @@ async def record_proctoring_event(
     )
     db.add(event)
 
-    # Evidence-only signals stop here: the frame is preserved for the
-    # instructor's review, but presence of a camera frame is not misconduct and
-    # must never count against the candidate's tolerance.
+    # Evidence-only signals stop here: a frame or an excused quick return does
+    # not consume the allowance and does not imply a review finding.
     if payload.event_type in NON_VIOLATION_EVENT_TYPES:
         await db.commit()
         return ProctoringStatusResponse(
@@ -2186,25 +2525,63 @@ async def record_proctoring_event(
             is_locked=False,
             status=attempt.status,
             warning=None,
+            event_category=_proctoring_event_category(payload.event_type),
         )
 
-    # A probable device is an observation, not misconduct (ADR-024): it raises
-    # the review flag and leaves both the allowance and the attempt state alone,
-    # so a false positive can never remove a candidate from a paper.
-    if payload.event_type in DEVICE_OBSERVATION_EVENT_TYPES:
+    # A counted warning opens a disclosed quiet period. Signals inside it are
+    # still evidence for the lecturer — and a camera cue still raises the review
+    # flag — but they cannot climb the warning ladder until it has elapsed. This
+    # is deliberately server-side: the client cannot shorten the gap, and a
+    # reload cannot be used to spend the allowance faster.
+    suppressed_by_cooldown = False
+    cooldown_remaining = 0
+    cooldown_seconds = PROCTORING_WARNING_COOLDOWN_SECONDS
+    if cooldown_seconds > 0 and attempt.last_warning_at is not None:
+        since_last_warning = (now - normalize_datetime(attempt.last_warning_at)).total_seconds()
+        if 0 <= since_last_warning < cooldown_seconds:
+            suppressed_by_cooldown = True
+            cooldown_remaining = max(1, int(cooldown_seconds - since_last_warning))
+            annotated = dict(details or {})
+            annotated["counted"] = False
+            annotated["suppressed_by_cooldown"] = True
+            annotated["cooldown_seconds_remaining"] = cooldown_remaining
+            details = annotated
+            event.details = annotated
+
+    # Camera and microphone cues are classified for the timeline, and raise the
+    # lecturer's review flag, but they are *counted*: the allowance below applies
+    # to them exactly as it does to a tab switch (D-31). The specific sentence is
+    # kept so the candidate is told what was seen, not just that something was.
+    observation_detail: str | None = None
+    if payload.event_type in CAMERA_OBSERVATION_EVENT_TYPES:
         await db.commit()
+        if payload.event_type in DEVICE_OBSERVATION_EVENT_TYPES:
+            action = "exam.attempt_flagged_device_observation"
+        elif payload.event_type in HAND_AUDIO_OBSERVATION_EVENT_TYPES | MOUTH_OBSERVATION_EVENT_TYPES:
+            action = f"exam.attempt_observation_{payload.event_type}"
+        else:
+            action = f"exam.attempt_camera_observation_{payload.event_type}"
         await _raise_review_flag(
             db,
             attempt,
             student_user=student_user,
-            action="exam.attempt_flagged_device_observation",
+            action=action,
             extra_data={
                 "event_type": payload.event_type,
                 "details": details,
+                "integrity_sensitivity": _resolve_integrity_sensitivity(attempt.exam),
                 "violations_count": attempt.proctor_violations_count,
                 "max_violations": max_violations,
             },
         )
+        observation_detail = _camera_observation_message(payload.event_type)
+
+    if suppressed_by_cooldown:
+        # The observation is recorded and (for a camera cue) already queued for
+        # review, but the candidate is not warned again: they have just been shown
+        # a warning, and a second modal inside the gap would make the disclosed
+        # allowance look like a burst rather than a ladder.
+        await db.commit()
         return ProctoringStatusResponse(
             violations_count=attempt.proctor_violations_count,
             max_violations=max_violations,
@@ -2212,12 +2589,16 @@ async def record_proctoring_event(
             auto_submitted=False,
             is_locked=False,
             status=attempt.status,
-            warning=(
-                "A possible prohibited device was visible to your camera. It is "
-                "recorded for your lecturer to review — no allowance was used and your "
-                "attempt continues. Put phones, earbuds and smartwatches out of view."
+            warning=None,
+            event_category=(
+                "camera_observation"
+                if payload.event_type in CAMERA_OBSERVATION_EVENT_TYPES
+                else "browser_signal"
             ),
         )
+
+    # Browser/page telemetry and confirmed camera cues share one ladder below.
+    # Both are observable signals, not automated findings of misconduct.
 
     # Increment atomically in SQL. Reading the counter into Python and writing it
     # back loses updates whenever signals arrive concurrently (several tabs, a
@@ -2226,7 +2607,13 @@ async def record_proctoring_event(
     await db.execute(
         update(ExamAttempt)
         .where(ExamAttempt.id == attempt.id)
-        .values(proctor_violations_count=ExamAttempt.proctor_violations_count + 1)
+        .values(
+            proctor_violations_count=ExamAttempt.proctor_violations_count + 1,
+            # Stamp the moment this warning was counted, not the moment the
+            # candidate acknowledged it: the gap is measured from the server's
+            # decision so closing the modal cannot shorten it.
+            last_warning_at=now,
+        )
     )
     await db.commit()
     await db.refresh(attempt)
@@ -2234,6 +2621,7 @@ async def record_proctoring_event(
 
     warning: str | None = None
     is_locked = False
+    is_camera_cue = payload.event_type in CAMERA_OBSERVATION_EVENT_TYPES
 
     if violations >= max_violations and policy == WARNING_POLICY_REMOVE:
         # Threshold reached under the removal policy (ADR-015): the candidate is
@@ -2251,9 +2639,9 @@ async def record_proctoring_event(
 
         is_locked = True
         warning = (
-            f"Removed from this examination: {violations} of {max_violations} "
-            "assessment-integrity violations have been recorded. Your answers are "
-            "saved. Contact your lecturer so they can reopen your attempt."
+            f"Examination stopped: warning {violations} of {max_violations} has been "
+            f"recorded{': ' + observation_detail if observation_detail else '.'}"
+            " Your answers are saved. Only your lecturer can authorise you to continue."
         )
         await record_audit_event(
             db=db,
@@ -2273,9 +2661,8 @@ async def record_proctoring_event(
         # Threshold reached under the review policy (ADR-023): the candidate is
         # not removed. The attempt is flagged for the lecturer's review and the
         # paper continues, because an automated signal is an observation for a
-        # human to weigh, never a verdict this platform delivers on its own.
-        # Only the *first* crossing writes the flag and the audit entry, so a
-        # long session cannot forge a trail of duplicate reviews.
+        # human to weigh. Only the *first* crossing writes the flag and the audit
+        # entry, so a long session cannot forge a trail of duplicate reviews.
         await _raise_review_flag(
             db,
             attempt,
@@ -2288,13 +2675,13 @@ async def record_proctoring_event(
             },
         )
         warning = (
-            f"Integrity review: {violations} recorded events have reached this attempt's "
-            "disclosed tolerance, so it is now flagged for your lecturer's review. You are "
-            "not removed and your answers keep saving — you may carry on. Tell your lecturer "
-            "now if a technical fault caused these events."
+            f"Warning {violations} of {max_violations} — the disclosed limit has been "
+            "reached, so this attempt is now flagged for your lecturer's review. "
+            "You are not removed and your answers keep saving."
+            + (f" {observation_detail}." if observation_detail else "")
         )
     else:
-        warning = _integrity_warning(policy, violations, max_violations)
+        warning = _integrity_warning(policy, violations, max_violations, observation_detail)
         await db.commit()
 
     return ProctoringStatusResponse(
@@ -2305,6 +2692,7 @@ async def record_proctoring_event(
         is_locked=is_locked,
         status=attempt.status,
         warning=warning,
+        event_category="camera_observation" if is_camera_cue else "browser_signal",
     )
 
 
@@ -2358,6 +2746,10 @@ async def unlock_exam_attempt(
             attempt.started_at = min(shifted, now)
 
     attempt.status = "in_progress"
+    # A re-entry is a fresh start on the ladder whichever reset the lecturer
+    # chose; carrying the old cooldown into the resumed attempt would deny the
+    # candidate their first warning for no disclosed reason.
+    attempt.last_warning_at = None
     if reset_violations:
         attempt.proctor_violations_count = 0
     else:
@@ -2369,9 +2761,10 @@ async def unlock_exam_attempt(
     flags = [
         f
         for f in previous_flags
-        if f not in (FLAGGED_FOR_REVIEW_FLAG, "max_violations_exceeded")
+        if f not in (FLAGGED_FOR_REVIEW_FLAG, "max_violations_exceeded", RESUME_REQUESTED_FLAG)
         and not str(f).startswith(LOCKED_AT_FLAG_PREFIX)
         and not str(f).startswith(REVIEW_FLAGGED_AT_FLAG_PREFIX)
+        and not str(f).startswith(RESUME_REQUESTED_AT_FLAG_PREFIX)
     ]
     flags.append(f"resumed_by_{faculty_user.email}")
     attempt.proctor_flags = flags
@@ -2401,6 +2794,75 @@ async def unlock_exam_attempt(
     return attempt
 
 
+async def request_attempt_resume(
+    db: AsyncSession,
+    exam_id: uuid.UUID,
+    student_user: User,
+) -> ExamAttempt:
+    """Ask the lecturer to reopen an attempt that the tolerance stopped.
+
+    The candidate cannot reopen their own paper: this writes a request flag and
+    returns the attempt **still locked**. Only ``unlock_exam_attempt`` — gated on
+    teaching scope — changes the status back to ``in_progress``, so asking can
+    never be mistaken for being allowed back in. A second request while one is
+    pending changes nothing, because pressing the button twice is impatience,
+    not new evidence.
+    """
+    # Addressed by exam, not by attempt id: the lock surface a candidate reaches
+    # after the last warning does not always know an attempt id yet, and the
+    # caller's own most recent locked attempt is unambiguous. Scoping by
+    # ``student_id`` is what makes that safe — another candidate's attempt can
+    # never be reached, and a missing one is a 404 rather than a 403 so the route
+    # cannot be used to discover attempt ids (anti-enumeration).
+    query = (
+        select(ExamAttempt)
+        .where(
+            ExamAttempt.exam_id == exam_id,
+            ExamAttempt.student_id == student_user.id,
+            ExamAttempt.status == "locked_violation",
+        )
+        .options(selectinload(ExamAttempt.exam), selectinload(ExamAttempt.student))
+        .order_by(desc(ExamAttempt.started_at))
+        .limit(1)
+    )
+    attempt = (await db.execute(query)).scalar_one_or_none()
+    if not attempt:
+        raise AppException(
+            status_code=409,
+            error_code="ATTEMPT_NOT_LOCKED",
+            message="This attempt is not locked, so there is nothing to reopen.",
+        )
+
+    requested, _ = resume_request_state(attempt)
+    if requested:
+        return attempt
+
+    now = get_utc_now()
+    flags = [f for f in attempt.proctor_flags if f != RESUME_REQUESTED_FLAG]
+    flags.append(RESUME_REQUESTED_FLAG)
+    flags.append(f"{RESUME_REQUESTED_AT_FLAG_PREFIX}{now.isoformat()}")
+    attempt.proctor_flags = flags
+    await db.commit()
+
+    await record_audit_event(
+        db=db,
+        user_id=student_user.id,
+        user_email=student_user.email,
+        action="exam.attempt_resume_requested",
+        resource_type="exam_attempt",
+        resource_id=str(attempt.id),
+        extra_data={
+            "violations_count": attempt.proctor_violations_count,
+            "max_violations": (
+                _resolve_max_violations(attempt.exam) if attempt.exam is not None else None
+            ),
+        },
+    )
+    await db.commit()
+    await db.refresh(attempt)
+    return attempt
+
+
 async def get_proctoring_timeline(
     db: AsyncSession,
     attempt_id: uuid.UUID,
@@ -2421,7 +2883,23 @@ async def get_proctoring_timeline(
     )
     res = await db.execute(query)
     events = list(res.scalars().all())
-    return [ProctoringEventResponse.model_validate(e) for e in events]
+    responses: list[ProctoringEventResponse] = []
+    for event in events:
+        details = dict(event.details or {})
+        purged_at = details.pop(EVIDENCE_PURGED_AT_KEY, None)
+        responses.append(
+            ProctoringEventResponse(
+                id=event.id,
+                attempt_id=event.attempt_id,
+                event_type=event.event_type,
+                timestamp=event.timestamp,
+                severity=event.severity,
+                details=details,
+                evidence_purged_at=purged_at,
+                event_category=_proctoring_event_category(event.event_type),
+            )
+        )
+    return responses
 
 
 async def export_exam_results_csv(

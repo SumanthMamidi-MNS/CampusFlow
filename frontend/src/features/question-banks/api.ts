@@ -11,7 +11,10 @@ import type {
 
 // ── Question Banks Queries & Mutations ──────────────────────────────────────
 
-export function useQuestionBanks(params?: { department_id?: string; course_id?: string }) {
+export function useQuestionBanks(
+  params?: { department_id?: string; course_id?: string },
+  options?: { enabled?: boolean }
+) {
   return useQuery({
     queryKey: ['question-banks', params],
     queryFn: async () => {
@@ -22,6 +25,9 @@ export function useQuestionBanks(params?: { department_id?: string; course_id?: 
       const res = await apiClient.get<ApiResponse<QuestionBank[]>>(`/question-banks${query}`);
       return res.data.data;
     },
+    // Callers that only need the list for a staff-only control pass `enabled`
+    // so a candidate's page never asks for a resource their role cannot read.
+    enabled: options?.enabled ?? true,
   });
 }
 

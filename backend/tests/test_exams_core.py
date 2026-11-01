@@ -138,6 +138,14 @@ async def test_examination_core_end_to_end_lifecycle(client, db_session):
     exam_id = exam_data["id"]
     assert exam_data["title"] == "Operating Systems Midterm 1"
 
+    # Enable candidate-level randomization for regression coverage: the variant
+    # must persist independently of order in the question bank.
+    from campusflow.domain.exams.models import Exam
+
+    exam_row = await db_session.get(Exam, uuid.UUID(str(exam_id)))
+    exam_row.config = {**(exam_row.config or {}), "shuffle_questions": True, "shuffle_options": True}
+    await db_session.commit()
+
     # 5. Add Questions to Exam
     add_q_resp = await client.post(
         f"/api/v1/exams/{exam_id}/questions",
@@ -174,6 +182,17 @@ async def test_examination_core_end_to_end_lifecycle(client, db_session):
         for opt in q_del["options"]:
             assert "is_correct" not in opt
 
+    # Candidate selects the displayed letter corresponding to the true canonical
+    # option. On resume the same question/option ordering and answer are restored.
+    delivered_by_id = {str(question["id"]): question for question in delivery_data["questions"]}
+    assert [question["id"] for question in delivery_data["questions"]] != [
+        question["id"] for question in add_q_resp.json()["data"]["questions"]
+    ]
+    shuffled_q1 = delivered_by_id[str(eq1_id)]
+    canonical_to_display = next(
+        option["label"] for option in shuffled_q1["options"] if option["body"] == "Round Robin"
+    )
+
     # 7. Student Auto-Saves Answers (Batch Save)
     save_resp = await client.put(
         f"/api/v1/exam-attempts/{attempt_id}/answers",
@@ -182,7 +201,7 @@ async def test_examination_core_end_to_end_lifecycle(client, db_session):
             "answers": [
                 {
                     "exam_question_id": str(eq1_id),
-                    "answer_data": {"selected": "A"},  # Correct Round Robin
+                    "answer_data": {"selected": canonical_to_display},  # Correct Round Robin in displayed order
                     "time_spent_seconds": 45,
                     "flagged_for_review": False,
                 },
@@ -203,6 +222,16 @@ async def test_examination_core_end_to_end_lifecycle(client, db_session):
     )
     assert save_resp.status_code == 200
     assert save_resp.json()["data"]["status"] == "saved"
+
+    resumed = await client.post(
+        f"/api/v1/exams/{exam_id}/start",
+        headers=student_headers,
+        json={"browser_fingerprint": "fp_test_12345"},
+    )
+    assert resumed.status_code == 200, resumed.text
+    resumed_data = resumed.json()["data"]
+    assert [q["id"] for q in resumed_data["questions"]] == [q["id"] for q in delivery_data["questions"]]
+    assert resumed_data["saved_answers"][str(eq1_id)]["answer_data"]["selected"] == canonical_to_display
 
     # 8. Student Submits Exam
     submit_resp = await client.post(

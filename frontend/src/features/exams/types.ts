@@ -63,6 +63,12 @@ export interface Exam {
     obstruction_threshold_seconds?: number;
     max_attempts?: number;
     allowed_cidrs?: string[];
+    /** Dwell tier the paper is run at (ADR-029). */
+    integrity_sensitivity?: ExamIntegritySensitivity;
+    face_monitoring_enabled?: boolean;
+    hand_monitoring_enabled?: boolean;
+    audio_monitoring_enabled?: boolean;
+    mouth_monitoring_enabled?: boolean;
   };
   status: ExamStatus;
   created_by_id?: string | null;
@@ -78,15 +84,78 @@ export interface Exam {
 export interface ExamStudentConfig {
   proctoring_enabled: boolean;
   max_attempts: number;
+  /**
+   * The disclosed integrity allowance: how many recorded events this attempt
+   * tolerates. Shown before the paper starts, not after the first event.
+   */
+  max_violations?: number;
+  /**
+   * Disclosed gap after a counted warning. Signals inside it are recorded but
+   * cannot spend another warning, so a burst cannot empty the allowance.
+   */
+  warning_cooldown_seconds?: number;
   /** Disclosed to the candidate before the paper starts. */
   warning_policy?: ExamWarningPolicy;
   /** On-device camera analysis for prohibited electronics (ADR-024). */
   device_detection_enabled?: boolean;
+  /** The dwell tier this paper runs at, and the camera cues it switches on. */
+  integrity_sensitivity?: ExamIntegritySensitivity;
+  face_monitoring_enabled?: boolean;
+  hand_monitoring_enabled?: boolean;
+  audio_monitoring_enabled?: boolean;
+  mouth_monitoring_enabled?: boolean;
+  /** Every threshold the candidate is held to, in milliseconds. */
+  dwell_ms?: ExamDwellMs;
   /** Seconds of continuous camera obstruction before it is reported (D-12). */
   obstruction_threshold_seconds?: number;
   /** Days after which captured evidence images are erased (D-2); 0 = kept. */
   evidence_retention_days?: number;
+  /** The demonstration paper; its stopped screen restarts the demo in one click. */
+  demo?: boolean;
 }
+
+/**
+ * How tightly a paper's camera cues are enforced (ADR-029).
+ *
+ * `standard` is what every assessment authored before the switch existed was
+ * already held to, so an upgrade never silently tightens a cohort's paper.
+ */
+export type ExamIntegritySensitivity = 'relaxed' | 'standard' | 'strict';
+
+/** The dwell values a tier implies, as the server discloses them. */
+export interface ExamDwellMs {
+  /** Head turned past the yaw threshold. */
+  turn?: number;
+  /** No face visible. */
+  absence?: number;
+  /** A hand held at the face. */
+  hand?: number;
+  /** A second voice sustained in the room. */
+  voice?: number;
+  /** Talking-shaped mouth movement while facing the paper. */
+  mouth?: number;
+}
+
+/**
+ * The dwell values every tier implies, mirrored from the server's
+ * `INTEGRITY_DWELL_MS` so the authoring form can show an author what each tier
+ * will mean in seconds before they pick it.
+ *
+ * Presentation only: the value the candidate is held to is always the one the
+ * server sends with the delivery, never this table.
+ */
+export const INTEGRITY_DWELL_MS: Record<ExamIntegritySensitivity, Required<ExamDwellMs>> = {
+  relaxed: { turn: 3_000, absence: 6_000, hand: 6_000, voice: 6_000, mouth: 4_500 },
+  standard: { turn: 2_000, absence: 3_000, hand: 3_500, voice: 3_500, mouth: 3_000 },
+  strict: { turn: 1_200, absence: 2_000, hand: 2_000, voice: 2_000, mouth: 2_000 },
+};
+
+/** The name each tier is called on screen, in one place. */
+export const SENSITIVITY_LABEL: Record<ExamIntegritySensitivity, string> = {
+  relaxed: 'Relaxed',
+  standard: 'Standard',
+  strict: 'Strict',
+};
 
 /**
  * Examination metadata as returned to a candidate (and to the exam list for
@@ -192,10 +261,24 @@ export interface ExamDelivery {
   /** Server-authoritative integrity configuration for this attempt. */
   proctoring_enabled: boolean;
   warning_policy?: ExamWarningPolicy;
+  /** Integrity counters as the server holds them, so a resume shows the truth. */
+  violations_count?: number;
+  max_violations?: number;
+  /** Server-owned gap between counted warnings, echoed for the brief copy. */
+  warning_cooldown_seconds?: number;
   device_detection_enabled?: boolean;
+  /** The dwell tier this attempt runs at, and the monitoring it switches on. */
+  integrity_sensitivity?: ExamIntegritySensitivity;
+  face_monitoring_enabled?: boolean;
+  hand_monitoring_enabled?: boolean;
+  audio_monitoring_enabled?: boolean;
+  mouth_monitoring_enabled?: boolean;
+  dwell_ms?: ExamDwellMs;
   obstruction_threshold_seconds?: number;
   /** Days after which captured evidence images are erased (D-2); 0 = kept. */
   evidence_retention_days?: number;
+  /** True for the demo paper, whose stopped screen offers a fresh sitting. */
+  demo?: boolean;
   questions: ExamDeliveryQuestion[];
   saved_answers: Record<string, { answer_data: any; flagged_for_review: boolean }>;
 }
@@ -224,6 +307,12 @@ export interface ExamAttemptSummary {
   flagged_for_review?: boolean;
   /** When the tolerance was crossed and the review flag was stamped. */
   review_flagged_at?: string | null;
+  /**
+   * The candidate was stopped at the tolerance and has asked to continue. The
+   * attempt is still locked; approving it is what reopens the paper.
+   */
+  resume_requested?: boolean;
+  resume_requested_at?: string | null;
 }
 
 export interface ExamResponseDetail {
@@ -267,6 +356,10 @@ export interface ProctoringEvent {
   timestamp: string;
   severity: string;
   details?: Record<string, any> | null;
+  /** Server-classified source; camera/model observations are never violations. */
+  event_category?: 'browser_signal' | 'camera_observation' | 'evidence';
+  /** Present after the retained image has been erased. */
+  evidence_purged_at?: string | null;
 }
 
 export interface ProctoringStatus {
@@ -278,6 +371,7 @@ export interface ProctoringStatus {
   status?: string;
   /** The policy in force for this attempt, as the server enforces it. */
   warning_policy?: ExamWarningPolicy;
+  event_category?: 'browser_signal' | 'camera_observation' | 'evidence' | null;
 }
 
 export interface UnlockAttemptPayload {

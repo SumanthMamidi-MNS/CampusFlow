@@ -326,15 +326,39 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
     # (whether their camera picture is analysed on their own device — ADR-024),
     # `obstruction_threshold_seconds` (the grace they actually have before
     # stillness is reported — D-12) and `evidence_retention_days` (when the
-    # stills of them are erased — D-2). None of these reveal grading internals.
+    # stills of them are erased — D-2). `max_violations` is the disclosed
+    # allowance, so the candidate can answer "how many warnings do I have"
+    # before the first event instead of after it. None of these reveal grading
+    # internals.
+    #
+    # The integrity profile adds the disclosures the candidate is entitled to
+    # know rather than internals: which dwell tier the paper runs at
+    # (`integrity_sensitivity`), which camera cues are switched on
+    # (`face_monitoring_enabled`, `hand_monitoring_enabled`,
+    # `audio_monitoring_enabled` — ADR-029; `mouth_monitoring_enabled` —
+    # ADR-030), and the seconds each one implies (`dwell_ms`). A candidate must
+    # be able to answer "am I being listened to, and for how long can I look
+    # away" before the paper starts. None of them carries a grading rule, an
+    # answer key or another candidate's data. `demo` only says this is the
+    # demonstration paper, so its stopped screen can offer a fresh sitting
+    # instead of a lecturer reopen (ADR-033).
     assert set(listed[0]["config"].keys()) == {
         "proctoring_enabled",
         "max_attempts",
         "show_results_immediately",
         "warning_policy",
+        "max_violations",
+        "warning_cooldown_seconds",
         "device_detection_enabled",
         "obstruction_threshold_seconds",
         "evidence_retention_days",
+        "integrity_sensitivity",
+        "face_monitoring_enabled",
+        "hand_monitoring_enabled",
+        "audio_monitoring_enabled",
+        "mouth_monitoring_enabled",
+        "dwell_ms",
+        "demo",
     }
 
     brief_res = await client.get(f"/api/v1/exams/{exam_a.id}/public", headers=student_a_h)
