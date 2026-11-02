@@ -699,7 +699,7 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
 
 ### ADR-030: Mouth Movement Is Measured as Pixel Motion, Never as Speech
 
-* **Status:** Accepted (2026-10-30)
+* **Status:** Accepted (2026-10-30); since ADR-039 the cue is opt-in and off by default.
 * **Context:** Every other camera cue in the engine is a position measurement — where the head is,
   where a hand is, whether a device is in the shot. Speaking moves none of them: the head stays
   forward, the hands stay clear, the phone stays out of frame, and with `audio_monitoring_enabled`
@@ -784,7 +784,8 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
 * **Decision:** Every confirmed cue spends exactly one of the disclosed warnings, on the same ladder
   as a tab switch, and the seventh stops the paper under the `remove` policy. `hand_monitoring_enabled`,
   `mouth_monitoring_enabled` and `device_detection_enabled` default on, `audio_monitoring_enabled`
-  stays on, and an author may still switch any one of them off. The server no longer applies its
+  stays on, and an author may still switch any one of them off. (The mouth default was reversed in
+  ADR-039 after real-sitting false positives; it is now opt-in.) The server no longer applies its
   duplicate-signal debounce to confirmed camera cues: the client has already paid the dwell and
   resets its episode after reporting, so a repeat is a new episode, not a doubled listener. Browser
   signals keep the debounce.
@@ -818,10 +819,12 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
   answer or a grading internal, and the exact-key assertion on the candidate config still guards the
   projection.
 
-### ADR-034: Ten Warnings, and a Ten-Second Gap Between Counted Ones
+### ADR-034: Ten Warnings, and a Cooldown Between Counted Ones
 
 * **Status:** Accepted (2026-11-01) — raises the default allowance from ADR-032's seven and adds the
-  cooldown; the ADR-032 decision that every confirmed cue spends a warning is unchanged.
+  cooldown; the ADR-032 decision that every confirmed cue spends a warning is unchanged. The gap
+  value is **5 s** since ADR-039, and the clock starts at the acknowledgement since ADR-037; the
+  mechanism described below is otherwise current.
 * **Context:** The warning ladder was correct but too fast in practice. A single sustained
   condition — a face out of frame, a phone left in shot, a stalled monitor — could emit several
   events in a second, so a candidate could reach the stop before reading the first warning, and the
@@ -844,3 +847,133 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
   disabled by an autouse seam and one dedicated test turns it back on, so the rest of the suite
   still exercises the ladder without sleeping. Existing exams keep an explicitly authored value
   until the seeder repairs the demo rows; the default for an exam that authored nothing is now ten.
+
+### ADR-035: The Warning Gate Lives in the UPDATE, Not in a Read
+
+* **Status:** Accepted (2026-11-01) — hardens ADR-034.
+* **Context:** The cooldown was correct one request at a time, and still let two warnings through
+  when two detectors reported in the same second. Both requests loaded the attempt with
+  `last_warning_at = NULL`, both passed the Python `if`, and both incremented. A face leaving the
+  frame and an obstruction (or a tab switch and a blur) could therefore produce "Warning 1 of 10"
+  followed immediately by "Warning 2 of 10" — exactly the burst the ten-second gap exists to
+  prevent.
+* **Decision:** The gap is part of the conditional `UPDATE` that increments the counter:
+  `WHERE id = :id AND (last_warning_at IS NULL OR last_warning_at <= now - gap)`. The database's
+  row lock serialises concurrent requests, and the loser sees the winner's timestamp after the
+  lock is released, so it updates zero rows and is recorded as suppressed. The comparison uses
+  epoch seconds (`strftime('%s', …)` on SQLite, `extract('epoch', …)` on PostgreSQL) because SQLite
+  returns naive datetimes and a Python datetime comparison would fail across the two engines.
+  `synchronize_session=False` keeps the ORM from trying the same comparison in Python.
+* **Consequences:** Simultaneous signals now produce one counted warning and one suppressed trail
+  entry; the candidate sees one modal, and the count in the header cannot jump by two. A timestamp
+  that is ahead of the server also closes the gate rather than opening it, so a clock skew cannot
+  be used to spend the ladder faster. The loser refreshes the attempt before narrating the
+  remaining seconds, so the trail carries the real gap rather than a stale one.
+
+### ADR-036: One Blocking Overlay at a Time, and Full-Screen on the Begin Gesture
+
+* **Status:** Accepted (2026-11-01).
+* **Context:** The warning modal and the observation gate were independent layers. When a camera
+  cue both counted a warning and confirmed the cover condition, the warning rendered at `z-60`
+  over the cover gate at `z-57`; the candidate saw two full-page panels at once, one behind the
+  other. The full-screen request was made after the start request and the camera handshake, by
+  which point the browser had forgotten the click that authorised it, so the paper often opened in
+  a normal tab. A full-screen overlay also could not appear while the cover gate was up.
+* **Decision:** The candidate surface renders exactly one blocking overlay, in priority order:
+  the unacknowledged warning, the observation gate, then the full-screen gate. A warning's
+  acknowledge click is also the trusted gesture used to request full-screen again. Full-screen is
+  requested synchronously at the top of `beginAttempt`, before any `await`, and the gate is only
+  rendered where `document.documentElement.requestFullscreen` exists; where it does not, the
+  header carries the keyboard instruction. The full-screen gate is not suppressed by the
+  "you left full-screen" banner any more, so the paper is covered rather than merely annotated.
+* **Consequences:** The candidate can only be looking at one explanation at a time, and the
+  warning count cannot be read against a second, contradictory panel. Browsers still refuse
+  full-screen without a gesture; a refusal is not fatal and leaves the candidate on the gate with
+  the F11 / Control+Command+F instruction. The browser's native full-screen mode (F11) is not
+  visible to the Fullscreen API; ADR-038 supersedes the part of this decision that treated an
+  F11 candidate as out of full-screen.
+
+### ADR-037: The Gap Starts When the Warning Is Acknowledged
+
+* **Status:** Accepted (2026-11-02) — supersedes the clock point of ADR-034.
+* **Context:** A timestamp taken at the instant of the count is enough to stop a burst, but it is
+  not the rule the candidate is promised. The modal can take ten seconds or more to read, and any
+  timestamp-only gate has already expired by the time they dismiss it. Worse, a candidate who was
+  reading the modal saw the header count move underneath it when a second detector reported. The
+  promise on the paper is a short gap after the acknowledgement (now 5 s, ADR-039), so the server
+  has to measure from the acknowledgement, not from the count.
+* **Decision:** A counted warning stores `last_warning_at` and leaves `warning_acknowledged_at`
+  null. `_warning_is_pending` treats the attempt as gated while the acknowledgement is null or
+  older than the count. In that state the conditional `UPDATE` cannot increment at all. Pressing
+  "I understand — continue the paper" calls `POST /exam-attempts/{id}/acknowledge-warning` (gate:
+  `exams:take`, owner-only, conditional update), which stamps `warning_acknowledged_at`; only then
+  does the disclosed gap begin, measured as `warning_acknowledged_at <= now - gap`. A duplicate or
+  retried acknowledgement is a no-op, and a candidate who never acknowledges keeps the paper
+  covered and the ladder paused rather than being counted again. Delivery and every event response
+  carry `warning_pending`, so a reload restores the same modal instead of stranding the sitting.
+  Migration `c8d9e0f1a2b3` backfills attempts that predate the concept by acknowledging their
+  existing warning at its count time.
+* **Consequences:** The count cannot move while the candidate is reading a warning, and a burst of
+  camera cues arrives as one modal plus recorded, suppressed evidence. The browser still has to be
+  the one that shows the modal and sends the click; the server's guarantee is that nothing counts
+  before that write commits. A dropped acknowledgement leaves the modal on screen with a retry, so
+  the client cannot silently dismiss a warning the server has not received. Signals during the
+  still-unacknowledged or cooling windows stay in the lecturer's timeline with `counted: false`.
+
+### ADR-038: Full-Screen Means the Display Is Filled, and Loss Must Persist
+
+* **Status:** Accepted (2026-11-02) — supersedes the F11 point of ADR-036.
+* **Context:** Two false alarms shared one root cause: judging full-screen from
+  `document.fullscreenElement` alone. A candidate in the browser's own F11 mode is visibly
+  full-screen, yet the API element is null, so the gate told them to return to a screen they were
+  already on. Separately, Chrome clears the API element one frame before its own full-screen mode
+  becomes visible to the viewport, so moving between the two routes flashed the gate and recorded a
+  `fullscreen_exit` the candidate never performed. Finally, a request in flight after Begin could
+  be judged before it settled, and an environment that cannot enter the API at all (an iframe
+  without `allow="fullscreen"`, a Permissions-Policy) was shown a gate whose button could never
+  work.
+* **Decision:** `frontend/src/features/exams/fullscreen.ts` owns the reading. `api` is
+  `document.fullscreenElement`; `browser` is the standalone display mode or a viewport that fills
+  the reported screen within a 16 px edge tolerance (a maximised window still has browser chrome, so
+  it is not full-screen); `active = api || browser`. The gate is armed only after the entry request
+  has resolved or rejected, and a loss is acted on only after it has persisted for 900 ms — the
+  same window decides the cover and the `fullscreen_exit` event, so one transition cannot produce a
+  false panel or a false warning. Loss is not reported while the document is hidden, because the
+  tab-switch handler already recorded that departure. `canRequestFullscreen()` also requires
+  `document.fullscreenEnabled !== false`; where the API is unavailable the paper keeps the keyboard
+  instruction banner rather than a gate that cannot be cleared.
+* **Consequences:** F11 and the in-page control are both full-screen, and switching between them is
+  not an event. A genuinely lost full-screen still covers the paper after under a second and still
+  records one `fullscreen_exit`. The viewport test can theoretically mistake an exactly
+  screen-sized non-fullscreen window for full-screen; that is accepted because it fails open (no
+  false accusation) and ordinary maximised windows are far outside the tolerance. The detector is
+  pinned by `scripts/check-fullscreen.ts` (11 checks), because the headless preview cannot grant
+  the Fullscreen API.
+
+### ADR-039: Five-Second Gap, and the Mouth Cue Retired to Opt-In
+
+* **Status:** Accepted (2026-11-02) — supersedes the gap value in ADR-034/ADR-037 and the default
+  in ADR-032/ADR-030.
+* **Context:** Two reports from a real sitting. First, the disclosed gap was longer than the
+  product needed: the acknowledgement already guarantees the candidate has seen the warning, so
+  ten further seconds added waiting without adding protection. Second, `mouth_movement_detected`
+  fired with "sustained mouth movement" while the candidate was not talking. The cue is a pixel
+  heuristic: the mouth band is differenced against a forehead band, and a jaw shift, a cheek
+  movement, a low-light sensor or video compression on a still face can clear both the 0.012
+  motion floor and the 1.35 dominance factor. It spends a warning like every confirmed cue
+  (ADR-032), so a false positive removes a warning the candidate never earned — worse than a cue
+  that does not exist, especially on a paper being handed to an external examiner.
+* **Decision:** `DEFAULT_WARNING_COOLDOWN_SECONDS` is **5**. The clock still starts at the
+  server-confirmed acknowledgement (ADR-037); nothing else about the gate changes. Mouth-movement
+  monitoring becomes **opt-in**: `DEFAULT_MOUTH_MONITORING` is `False`, the demo sets it off, the
+  authoring form offers it off with an "experimental" label, and the landing page no longer lists
+  it among the cues a default paper runs. The engine, the event type, the dwell tier and the
+  harness stay: an author who explicitly enables it still gets the measurement and the warning, and
+  the published rules still apply. The supported talking signal is the voice check (ADR-029),
+  which requires a loud, vowel-shaped, fluctuating and sustained sound and records no audio.
+* **Consequences:** The demo and every new paper can no longer produce the false "mouth movement"
+  warning that prompted the report; existing papers that explicitly enabled it keep it until their
+  author turns it off. The authored brief only mentions mouth movement when the paper enables it.
+  The five-second gap means a second warning can arrive five seconds after the acknowledgement,
+  never before it; signals inside the window are still recorded with `counted: false`. The
+  regression tests pin both the disclosure value and the opt-in default.

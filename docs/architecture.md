@@ -268,12 +268,13 @@ locally and only the resulting event, with the evidence frame that the trail alr
 reported observations, is sent.
 - **Per-exam integrity profile (ADR-029):** `integrity_sensitivity` (`relaxed`, `standard`,
 `strict`) sets and discloses `dwell_ms` for face turn/absence, hand-near-face and sustained voice.
-`face_monitoring_enabled`, `hand_monitoring_enabled`, `audio_monitoring_enabled` and
-`mouth_monitoring_enabled` all default on and are individually configurable (ADR-032). Hand
-proximity, sustained voice and talking-shaped mouth motion are confirmed on-device and spend one
-warning each; audio is analysed in memory from the existing camera stream, with no recording or
-transcript. When a signal is disabled or its model/permission is unavailable, the candidate sees
-that it is unavailable rather than an assurance that it ran.
+`face_monitoring_enabled`, `hand_monitoring_enabled` and `audio_monitoring_enabled` default on;
+`mouth_monitoring_enabled` is opt-in and off by default (ADR-039), because the mouth-motion
+heuristic false-fired on still faces and spent warnings the candidate had not earned. Hand
+proximity and sustained voice are confirmed on-device and spend one warning each; audio is
+analysed in memory from the existing camera stream, with no recording or transcript. When a
+signal is disabled or its model/permission is unavailable, the candidate sees that it is
+unavailable rather than an assurance that it ran.
   - **Retention and erasure (ADR-026):** frames are personal data and do not live forever.
     `PROCTORING_EVIDENCE_RETENTION_DAYS` (institution setting, default 90; non-positive values
     fall back to that default so erasure cannot be switched off) drives a
@@ -307,7 +308,8 @@ that it is unavailable rather than an assurance that it ran.
 - **Recorded telemetry (client-reported, server-stored; the server fixes the vocabulary in
 `PROCTORING_EVENT_TYPES`):**
   - Tab switching (`visibilitychange`) and window blur.
-  - Fullscreen exit.
+  - Fullscreen exit, decided after the loss has persisted for 900 ms so that moving between the
+    Fullscreen API and the browser's own F11 mode is not recorded as leaving (ADR-038).
   - Clipboard activity (copy/paste) and right-click context menu.
   - Developer-tools shortcut attempts.
   - Returning inside the five-second grace (`quick_tab_return`: recorded, never charged) and
@@ -319,21 +321,39 @@ already recorded, so a resumed attempt shows the true `n / m` from its first fra
 (the default) reaching the threshold locks the attempt until a lecturer reopens it; under
 `review` the attempt is flagged once for faculty review and the candidate keeps working.
 Either way an automated signal never decides guilt.
-- **Warning cooldown (ADR-034):** a counted warning stamps `ExamAttempt.last_warning_at`. Until
-`PROCTORING_WARNING_COOLDOWN_SECONDS` (10) has elapsed, a further signal is written to the
-trail — annotated `suppressed_by_cooldown` with the seconds remaining — and still raises the
-review flag if it is a camera cue, but cannot increment `proctor_violations_count`. The
-gap is enforced in `record_proctoring_event`, so a client burst or a page reload cannot spend
-the ladder faster than the candidate can read it. The cooldown is disclosed in the candidate
+- **Warning cooldown (ADR-034, ADR-035, ADR-037):** a counted warning stamps
+`ExamAttempt.last_warning_at` and clears `warning_acknowledged_at`. While the acknowledgement
+is missing (or older than the count), the warning is *pending*: the paper is covered, and the
+conditional `UPDATE` in `record_proctoring_event` cannot increment at all. The candidate's
+acknowledgement (`POST /exam-attempts/{id}/acknowledge-warning`, `exams:take`, owner-only)
+stamps `warning_acknowledged_at`; only then does `PROCTORING_WARNING_COOLDOWN_SECONDS` (5)
+start. A further signal inside that window is written to the trail — annotated
+`suppressed_by_cooldown`, `counted: false`, with the seconds remaining — and still raises the
+review flag if it is a camera cue, but cannot increment `proctor_violations_count`. The gate is
+part of the conditional `UPDATE`
+(`last_warning_at IS NULL OR (warning_acknowledged_at IS NOT NULL AND warning_ack_epoch <= now - gap)`),
+not a Python read followed by a write: simultaneous detector reports serialise on the row, so
+only one can count. The comparison is done in epoch seconds because SQLite drops timezone
+information while PostgreSQL keeps it. Delivery and every event response carry
+`warning_pending`, so a reload restores the modal; the cooldown is disclosed in the candidate
 brief (`warning_cooldown_seconds`) and cleared when a lecturer reopens the attempt.
 - **Candidate messaging:** The attempt header carries a persistent integrity chip with the
 recorded count and allowance (`n / m`), a recorded event raises a red banner with the
 server's wording, and the cover gate names the condition that is hiding the paper. The copy
 is instructional, not accusatory; there is no strobe effect and no permanent lockout screen.
+Exactly one blocking overlay is rendered at a time — warning, camera gate, then full-screen
+gate — so two detectors cannot stack two dialogs in front of the candidate. The paper asks
+for full-screen on the Begin click (the trusted gesture browsers require) and again when a
+warning is acknowledged; if a browser refuses, the full-screen gate gives the keyboard
+command instead of leaving the paper in a normal tab. Full-screen is read from both routes
+(API element or a viewport that fills the display, so F11 counts), a loss must persist for
+900 ms before it is acted on, and a document that cannot enter the API is given the keyboard
+instruction rather than an impossible gate (ADR-038).
 - **Faculty review:** The exam workspace exposes a per-attempt integrity timeline with
 severities, timestamps and the measurement behind each camera/model observation — which device the
 model named, its confidence, whether the read came from a wrist close-up or the weaker whole-frame
-path, how long a cue was held, and how much more the mouth band moved than the forehead band. Only
+path, how long a cue was held, and — for a paper that opted into the experimental mouth cue — how
+much more the mouth band moved than the forehead band. Only
 known keys are rendered, so an evidence frame or a raw bbox is never dumped into the panel.
 - **Faculty-authorised resumption:** `POST /exams/{id}/attempts/{attempt_id}/unlock`
 (requires `exams:grade`, always audited) reopens an attempt when a recorded event is
@@ -342,8 +362,9 @@ disputed. Students can never unlock their own attempt; the endpoint rejects them
 synced to the server on a 30-second cadence and on navigation, so a resumed attempt keeps
 all previously entered responses.
 
-> **Superseded:** the camera/gaze/strobe/lockdown model described in earlier revisions of
-> this document was removed in Phase 13. See ADR-013.
+> **History:** the camera/gaze/strobe/lockdown model described in earlier revisions of this
+> document was removed in Phase 13 (ADR-013). The disclosed on-device checks above are the
+> current model (ADR-024–032), not a return to it.
 
 ### Sandboxed Code Execution (Programming Environment)
 Student source code is **never** executed inside the API process. Execution is delegated to

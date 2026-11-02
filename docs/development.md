@@ -290,7 +290,7 @@ shipped modules with synthetic landmarks, synthetic analyser frames and a synthe
 
 ```bash
 cd frontend
-node scripts/check-hand-voice-monitoring.ts   # Node 22.6+; 42 checks
+node scripts/check-hand-voice-monitoring.ts   # Node 22.6+; 44 checks
 ```
 
 What it pins, and why each one matters:
@@ -305,9 +305,11 @@ measurement the geometry cannot make.
 evasion); an unmeasurable frame neither reports nor clears an open episode; a throttled tab
 cannot leap the dwell in one gap; escalation keeps a minute-long episode to a handful of events;
 and a real return closes the episode so the next one reports fresh.
-* **Voice analysis.** In-band versus out-of-band energy; a level under the floor rejected; a
-**steady loud hum rejected for lack of modulation** (the false positive that would make a generic
-sound alarm worthless); and syllabic speech detected at the same average level as the hum.
+* **Voice analysis.** In-band versus out-of-band energy; a level under the floor rejected; ordinary
+room chatter rejected by the raised loudness floor while a raised voice clears it; a **steady loud
+hum rejected for lack of modulation** (the false positive that would make a generic sound alarm
+worthless); and syllabic speech detected at the same average level as the hum. The floor is RMS
+0.025 (about −32 dBFS), with a 3.5 s dwell, so a chair, a fan or a single cough is never a signal.
 * **Voice decisions.** A cough is not sustained enough to report; sustained speech reports; a
 pause between sentences does not defeat the dwell; a long conversation stays a few events rather
 than thousands; a suspended tab cannot leap the dwell; and a quiet room ends the episode.
@@ -318,10 +320,29 @@ analyser path uses. Neither harness claims detection *accuracy*: they prove the 
 they should and stay silent when they should, which is what can be verified without a person in
 front of a camera.
 
+### Verifying full-screen detection (ADR-038)
+
+Full-screen cannot be granted to the headless preview (it needs a trusted gesture and a real
+display), so the state reader is driven directly with synthetic `screen`, viewport and API values:
+
+```bash
+cd frontend
+node scripts/check-fullscreen.ts   # Node 22.6+; 11 checks
+```
+
+It pins the cases that caused the false alarm: F11 (a viewport that fills the display) is
+full-screen even with `document.fullscreenElement` null; an API full-screen is still full-screen;
+a maximised window with browser chrome and an ordinary window are not; a viewport that merely fills
+a smaller window is not filling a larger display; a scrollbar's few missing pixels still count; an
+installed full-screen display mode counts; and `document.fullscreenEnabled === false` (an iframe or
+Permissions-Policy) reports the API as unavailable rather than promising a gate that cannot clear.
+
 ### Verifying mouth movement, the wrist crop and device labels (ADR-030/031)
 
 Mouth movement is measured from pixels, and the watch read depends on a crop built from hand
-landmarks, so neither can be exercised in CI either. Everything that decides *whether an event is
+landmarks, so neither can be exercised in CI either. Mouth-movement monitoring itself is opt-in
+and off by default (ADR-039) after real-sitting false positives; the module and this harness stay,
+and an author who enables it explicitly is still held to the tested rules. Everything that decides *whether an event is
 recorded* is pure and is driven by
 [check-integrity-signals.ts](frontend/scripts/check-integrity-signals.ts):
 

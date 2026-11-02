@@ -111,9 +111,10 @@ export function ExamsList() {
     useState<ExamIntegritySensitivity>('standard');
   const [handMonitoring, setHandMonitoring] = useState(false);
   const [audioMonitoring, setAudioMonitoring] = useState(false);
-  // On with the camera, like face monitoring: it measures motion in the frames
-  // the face check already reads and records no audio at all.
-  const [mouthMonitoring, setMouthMonitoring] = useState(true);
+  // Off by default (ADR-039): the pixel heuristic false-fired on still faces and
+  // spent warnings the candidate had not earned. It stays available as an
+  // explicit experiment; the voice check is the supported talking signal.
+  const [mouthMonitoring, setMouthMonitoring] = useState(false);
   const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [showResultsImmediately, setShowResultsImmediately] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -870,9 +871,10 @@ export function ExamsList() {
                     <span>
                       Second-voice check (microphone)
                       <span className="mt-0.5 block text-[11px] text-slate-500">
-                        Sees a second person who never enters the frame. Only loudness and shape
-                        are measured on the candidate’s own device — <strong>no audio is
-                        recorded, stored or transmitted</strong>. Review evidence only.
+                      Sees a second person who never enters the frame. Only loudness and shape
+                      are measured on the candidate’s own device — <strong>no audio is
+                      recorded, stored or transmitted</strong>. A confirmed cue raises a
+                      warning the candidate sees and is recorded for your review.
                       </span>
                     </span>
                   </label>
@@ -884,12 +886,13 @@ export function ExamsList() {
                       className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
                     />
                     <span>
-                      Talking / mouth-movement check
+                      Talking / mouth-movement check (experimental — off by default)
                       <span className="mt-0.5 block text-[11px] text-slate-500">
-                        Notices a candidate reading an answer aloud to someone off-camera, or
-                        repeating a dictation, while their face stays forward. It measures
-                        movement in the camera picture — <strong>no speech is recognised and no
-                        audio is captured</strong>. Review evidence only, never a violation.
+                        An opt-in experiment: it measures movement in the camera picture —
+                        <strong>no speech is recognised and no audio is captured</strong>. The
+                        pixel heuristic can mistake a jaw, a cheek or camera noise for speech,
+                        and a misfire spends a warning, so it is off in the demo and for new
+                        papers. The second-voice check is the supported talking signal.
                       </span>
                     </span>
                   </label>
@@ -909,9 +912,9 @@ export function ExamsList() {
                       className="w-24 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
                     />
                     <p className="mt-1 text-[11px] text-slate-500">
-                      Between 1 and 20 events. After a warning is counted, the next cannot be
-                      counted for 10 seconds; signals inside that gap are recorded without
-                      spending another warning.
+                      Between 1 and 20 events. After the candidate acknowledges a warning,
+                      the next cannot be counted for 5 seconds; signals inside that gap are
+                      recorded without spending another warning.
                     </p>
                   </div>
                   <div>

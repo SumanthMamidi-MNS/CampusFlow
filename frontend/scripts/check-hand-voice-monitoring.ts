@@ -104,9 +104,19 @@ function audioFrame(amplitude: number, voiceOnly = true, sampleRate = 44_100): A
   return { timeDomain, frequency, sampleRate };
 }
 
-/** Frames that alternate loud/quiet, i.e. syllables rather than a steady hum. */
+/**
+ * Frames that alternate between a stressed and an unstressed syllable, i.e.
+ * speech rather than a steady hum.
+ *
+ * The softer half stays above the loudness floor on purpose. Real speech is not
+ * a full-scale tone followed by silence; it is a voiced syllable followed by a
+ * quieter voiced one. A true silent gap is modelled separately by
+ * `audioFrame(0.0003)`. The old 15% valley fell under the new loud-voice floor,
+ * which made this synthetic speaker alternate between "heard" and "not there"
+ * rather than sound like a person talking.
+ */
 function syllable(level: number, index: number): AudioLevelFrame {
-  return audioFrame(index % 2 === 0 ? level : level * 0.15);
+  return audioFrame(index % 2 === 0 ? level * 1.4 : level * 0.9);
 }
 
 // ── Hand geometry ───────────────────────────────────────────────────────────
@@ -276,6 +286,23 @@ console.log('\nvoice signal analysis');
 
   const quiet = frameIsVoice(audioFrame(0.0008), [], { rms: VOICE_RMS_THRESHOLD, band: 0.45, modulation: 0 });
   check('a level under the floor is not voice', quiet.voice === false);
+
+  // The loudness floor is deliberately above ordinary room noise: a desk
+  // conversation in the next room, a chair and a fan must not be treated as a
+  // second person speaking into the paper. A raised voice must still pass.
+  const chatter = frameIsVoice(audioFrame(0.03), [], {
+    rms: VOICE_RMS_THRESHOLD,
+    band: 0.45,
+    modulation: 0,
+  });
+  check('ordinary room noise stays below the voice floor', chatter.voice === false);
+
+  const raised = frameIsVoice(audioFrame(0.05), [], {
+    rms: VOICE_RMS_THRESHOLD,
+    band: 0.45,
+    modulation: 0,
+  });
+  check('a raised voice clears the loudness floor', raised.voice === true);
 
   // A steady loud hum: enough amplitude, right band, but no modulation.
   const steadyHistory: number[] = [];

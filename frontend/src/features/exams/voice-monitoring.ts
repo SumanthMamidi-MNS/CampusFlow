@@ -52,12 +52,15 @@ export interface AudioLevelFrame {
 /**
  * RMS amplitude a frame must reach before it is considered at all.
  *
- * -48 dBFS: a mouse click, a keyboard and a page turn all sit below this, and
- * quiet speech at desk distance sits above it. The value is a starting point
- * measured against the author's own laptop microphone; it is one exported
- * constant so it can be recalibrated without touching the rules.
+ * 0.025 is about -32 dBFS, deliberately in the *loud* half of a laptop
+ * microphone's range: a keyboard, a page turn, a fan, a chair and ordinary
+ * room chatter all sit below it, while speech aimed at the paper — the second
+ * person the check exists to notice — sits above it. The earlier -48 dBFS floor
+ * caught the room rather than a voice, which is why a quiet desk could produce
+ * warnings. This is one exported constant so it can be recalibrated against a
+ * different microphone without touching the dwell or band rules.
  */
-export const VOICE_RMS_THRESHOLD = 0.004;
+export const VOICE_RMS_THRESHOLD = 0.025;
 
 /**
  * Share of in-band energy that must sit in the vowel band (roughly 120–1000 Hz).

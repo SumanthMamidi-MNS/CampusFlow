@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import desc, func, or_, select, update
+from sqlalchemy import Float, and_, cast, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -71,6 +71,7 @@ from campusflow.domain.exams.schemas import (
     ProctoringEventResponse,
     ProctoringStatusResponse,
     StudentExamResultResponse,
+    WarningAcknowledgementResponse,
     integrity_dwell_ms,
 )
 from campusflow.domain.exams.schemas import (
@@ -1266,6 +1267,7 @@ async def start_or_resume_attempt(
         violations_count=attempt.proctor_violations_count,
         max_violations=_resolve_max_violations(exam),
         warning_cooldown_seconds=PROCTORING_WARNING_COOLDOWN_SECONDS,
+        warning_pending=_warning_is_pending(attempt),
         device_detection_enabled=_resolve_device_detection(exam),
         obstruction_threshold_seconds=_resolve_obstruction_threshold(exam),
         evidence_retention_days=_evidence_retention_days(),
@@ -1962,11 +1964,11 @@ PROCTORING_EVENT_TYPES = frozenset(
         "context_menu",
         "ip_change",
         "camera_snapshot",  # evidence frame; never a violation
-        "camera_off",  # the required camera stopped mid-attempt; review only
+        "camera_off",  # the required camera stopped mid-attempt; a counted cue
         # Camera fields a frame whose pixels never change (laptop lid down,
         # finger over the lens, a phone held in front of the camera). The
-        # candidate gets the authored grace before this is reported; it is an
-        # observation for the lecturer, never a verdict or allowance event.
+        # candidate gets the authored grace before this is reported; it spends
+        # one warning and raises the review flag, but is never a verdict.
         "camera_obstructed",
         # A phone/second device was detected in camera view. Same privacy
         # stance: observable signal for faculty review, never an automatic
@@ -1990,20 +1992,20 @@ PROCTORING_EVENT_TYPES = frozenset(
         # A hand held at or over the face for the disclosed dwell. This is the
         # signal for reading off a phone held below the shot or a crib sheet
         # raised to eye level: the face is present, the camera is alive, and the
-        # candidate is visibly occupied with something in their hand (ADR-029).
-        # Observation tier only — see HAND_AUDIO_OBSERVATION_EVENT_TYPES.
+        # candidate is visibly occupied with something in their hand (ADR-032).
+        # Counted on the warning ladder; see HAND_AUDIO_OBSERVATION_EVENT_TYPES.
         "hand_near_face",
         # A second voice, sustained, picked up by the candidate's own device for
         # the disclosed dwell: someone is reading answers out of frame. Detected
         # from the audio track only, never recorded or transcribed here
-        # (ADR-029). Observation tier only.
+        # (ADR-032). Counted on the warning ladder.
         "voice_detected",
         # Talking-shaped mouth motion sustained while the candidate faces the
         # paper: repeating an answer aloud for someone off-frame, or reading back
         # what was dictated. This is measured as pixel motion in the mouth band
         # that the forehead band does not share (frontend/src/features/exams/
         # mouth-monitoring.ts) — never speech recognition, never audio, never a
-        # transcript. Observation tier only (ADR-030).
+        # transcript. Counted on the warning ladder (ADR-032).
         "mouth_movement_detected",
         # The candidate returned to the assessment within the 5-second grace
         # after leaving it. Disclosed, deliberate good behaviour — recorded
@@ -2090,9 +2092,9 @@ PROCTORING_EVENT_DEDUPE_SECONDS = 3
 
 # The disclosed gap between counted warnings (D-31). A signal that arrives inside
 # it is still written to the trail — the lecturer should see everything the
-# candidate did — but it cannot spend another warning. The clock starts when a
-# warning is counted, not when the candidate dismisses it, so a burst of one
-# sustained condition cannot walk the whole ladder before the first modal is read.
+# candidate did — but it cannot spend another warning. The clock starts when the
+# candidate acknowledges the warning, not when it is counted, so a burst of one
+# sustained condition cannot walk the ladder while the first modal is unread.
 PROCTORING_WARNING_COOLDOWN_SECONDS = DEFAULT_WARNING_COOLDOWN_SECONDS
 
 
@@ -2103,6 +2105,24 @@ def _proctoring_event_category(event_type: str) -> str:
     if event_type in CAMERA_OBSERVATION_EVENT_TYPES:
         return "camera_observation"
     return "browser_signal"
+
+
+def _warning_is_pending(attempt: ExamAttempt) -> bool:
+    """True while the warning on screen still awaits the candidate's acknowledgement.
+
+    A warning is pending from the moment it is counted until the candidate
+    acknowledges it. The ladder does not move in between — that is what makes
+    the disclosed gap start after the modal is dismissed rather than while the
+    candidate is still reading it. ``last_warning_at`` alone cannot answer this:
+    it is also non-null on an acknowledged warning that is simply cooling down.
+    """
+    if attempt.last_warning_at is None:
+        return False
+    if attempt.warning_acknowledged_at is None:
+        return True
+    return normalize_datetime(attempt.warning_acknowledged_at) < normalize_datetime(
+        attempt.last_warning_at
+    )
 
 
 def _resolve_max_violations(exam: Exam) -> int:
@@ -2417,6 +2437,7 @@ async def record_proctoring_event(
                 auto_submitted=False,
                 is_locked=True,
                 status="locked_violation",
+                warning_pending=False,
                 warning=(
                     "This session is locked after reaching the assessment-integrity "
                     "tolerance. Your answers are saved. Contact your lecturer so they "
@@ -2430,6 +2451,7 @@ async def record_proctoring_event(
             auto_submitted=True,
             is_locked=False,
             status=attempt.status,
+            warning_pending=False,
             warning="This assessment attempt has already concluded.",
         )
 
@@ -2500,6 +2522,7 @@ async def record_proctoring_event(
                 is_locked=False,
                 status=attempt.status,
                 warning=None,
+                warning_pending=_warning_is_pending(attempt),
                 event_category=category,
             )
 
@@ -2525,36 +2548,115 @@ async def record_proctoring_event(
             is_locked=False,
             status=attempt.status,
             warning=None,
+            warning_pending=_warning_is_pending(attempt),
             event_category=_proctoring_event_category(payload.event_type),
         )
 
-    # A counted warning opens a disclosed quiet period. Signals inside it are
-    # still evidence for the lecturer — and a camera cue still raises the review
-    # flag — but they cannot climb the warning ladder until it has elapsed. This
-    # is deliberately server-side: the client cannot shorten the gap, and a
-    # reload cannot be used to spend the allowance faster.
-    suppressed_by_cooldown = False
-    cooldown_remaining = 0
+    # A counted warning pauses the ladder twice over. It stays paused until the
+    # candidate acknowledges the modal, so a second modal can never replace the
+    # one they are reading; once acknowledged, it stays paused for the disclosed
+    # gap. Signals in either window are still evidence for the lecturer — and a
+    # camera cue still raises the review flag — but they cannot climb the ladder.
+    #
+    # The gate is part of the UPDATE, not a read followed by a write. Two
+    # detectors often report in the same second (a face out of frame and an
+    # obstruction, a tab switch and a blur); both requests used to load the
+    # same `last_warning_at = NULL`, both pass a Python `if`, and the candidate
+    # saw two warnings inside the gap. The row lock serialises those updates,
+    # and the WHERE clause re-evaluates after the first one commits, so exactly
+    # one request can move the counter and the other is recorded as suppressed.
     cooldown_seconds = PROCTORING_WARNING_COOLDOWN_SECONDS
-    if cooldown_seconds > 0 and attempt.last_warning_at is not None:
-        since_last_warning = (now - normalize_datetime(attempt.last_warning_at)).total_seconds()
-        if 0 <= since_last_warning < cooldown_seconds:
-            suppressed_by_cooldown = True
-            cooldown_remaining = max(1, int(cooldown_seconds - since_last_warning))
-            annotated = dict(details or {})
-            annotated["counted"] = False
-            annotated["suppressed_by_cooldown"] = True
-            annotated["cooldown_seconds_remaining"] = cooldown_remaining
-            details = annotated
-            event.details = annotated
+    counted = False
+    if cooldown_seconds > 0:
+        # Compare epoch seconds, not datetimes: SQLite drops tzinfo while
+        # PostgreSQL keeps it, and evaluating `datetime <= datetime` in Python
+        # would fail on one of them. The database does the comparison in the
+        # UPDATE itself, under its row lock.
+        bind = db.get_bind()
+        dialect = getattr(bind, "dialect", None)
+        if getattr(dialect, "name", "") == "sqlite":
+            warning_ack_epoch = cast(
+                func.strftime("%s", ExamAttempt.warning_acknowledged_at), Float
+            )
+        else:
+            warning_ack_epoch = cast(
+                func.extract("epoch", ExamAttempt.warning_acknowledged_at), Float
+            )
+        cutoff_epoch = now.timestamp() - cooldown_seconds
+        result = await db.execute(
+            update(ExamAttempt)
+            .where(
+                ExamAttempt.id == attempt.id,
+                or_(
+                    ExamAttempt.last_warning_at.is_(None),
+                    and_(
+                        ExamAttempt.warning_acknowledged_at.is_not(None),
+                        warning_ack_epoch <= cutoff_epoch,
+                    ),
+                ),
+            )
+            .values(
+                proctor_violations_count=ExamAttempt.proctor_violations_count + 1,
+                # The modal is now the current warning and has not been
+                # acknowledged. The UPDATE clears any previous acknowledgement
+                # atomically with the count, so a stale read cannot reopen the
+                # ladder before the candidate has seen this warning.
+                last_warning_at=now,
+                warning_acknowledged_at=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        counted = (result.rowcount or 0) > 0
+    else:
+        # The test seam switches the shipped gap and the acknowledgement gate
+        # off together: the suite's rapid sequences are about the ladder's
+        # shape, not about a candidate reading a modal. The increment still has
+        # to be atomic for the same reason, and the warning is recorded as
+        # already acknowledged so `warning_pending` stays false in those tests.
+        await db.execute(
+            update(ExamAttempt)
+            .where(ExamAttempt.id == attempt.id)
+            .values(
+                proctor_violations_count=ExamAttempt.proctor_violations_count + 1,
+                last_warning_at=now,
+                warning_acknowledged_at=now,
+            )
+        )
+        counted = True
+
+    if not counted:
+        # A concurrent request may have been the one that won the row; refresh
+        # before narrating the gap so the trail carries the real remaining time.
+        await db.refresh(attempt)
+        pending = _warning_is_pending(attempt)
+        cooldown_remaining = cooldown_seconds
+        if not pending and attempt.last_warning_at is not None:
+            acknowledged_at = attempt.warning_acknowledged_at or attempt.last_warning_at
+            since_acknowledged = (
+                now - normalize_datetime(acknowledged_at)
+            ).total_seconds()
+            cooldown_remaining = max(
+                1, math.ceil(cooldown_seconds - since_acknowledged)
+            )
+        annotated = dict(details or {})
+        annotated["counted"] = False
+        annotated["suppressed_by_cooldown"] = True
+        annotated["warning_pending"] = pending
+        if pending:
+            annotated["suppressed_until_acknowledged"] = True
+        annotated["cooldown_seconds_remaining"] = cooldown_remaining
+        details = annotated
+        event.details = annotated
+
+    await db.commit()
+    await db.refresh(attempt)
 
     # Camera and microphone cues are classified for the timeline, and raise the
     # lecturer's review flag, but they are *counted*: the allowance below applies
-    # to them exactly as it does to a tab switch (D-31). The specific sentence is
-    # kept so the candidate is told what was seen, not just that something was.
+    # to them exactly as it does to a tab switch (ADR-032). A suppressed cue is
+    # still evidence and still raises the flag; it just does not spend a warning.
     observation_detail: str | None = None
     if payload.event_type in CAMERA_OBSERVATION_EVENT_TYPES:
-        await db.commit()
         if payload.event_type in DEVICE_OBSERVATION_EVENT_TYPES:
             action = "exam.attempt_flagged_device_observation"
         elif payload.event_type in HAND_AUDIO_OBSERVATION_EVENT_TYPES | MOUTH_OBSERVATION_EVENT_TYPES:
@@ -2576,12 +2678,11 @@ async def record_proctoring_event(
         )
         observation_detail = _camera_observation_message(payload.event_type)
 
-    if suppressed_by_cooldown:
+    if not counted:
         # The observation is recorded and (for a camera cue) already queued for
         # review, but the candidate is not warned again: they have just been shown
         # a warning, and a second modal inside the gap would make the disclosed
         # allowance look like a burst rather than a ladder.
-        await db.commit()
         return ProctoringStatusResponse(
             violations_count=attempt.proctor_violations_count,
             max_violations=max_violations,
@@ -2590,6 +2691,7 @@ async def record_proctoring_event(
             is_locked=False,
             status=attempt.status,
             warning=None,
+            warning_pending=_warning_is_pending(attempt),
             event_category=(
                 "camera_observation"
                 if payload.event_type in CAMERA_OBSERVATION_EVENT_TYPES
@@ -2600,23 +2702,6 @@ async def record_proctoring_event(
     # Browser/page telemetry and confirmed camera cues share one ladder below.
     # Both are observable signals, not automated findings of misconduct.
 
-    # Increment atomically in SQL. Reading the counter into Python and writing it
-    # back loses updates whenever signals arrive concurrently (several tabs, a
-    # burst of focus changes), which would both let a candidate slip past the
-    # allowance and leave faculty with a count the trail does not support.
-    await db.execute(
-        update(ExamAttempt)
-        .where(ExamAttempt.id == attempt.id)
-        .values(
-            proctor_violations_count=ExamAttempt.proctor_violations_count + 1,
-            # Stamp the moment this warning was counted, not the moment the
-            # candidate acknowledged it: the gap is measured from the server's
-            # decision so closing the modal cannot shorten it.
-            last_warning_at=now,
-        )
-    )
-    await db.commit()
-    await db.refresh(attempt)
     violations = attempt.proctor_violations_count
 
     warning: str | None = None
@@ -2692,7 +2777,62 @@ async def record_proctoring_event(
         is_locked=is_locked,
         status=attempt.status,
         warning=warning,
+        warning_pending=_warning_is_pending(attempt),
         event_category="camera_observation" if is_camera_cue else "browser_signal",
+    )
+
+
+async def acknowledge_warning(
+    db: AsyncSession,
+    attempt_id: uuid.UUID,
+    student_user: User,
+) -> WarningAcknowledgementResponse:
+    """Acknowledge the warning currently on screen and start its disclosed gap.
+
+    Only the candidate who owns the attempt may acknowledge it, and only while
+    the attempt is running. The write is conditional on the warning still being
+    unacknowledged, so a duplicated click (or a retry after a dropped response)
+    is a no-op rather than a way to keep resetting the clock. A candidate who
+    never acknowledges simply keeps the ladder paused: the paper stays covered
+    by the modal and the timer keeps running, which is the honest consequence of
+    not dismissing a warning they were shown.
+    """
+    res = await db.execute(
+        select(ExamAttempt)
+        .where(ExamAttempt.id == attempt_id)
+        .options(selectinload(ExamAttempt.exam))
+    )
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise NotFoundError("Exam attempt not found")
+    if attempt.student_id != student_user.id:
+        raise AuthorizationError("Unauthorized attempt access.")
+
+    max_violations = _resolve_max_violations(attempt.exam)
+    if attempt.status == "in_progress" and _warning_is_pending(attempt):
+        now = get_utc_now()
+        await db.execute(
+            update(ExamAttempt)
+            .where(
+                ExamAttempt.id == attempt.id,
+                ExamAttempt.student_id == student_user.id,
+                ExamAttempt.last_warning_at.is_not(None),
+                or_(
+                    ExamAttempt.warning_acknowledged_at.is_(None),
+                    ExamAttempt.warning_acknowledged_at < ExamAttempt.last_warning_at,
+                ),
+            )
+            .values(warning_acknowledged_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        await db.refresh(attempt)
+
+    return WarningAcknowledgementResponse(
+        warning_pending=_warning_is_pending(attempt),
+        violations_count=attempt.proctor_violations_count,
+        max_violations=max_violations,
+        warning_cooldown_seconds=PROCTORING_WARNING_COOLDOWN_SECONDS,
     )
 
 
@@ -2750,6 +2890,7 @@ async def unlock_exam_attempt(
     # chose; carrying the old cooldown into the resumed attempt would deny the
     # candidate their first warning for no disclosed reason.
     attempt.last_warning_at = None
+    attempt.warning_acknowledged_at = None
     if reset_violations:
         attempt.proctor_violations_count = 0
     else:

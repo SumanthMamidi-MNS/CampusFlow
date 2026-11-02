@@ -32,13 +32,14 @@ MAX_MAX_VIOLATIONS = 20
 # value; it may not author silence.
 DEFAULT_MAX_VIOLATIONS = 10
 
-# Consecutive warnings cannot arrive back to back. After a warning is counted,
-# the next one is at least this many seconds away: the signal in between is still
-# recorded for review, but it does not spend another warning. Without the gap, a
-# single sustained condition — a face held out of frame, a phone on the desk, a
-# stall in the camera loop — can fire the whole allowance in a second and stop a
-# paper before the candidate has read the first warning.
-DEFAULT_WARNING_COOLDOWN_SECONDS = 10
+# Consecutive warnings cannot arrive back to back. Once the candidate has
+# acknowledged a warning, the next one is at least this many seconds away: the
+# signal in between is still recorded for review, but it does not spend another
+# warning. Without the gap, a single sustained condition — a face held out of
+# frame, a phone on the desk, a stall in the camera loop — can fire the whole
+# allowance in a second and stop a paper before the candidate has read the first
+# warning.
+DEFAULT_WARNING_COOLDOWN_SECONDS = 5
 
 # Browser-side device detection is authored per exam and **on** by default: a
 # phone, earbuds or a watch in shot is the first thing an invigilator notices,
@@ -98,14 +99,17 @@ DEFAULT_HAND_MONITORING = True
 # speaking an answer aloud, is exactly the behaviour the last silence failed to
 # catch. The analyser measures band energy; it never records or transmits audio.
 DEFAULT_AUDIO_MONITORING = True
-# Mouth-movement monitoring rides on the same camera frames the face check
-# already analyses and records nothing new, so it defaults on with the camera the
-# way face monitoring does. It measures *motion*, never speech: no audio is
-# captured for it, no transcript exists, and the event carries two motion numbers
-# and a duration. It spends the allowance like every other confirmed cue (D-31);
-# the candidate sees which count it was and can explain a cough to their
-# lecturer, who controls whether the attempt continues.
-DEFAULT_MOUTH_MONITORING = True
+# Mouth-movement monitoring is off by default and opt-in per paper (ADR-039).
+# The idea is sound — talking is the one cheat that keeps the head, hands, phone
+# and microphone silent — but the shipped pixel heuristic could not tell a mouth
+# from a jaw, a cheek or compression noise on a still face, and candidates who
+# were not talking saw \"sustained mouth movement\" warnings. A cue that spends
+# the allowance on a false positive is worse than a cue that does not exist, so
+# the engine and the authoring switch stay, the default is off, and the voice
+# check remains the supported talking signal. It measures *motion*, never speech:
+# no audio is captured for it, no transcript exists, and the event carries two
+# motion numbers and a duration.
+DEFAULT_MOUTH_MONITORING = False
 
 
 def integrity_dwell_ms(config: dict[str, Any] | None) -> dict[str, int]:
@@ -497,6 +501,10 @@ class ExamDeliveryResponse(BaseModel):
     max_violations: int = DEFAULT_MAX_VIOLATIONS
     # Seconds after a counted warning before another can be counted (D-31).
     warning_cooldown_seconds: int = DEFAULT_WARNING_COOLDOWN_SECONDS
+    # True when a warning was counted but the candidate has not acknowledged it
+    # yet. The delivery surface restores the modal on a resume instead of
+    # letting the candidate work past a warning they never saw.
+    warning_pending: bool = False
     device_detection_enabled: bool = DEFAULT_DEVICE_DETECTION
     # The integrity tier this attempt is run at and the dwell values it implies.
     # Echoed on delivery so the monitoring loop enforces exactly what the
@@ -612,12 +620,25 @@ class ProctoringStatusResponse(BaseModel):
     is_locked: bool = False
     status: str = "in_progress"
     warning: str | None = None
+    # A counted warning that still awaits acknowledgement. Sent with every
+    # response so a lost first response can be recovered from the next one
+    # instead of leaving the ladder silently paused.
+    warning_pending: bool = False
     # The policy in force for this attempt, so the candidate surface renders the
     # consequence the server will actually apply rather than a hard-coded one.
     warning_policy: str = DEFAULT_WARNING_POLICY
     # Explicit signal category lets the candidate distinguish browser telemetry,
     # model observations, and passive evidence without guessing from a message.
     event_category: str | None = None
+
+
+class WarningAcknowledgementResponse(BaseModel):
+    """The result of a candidate acknowledging the warning on screen."""
+
+    warning_pending: bool
+    violations_count: int
+    max_violations: int
+    warning_cooldown_seconds: int = DEFAULT_WARNING_COOLDOWN_SECONDS
 
 
 class UnlockAttemptRequest(BaseModel):

@@ -20,6 +20,7 @@ import {
 import { useAuth } from '@/core/auth/hooks';
 import { PageLoading } from '@/core/components/ui/loading';
 import {
+  useAcknowledgeWarning,
   useExamBrief,
   useRecordProctoringEvent,
   useRequestExamResume,
@@ -34,6 +35,7 @@ import type {
   SaveAnswerPayload,
 } from '../types';
 import { startDemoSitting } from '../demo';
+import { canRequestFullscreen, readFullscreenState, type FullscreenState } from '../fullscreen';
 import {
   DEVICE_MODEL_CONFIG,
   DeviceConfirmationTracker,
@@ -215,7 +217,23 @@ export function ExamDelivery() {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Both the Fullscreen API and the browser's own F11 mode count. Checking only
+  // `document.fullscreenElement` told candidates who were visibly full-screen
+  // to return to full-screen — the false alarm this state exists to remove.
+  const [fullscreen, setFullscreen] = useState<FullscreenState>(() => readFullscreenState());
+  // Entering full-screen is a transition, not an instant. The gate waits for it
+  // to settle so the Begin click does not flash a barrier for one frame.
+  const [fullscreenGateReady, setFullscreenGateReady] = useState(false);
+  // Leaving is also a transition. Chrome clears `document.fullscreenElement`
+  // one frame before the viewport has resized when the candidate moves from the
+  // Fullscreen API to F11, so judging the loss on the event itself accused a
+  // candidate who was still full-screen. The gate appears only after the state
+  // has stayed non-full-screen for this long.
+  const [fullscreenLost, setFullscreenLost] = useState(false);
+  // A blocking full-screen gate is only honest where the API exists. Without
+  // it the candidate gets the keyboard instruction instead of a button that
+  // can never succeed.
+  const [fullscreenSupported] = useState(() => canRequestFullscreen());
 
   // ── Camera gate: the assessment does not start without a live camera ─────
   const [cameraState, setCameraState] = useState<
@@ -299,6 +317,7 @@ export function ExamDelivery() {
   // reached its dwell covers the paper. A single dropped frame must never hide
   // the question, and glancing back for a moment must not dismiss the cover.
   const [faceGate, setFaceGate] = useState<FaceCondition | null>(null);
+  const [ackError, setAckError] = useState('');
   const [alarm, setAlarm] = useState<{
     message: string;
     category: 'browser_signal' | 'camera_observation' | 'evidence';
@@ -342,8 +361,11 @@ export function ExamDelivery() {
   // Mouth movement rides on the camera frames the face check already reads and
   // records nothing new, so its un-authored default is on with the camera rather
   // than off like hand/audio. `!== false` is the server's own default, mirrored.
+  // Opt-in (ADR-039). A missing value means off, mirroring the server default:
+  // the pixel heuristic false-fired on still faces, so an older paper cannot be
+  // silently pulled back into it just because its config predates the switch.
   const mouthMonitoringEnabled =
-    delivery?.mouth_monitoring_enabled ?? examBrief?.config?.mouth_monitoring_enabled !== false;
+    delivery?.mouth_monitoring_enabled ?? examBrief?.config?.mouth_monitoring_enabled ?? false;
   useEffect(() => {
     audioMonitoringWantedRef.current = audioMonitoringEnabled;
   }, [audioMonitoringEnabled]);
@@ -359,7 +381,7 @@ export function ExamDelivery() {
   const warningCooldownSeconds =
     delivery?.warning_cooldown_seconds ??
     examBrief?.config?.warning_cooldown_seconds ??
-    10;
+    5;
   // The demonstration paper is the one assessment a candidate may restart
   // without staff: asking a lecturer to reopen it is a dead end in a demo that
   // has no lecturer. Everything else keeps the real reopen flow.
@@ -410,6 +432,7 @@ export function ExamDelivery() {
   const saveAnswers = useSaveExamAnswers(attemptId);
   const submitExam = useSubmitExam(attemptId);
   const recordEvent = useRecordProctoringEvent(attemptId);
+  const acknowledgeWarningMutation = useAcknowledgeWarning(attemptId);
   // Interval effects read the latest mutation/state through refs instead of
   // being torn down and re-created on every render.
   const recordEventRef = useRef(recordEvent);
@@ -435,11 +458,14 @@ export function ExamDelivery() {
     | null
   >(null);
 
+  const alarmRef = useRef(alarm);
+
   useEffect(() => {
     recordEventRef.current = recordEvent;
     cameraStateRef.current = cameraState;
     proctoringEnabledRef.current = proctoringEnabled;
-  }, [recordEvent, cameraState, proctoringEnabled]);
+    alarmRef.current = alarm;
+  }, [recordEvent, cameraState, proctoringEnabled, alarm]);
 
   const questions = delivery?.questions || [];
 
@@ -800,21 +826,21 @@ export function ExamDelivery() {
         return {
           tone: 'amber',
           title: 'Face the screen to continue',
-          body: 'A sustained head turn was observed. Your question is temporarily covered while you return to the screen; this camera observation does not use your browser-event allowance.',
+          body: 'A sustained head turn was observed. Your question is temporarily covered while you return to the screen. The cue is recorded and, if it is counted, spends one of the disclosed warnings.',
         };
       }
       if (faceGate === 'multiple_faces') {
         return {
           tone: 'amber',
           title: 'One candidate should be in view',
-          body: 'More than one face remained in view. Your question is temporarily covered while the camera view clears; this camera observation is for lecturer review, not a verdict.',
+          body: 'More than one face remained in view. Your question is temporarily covered while the camera view clears. The cue is recorded for your lecturer and, if counted, spends one warning.',
         };
       }
       if (faceGate === 'no_face') {
         return {
           tone: 'amber',
           title: 'Move into the camera view',
-          body: 'Your face was not visible for the required dwell. Your question is temporarily covered until the camera can observe you again; this does not use your browser-event allowance.',
+          body: 'Your face was not visible for the required dwell. Your question is temporarily covered until the camera can observe you again. The cue is recorded and counts on the same ladder as leaving the paper.',
         };
       }
     }
@@ -834,11 +860,15 @@ export function ExamDelivery() {
   // The rule in one sentence, built from the values the server enforces rather
   // than hard-coded: the authored warnings, then the paper stops until a lecturer
   // reopens it (or, under the review policy, it is flagged and continues).
+  const warningGapRule =
+    warningCooldownSeconds > 0
+      ? ` After you acknowledge a warning, the next cannot be counted for ${warningCooldownSeconds} seconds.`
+      : '';
   const violationRule =
     maxViolations > 0
       ? warningPolicyFromServer === 'review'
-        ? `This sitting allows ${maxViolations} warnings. At the ${maxViolations}th the attempt is flagged for your lecturer's review and you keep going.`
-        : `This sitting allows ${maxViolations} warnings. The ${maxViolations}th stops the paper; only your lecturer can reopen it.`
+        ? `This sitting allows ${maxViolations} warnings. At the ${maxViolations}th the attempt is flagged for your lecturer's review and you keep going.${warningGapRule}`
+        : `This sitting allows ${maxViolations} warnings. The ${maxViolations}th stops the paper; only your lecturer can reopen it.${warningGapRule}`
       : '';
 
   // Keep the enforced obstruction threshold in step with the authored value.
@@ -1405,6 +1435,16 @@ export function ExamDelivery() {
   const beginAttempt = useCallback(async () => {
     setStartError('');
 
+    // Enter full-screen on the click itself, before any await. The browser
+    // grants Fullscreen API access only while the user activation from the
+    // button is alive; asking after the start request or the camera handshake
+    // is a gesture the browser has already forgotten, which is why the paper
+    // could open in a normal tab. A refusal here is non-fatal — the full-screen
+    // gate below explains how to continue.
+    if (canRequestFullscreen() && !readFullscreenState().active) {
+      void document.documentElement.requestFullscreen().catch(() => undefined);
+    }
+
     // A proctored assessment does not start without a live camera: the
     // candidate sees themselves before anything is recorded.
     const needsCamera =
@@ -1466,21 +1506,19 @@ export function ExamDelivery() {
       }
       setAnswers(restored);
       setHasBegun(true);
-
-      // Enter full-screen immediately so the assessment runs in a locked-down
-      // viewport. This is triggered by the user's click, so the browser permits
-      // it; if the request is denied (e.g. an unsupported context) we keep going
-      // but surface a notice.
-      if (typeof document !== 'undefined' && document.documentElement?.requestFullscreen) {
-        document.documentElement
-          .requestFullscreen()
-          .catch(() => {
-            /* Browsers may deny fullscreen outside a trusted gesture or in
-               embedded contexts; the assessment is still usable. */
-          });
+      if (data.warning_pending) {
+        setAckError('');
+        // A warning was counted before this page loaded (a refresh, a dropped
+        // response, a resumed sitting). The paper stays covered until it is
+        // acknowledged, exactly as if it had just arrived.
+        setAlarm({
+          message:
+            'A warning was recorded before this page loaded and is still waiting for your acknowledgement. Acknowledge it to continue; the next warning cannot be counted until the disclosed gap has passed.',
+          category: 'browser_signal',
+        });
+      } else {
+        setAlarm(null);
       }
-
-
 
 
     } catch (err: any) {
@@ -1633,7 +1671,13 @@ export function ExamDelivery() {
           severity,
           details,
         });
-        if (typeof res.violations_count === 'number') setViolations(res.violations_count);
+        // Responses can arrive out of order when two detectors report at once.
+        // Never let a late, lower count erase a warning the candidate has
+        // already seen; the server is authoritative, and its counter only rises
+        // until a lecturer reopens the attempt.
+        if (typeof res.violations_count === 'number') {
+          setViolations((prev) => Math.max(prev, res.violations_count));
+        }
         if (typeof res.max_violations === 'number') setMaxViolations(res.max_violations);
         if (res.warning_policy) setWarningPolicyFromServer(res.warning_policy);
 
@@ -1647,7 +1691,21 @@ export function ExamDelivery() {
           );
           return;
         }
-        if (res.warning) setAlarm({ message: res.warning, category: res.event_category ?? 'browser_signal' });
+        if (res.warning) {
+          setAckError('');
+          setAlarm({ message: res.warning, category: res.event_category ?? 'browser_signal' });
+        } else if (res.warning_pending && !alarmRef.current) {
+          setAckError('');
+          // The first response may have been lost with the connection that
+          // carried it. The server keeps the warning pending, so the next
+          // response restores the modal instead of leaving the ladder paused
+          // behind a paper the candidate can work through.
+          setAlarm({
+            message:
+              'A warning is waiting for your acknowledgement. Acknowledge it to continue the paper.',
+            category: res.event_category ?? 'browser_signal',
+          });
+        }
         if (res.auto_submitted) {
           submittedRef.current = true;
           localStorage.removeItem(`exam_answers_${attemptId}`);
@@ -1663,9 +1721,6 @@ export function ExamDelivery() {
   useEffect(() => {
     reportEventRef.current = reportEvent;
   }, [reportEvent]);
-
-  // Visible warning when fullscreen is lost during the attempt.
-  const [fullscreenWarning, setFullscreenWarning] = useState<string | null>(null);
 
   // While locked, re-check on a cadence so the candidate does not have to
   // hammer the button after their lecturer reopens the attempt.
@@ -1699,7 +1754,9 @@ export function ExamDelivery() {
         .then((res) => {
           // Every proctoring response carries the authoritative counters; sync
           // them so the red banner always shows the true n / m even on resume.
-          if (typeof res?.violations_count === 'number') setViolations(res.violations_count);
+          if (typeof res?.violations_count === 'number') {
+            setViolations((prev) => Math.max(prev, res.violations_count));
+          }
           if (typeof res?.max_violations === 'number') setMaxViolations(res.max_violations);
         })
         .catch(() => undefined);
@@ -1800,18 +1857,12 @@ export function ExamDelivery() {
       reportEvent('context_menu', 'low');
     };
     const onFullscreenChange = () => {
-      const active = Boolean(document.fullscreenElement);
-      setIsFullscreen(active);
-      if (!active) {
-        reportEvent('fullscreen_exit', 'medium');
-        if (hasBegun) {
-          setFullscreenWarning(
-            'You left full-screen mode. This has been recorded and your instructor can review it.'
-          );
-        }
-      } else {
-        setFullscreenWarning(null);
-      }
+      // State only. Whether the candidate actually left full-screen is decided
+      // after a grace period by the effect below, because the API clears its
+      // element before the browser's own full-screen mode becomes visible to
+      // the viewport check. Reporting here logged a false exit — and a warning —
+      // every time somebody moved between the two full-screen routes.
+      setFullscreen(readFullscreenState());
     };
 
     document.addEventListener('visibilitychange', onVisibility);
@@ -1830,20 +1881,97 @@ export function ExamDelivery() {
     };
   }, [hasBegun, proctoringEnabled, reportEvent]);
 
+  // Keep the two full-screen routes in sync. `fullscreenchange` covers the API;
+  // `resize` covers F11, which the API never sees. The low-frequency poll is a
+  // fallback for a browser that changes its chrome without either event. It also
+  // means the gate clears within a second even when the platform is unusual,
+  // instead of accusing a candidate who is already full-screen.
+  useEffect(() => {
+    const sync = () => {
+      setFullscreen(readFullscreenState());
+    };
+    sync();
+    document.addEventListener('fullscreenchange', sync);
+    window.addEventListener('resize', sync);
+    const handle = window.setInterval(sync, 1_000);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      window.removeEventListener('resize', sync);
+      window.clearInterval(handle);
+    };
+  }, []);
+
   // Single source of full-screen entry: on begin (the click that started the
   // attempt is the trusted user gesture the browser requires) and again after a
-  // mid-attempt reload. A re-entry triggered without a gesture may be refused by
-  // the browser; that is non-fatal and the candidate can use the header control.
+  // mid-attempt reload. The gate is armed only once that request has settled,
+  // so a slow transition cannot flash a barrier over a candidate who is already
+  // full-screen. A candidate already in F11 mode is left alone: the page fills
+  // the display, and demanding a second, API-owned full-screen is a false alarm.
   useEffect(() => {
+    setFullscreenGateReady(false);
     if (!hasBegun) return;
-    if (typeof document === 'undefined' || !document.documentElement?.requestFullscreen) {
+
+    let cancelled = false;
+    let timer: number | undefined;
+    const arm = (delayMs: number) => {
+      timer = window.setTimeout(() => {
+        if (!cancelled) setFullscreenGateReady(true);
+      }, delayMs);
+    };
+
+    if (!canRequestFullscreen() || readFullscreenState().active) {
+      arm(400);
+      return () => {
+        cancelled = true;
+        if (timer !== undefined) window.clearTimeout(timer);
+      };
+    }
+
+    const settle = () => {
+      if (cancelled) return;
+      // One short beat after the promise resolves/rejects, so the viewport has
+      // resized before the gate judges it.
+      arm(500);
+    };
+    // Older browsers return undefined from `requestFullscreen`; treat that as
+    // settled rather than calling `.then` on nothing.
+    const request = document.documentElement.requestFullscreen();
+    if (request && typeof request.then === 'function') request.then(settle, settle);
+    else settle();
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [hasBegun]);
+
+  // The gate and the exit event share one decision, taken only after the loss
+  // has persisted. This is what stops an in-flight transition (API → F11, or a
+  // resize during entry) from being read as leaving the paper.
+  const fullscreenWasActiveRef = useRef(false);
+  useEffect(() => {
+    if (!hasBegun || !proctoringEnabled) return;
+    if (fullscreen.active) {
+      fullscreenWasActiveRef.current = true;
+      setFullscreenLost(false);
       return;
     }
-    if (document.fullscreenElement) return;
-    document.documentElement.requestFullscreen().catch(() => {
-      /* Non-fatal: the assessment remains usable without full-screen. */
-    });
-  }, [hasBegun]);
+    const handle = window.setTimeout(() => {
+      if (readFullscreenState().active) return;
+      setFullscreenLost(true);
+      if (!fullscreenWasActiveRef.current) return;
+      fullscreenWasActiveRef.current = false;
+      // A hidden document already reported the departure as a tab switch;
+      // counting the full-screen change as well would be two warnings for one
+      // action.
+      if (!document.hidden) {
+        reportEvent('fullscreen_exit', 'medium', {
+          route: document.fullscreenElement ? 'fullscreen_api' : 'browser_window',
+        });
+      }
+    }, 900);
+    return () => window.clearTimeout(handle);
+  }, [fullscreen.active, hasBegun, proctoringEnabled, reportEvent]);
 
   // Warn before an accidental refresh/close mid-attempt.
   useEffect(() => {
@@ -1866,6 +1994,24 @@ export function ExamDelivery() {
       }
     } catch {
       /* Browsers may require a user gesture or deny the request. */
+    }
+  };
+
+  // The acknowledgement is a server write, not a local dismiss. The ladder stays
+  // paused until the server has the click, and only then does its disclosed gap
+  // begin; a failed request leaves the warning on screen with a retry.
+  const acknowledgeWarning = async () => {
+    setAckError('');
+    try {
+      if (attemptId) await acknowledgeWarningMutation.mutateAsync();
+      if (canRequestFullscreen() && !readFullscreenState().active) {
+        void document.documentElement.requestFullscreen().catch(() => undefined);
+      }
+      setAlarm(null);
+    } catch {
+      setAckError(
+        'Your acknowledgement could not be saved. Check your connection and press the button again — the warning stays on screen until it is confirmed.'
+      );
     }
   };
 
@@ -2242,7 +2388,7 @@ export function ExamDelivery() {
                     {maxViolations > 0 ? `${maxViolations} warnings max` : 'Warnings recorded'}
                   </span>
                   <span className="rounded-full border border-rose-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold">
-                    {warningCooldownSeconds}s between warnings
+                    {warningCooldownSeconds}s after you acknowledge
                   </span>
                   <span className="rounded-full border border-rose-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold">
                     Frames kept{' '}
@@ -2251,8 +2397,9 @@ export function ExamDelivery() {
                 </div>
                 <ul className="mt-2.5 space-y-1 pl-4 text-[11.5px] leading-relaxed marker:text-rose-400 list-disc">
                   <li>
-                    Your <strong>camera stays on</strong>. Your lecturer can review camera stills
-                    and browser events such as leaving this window or full-screen mode.
+                    Your <strong>camera stays on</strong> and the paper opens in{' '}
+                    <strong>full-screen</strong>. Your lecturer can review camera stills and browser
+                    events such as leaving this window or full-screen mode.
                   </li>
                   <li>
                     <strong>On-device checks</strong> —{' '}
@@ -2264,10 +2411,11 @@ export function ExamDelivery() {
                     browser. <strong>No audio is recorded, stored or sent.</strong>
                   </li>
                   <li>
-                    Every warning covers the paper until you acknowledge it, and another cannot
-                    be counted for <strong>{warningCooldownSeconds} seconds</strong> — signals in
-                    between are recorded but cost nothing extra. Signals can be mistaken, so
-                    they are never proof of misconduct on their own.
+                    Every warning covers the paper until you acknowledge it. Only then does the{' '}
+                    <strong>{warningCooldownSeconds}-second</strong> gap begin, so a second warning
+                    can never replace the one you are reading; signals in the gap are recorded
+                    but cost nothing extra. Signals can be mistaken, so they are never proof of
+                    misconduct on their own.
                   </li>
                   <li>
                     {warningPolicy === 'review' ? (
@@ -2594,8 +2742,8 @@ export function ExamDelivery() {
                 Camera off — this is recorded
               </span>
               <span className="font-medium">
-                Your assessment requires a live camera. Restore it to resume observation. This
-                technical camera status does not use your browser-event allowance.
+                Your assessment requires a live camera.                Restore it to resume observation. A confirmed camera outage is
+                recorded and counts on the same ladder as leaving the paper.
               </span>
               <button
                 onClick={() => startCamera()}
@@ -2606,20 +2754,17 @@ export function ExamDelivery() {
             </div>
           </div>
         )}
-        {fullscreenWarning && (
+        {proctoringEnabled && hasBegun && !fullscreenSupported && (
           <div
             role="alert"
             className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900"
           >
-            <div className="mx-auto max-w-6xl flex flex-wrap items-center gap-2">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>{fullscreenWarning}</span>
-              <button
-                onClick={toggleFullscreen}
-                className="ml-auto rounded-md border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100"
-              >
-                Return to full screen
-              </button>
+              <span>
+                This assessment is designed for full-screen. Use your browser’s full-screen
+                command (F11 on Windows, Control + Command + F on macOS) before you continue.
+              </span>
             </div>
           </div>
         )}
@@ -2642,7 +2787,7 @@ export function ExamDelivery() {
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                     : 'border-rose-300 bg-rose-50 text-rose-700'
                 }`}
-                title="Browser/page events count toward the disclosed allowance; camera/model observations are separate review leads."
+                title="Every confirmed cue — browser event or camera observation — spends one of the disclosed warnings."
               >
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
@@ -2650,7 +2795,7 @@ export function ExamDelivery() {
                   }`}
                   aria-hidden="true"
                 />
-                {cameraReady ? 'Camera + integrity checks on' : cameraState === 'on' ? 'Camera picture not confirmed' : 'Camera off — review only'}
+                {cameraReady ? 'Camera + integrity checks on' : cameraState === 'on' ? 'Camera picture not confirmed' : 'Camera off — not observed'}
                 {maxViolations > 0 && (
                   <span className="ml-1 font-bold tabular-nums">
                     · {violations}/{maxViolations}
@@ -2669,17 +2814,19 @@ export function ExamDelivery() {
               <Clock className="h-3.5 w-3.5" aria-hidden="true" />
               {timeLabel}
             </div>
-            <button
-              onClick={toggleFullscreen}
-              aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50"
-            >
-              {isFullscreen ? (
-                <Minimize2 className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <Maximize2 className="h-4 w-4" aria-hidden="true" />
-              )}
-            </button>
+            {!fullscreen.browser && (
+              <button
+                onClick={toggleFullscreen}
+                aria-label={fullscreen.api ? 'Exit full screen' : 'Enter full screen'}
+                className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50"
+              >
+                {fullscreen.api ? (
+                  <Minimize2 className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            )}
           </div>
         </div>
         {notice && (
@@ -2834,7 +2981,7 @@ export function ExamDelivery() {
       {/* Observation gate: while the pipeline cannot see the candidate the
           paper is covered rather than merely warned about. Dismissal is not a
           control — the cover lifts only when observation returns. */}
-      {integrityBlock && (
+      {integrityBlock && !alarm && (
         <div
           className="fixed inset-0 z-[57] flex items-center justify-center bg-slate-900/85 p-6"
           role="alertdialog"
@@ -2867,7 +3014,6 @@ export function ExamDelivery() {
                 ? `${violations} of ${maxViolations} warnings counted on this attempt — screen leaves and camera cues alike.`
                 : 'This session is being recorded.'}
             </p>
-            {alarm && <p className="mt-3 text-xs font-medium text-rose-700">{alarm.message}</p>}
             <p className="mt-4 text-[11px] text-slate-500">
               Your answers are saved and the timer is still running. If your camera is
               physically broken, tell your invigilator now.
@@ -2876,14 +3022,21 @@ export function ExamDelivery() {
         </div>
       )}
 
-      {proctoringEnabled && hasBegun && !isFullscreen && !fullscreenWarning && (
+      {proctoringEnabled &&
+        hasBegun &&
+        fullscreenSupported &&
+        fullscreenGateReady &&
+        fullscreenLost &&
+        !fullscreen.active &&
+        !alarm &&
+        !integrityBlock && (
         <div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 p-6">
           <div className="max-w-md w-full rounded-2xl bg-white p-8 text-center shadow-2xl">
             <Maximize2 className="mx-auto h-10 w-10 text-amber-600" aria-hidden="true" />
             <p className="mt-4 text-lg font-bold text-slate-900">Return to full screen</p>
             <p className="mt-2 text-sm text-slate-600">
-              This assessment runs in full-screen mode. Leaving it has been recorded. Your
-              answers are safe — press the button below to continue where you left off.
+              This assessment runs in full-screen mode. Leaving it pauses the paper; your
+              answers are safe and the timer keeps running. Return to full-screen to carry on.
             </p>
             <button
               onClick={() => {
@@ -2893,6 +3046,10 @@ export function ExamDelivery() {
             >
               Return to full screen
             </button>
+            <p className="mt-3 text-[11px] text-slate-500">
+              If the browser blocks the request, use its full-screen command: F11 on Windows
+              or Control + Command + F on macOS.
+            </p>
           </div>
         </div>
       )}
@@ -2985,20 +3142,35 @@ export function ExamDelivery() {
                   {violationRule}
                 </p>
               )}
+              {ackError && (
+                <p
+                  role="alert"
+                  className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800"
+                >
+                  {ackError}
+                </p>
+              )}
               <button
                 type="button"
                 autoFocus
-                onClick={() => setAlarm(null)}
-                className="mt-5 w-full rounded-lg bg-rose-600 px-5 py-3 text-sm font-bold text-white hover:bg-rose-700"
+                disabled={acknowledgeWarningMutation.isPending}
+                onClick={() => void acknowledgeWarning()}
+                className="mt-5 w-full rounded-lg bg-rose-600 px-5 py-3 text-sm font-bold text-white hover:bg-rose-700 disabled:cursor-wait disabled:opacity-70"
               >
-                I understand — continue the paper
+                {acknowledgeWarningMutation.isPending
+                  ? 'Saving acknowledgement…'
+                  : 'I understand — continue the paper'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {confirmOpen && (
+      {/* One panel at a time. A warning or a coverage gate takes precedence
+          over the optional submit confirmation, so the candidate never has to
+          work out which of two stacked dialogs the paper is actually asking
+          them to answer. */}
+      {confirmOpen && !alarm && !integrityBlock && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div
             role="dialog"

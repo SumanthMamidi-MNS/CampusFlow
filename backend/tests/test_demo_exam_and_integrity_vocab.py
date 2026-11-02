@@ -104,7 +104,7 @@ async def test_demo_login_clears_the_previous_sitting_for_a_fresh_one(
     # Assert the shipped disclosure, not the suite's zero-cooldown test seam.
     from campusflow.domain.exams import service as exams_service
 
-    monkeypatch.setattr(exams_service, "PROCTORING_WARNING_COOLDOWN_SECONDS", 10)
+    monkeypatch.setattr(exams_service, "PROCTORING_WARNING_COOLDOWN_SECONDS", 5)
 
     login = await client.post("/api/v1/exams/demo/login")
     assert login.status_code == 200, login.text
@@ -155,12 +155,16 @@ async def test_demo_login_clears_the_previous_sitting_for_a_fresh_one(
     # demo rather than a lecturer reopen that the demo cannot perform.
     assert delivery["demo"] is True
     assert delivery["max_violations"] == 10
-    assert delivery["warning_cooldown_seconds"] == 10
+    assert delivery["warning_cooldown_seconds"] == 5
+    # The demo must not run the misfiring mouth heuristic (ADR-039); the voice
+    # check stays on so the talking path is still covered.
+    assert delivery["mouth_monitoring_enabled"] is False
+    assert delivery["audio_monitoring_enabled"] is True
     brief = await client.get(f"/api/v1/exams/{exam_id}/public", headers=fresh_headers)
     assert brief.status_code == 200, brief.text
     assert brief.json()["data"]["config"]["demo"] is True
     assert brief.json()["data"]["config"]["max_violations"] == 10
-    assert brief.json()["data"]["config"]["warning_cooldown_seconds"] == 10
+    assert brief.json()["data"]["config"]["warning_cooldown_seconds"] == 5
 
     created = (
         await db_session.execute(

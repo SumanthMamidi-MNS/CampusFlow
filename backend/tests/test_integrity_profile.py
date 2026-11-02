@@ -202,9 +202,11 @@ async def test_defaults_monitor_every_cue_of_an_unauthored_paper(client, db_sess
     assert delivery["hand_monitoring_enabled"] is True
     assert delivery["audio_monitoring_enabled"] is True
     assert delivery["device_detection_enabled"] is True
-    # Mouth motion rides on the frames the face check already reads, so it is on
-    # with the camera unless an author turns it off (ADR-030).
-    assert delivery["mouth_monitoring_enabled"] is True
+    # Mouth motion is opt-in per paper (ADR-039): the pixel heuristic could not
+    # separate a mouth from a jaw or compression noise on a still face, and
+    # candidates who were not talking were warned. Only an author who explicitly
+    # switches it on runs it; the voice check remains the talking signal.
+    assert delivery["mouth_monitoring_enabled"] is False
 
 
 @pytest.mark.asyncio

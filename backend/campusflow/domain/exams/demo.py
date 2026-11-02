@@ -285,15 +285,18 @@ async def ensure_demo_scenario(db: AsyncSession) -> dict:
                 "shuffle_questions": True,
                 "auto_grade": True,
                 "show_results_immediately": True,
-                # Everything the integrity engine can check, on, so the demo is a
-                # real trial of it: a phone shown to the camera, a smartwatch, a
-                # second voice and a speaking mouth all have to produce a warning
-                # here before they will in an authored paper.
+                # Every cue an authored paper runs by default, so the demo is a
+                # real trial of the shipped experience: a phone shown to the
+                # camera, a smartwatch and a sustained second voice all produce a
+                # warning here. Mouth-movement monitoring is opt-in per paper and
+                # stays off (ADR-039): its pixel heuristic false-fired on still
+                # faces, and a warning the candidate did not earn is worse than a
+                # cue the demo does not show.
                 "device_detection_enabled": True,
                 "hand_monitoring_enabled": True,
                 "face_monitoring_enabled": True,
                 "audio_monitoring_enabled": True,
-                "mouth_monitoring_enabled": True,
+                "mouth_monitoring_enabled": False,
                 # Marks the paper for the candidate surface: a demo that stops
                 # at the integrity limit offers a fresh demo, not a lecturer
                 # request that no one in the demo can approve.
@@ -315,7 +318,7 @@ async def ensure_demo_scenario(db: AsyncSession) -> dict:
         "hand_monitoring_enabled": True,
         "face_monitoring_enabled": True,
         "audio_monitoring_enabled": True,
-        "mouth_monitoring_enabled": True,
+        "mouth_monitoring_enabled": False,
         "demo": True,
     }
     repaired_config = dict(exam.config or {})

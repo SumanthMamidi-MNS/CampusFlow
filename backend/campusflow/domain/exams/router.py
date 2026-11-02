@@ -21,6 +21,7 @@ from campusflow.domain.exams.schemas import (
     UnlockAttemptRequest,
 )
 from campusflow.domain.exams.service import (
+    acknowledge_warning,
     add_questions_to_exam,
     create_exam,
     create_exam_for_offerings,
@@ -384,6 +385,19 @@ async def record_proctoring_event_endpoint(
         student_user=current_user,
     )
     return success_response(status_resp.model_dump(mode="json"))
+
+
+@router.post("/exam-attempts/{attempt_id}/acknowledge-warning")
+async def acknowledge_warning_endpoint(
+    attempt_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("exams:take")),
+):
+    """Acknowledge the warning on screen; the next one waits for the gap."""
+    result = await acknowledge_warning(
+        db=db, attempt_id=attempt_id, student_user=current_user
+    )
+    return success_response(result.model_dump(mode="json"))
 
 
 @router.get("/exam-attempts/{attempt_id}/proctoring-events")

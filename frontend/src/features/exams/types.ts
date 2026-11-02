@@ -266,6 +266,8 @@ export interface ExamDelivery {
   max_violations?: number;
   /** Server-owned gap between counted warnings, echoed for the brief copy. */
   warning_cooldown_seconds?: number;
+  /** A counted warning still awaits acknowledgement (restored on a resume). */
+  warning_pending?: boolean;
   device_detection_enabled?: boolean;
   /** The dwell tier this attempt runs at, and the monitoring it switches on. */
   integrity_sensitivity?: ExamIntegritySensitivity;
@@ -367,6 +369,8 @@ export interface ProctoringStatus {
   max_violations: number;
   auto_submitted: boolean;
   warning?: string | null;
+  /** A counted warning still awaits acknowledgement; the ladder is paused. */
+  warning_pending?: boolean;
   is_locked?: boolean;
   status?: string;
   /** The policy in force for this attempt, as the server enforces it. */

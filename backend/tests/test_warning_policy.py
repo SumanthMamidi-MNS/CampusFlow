@@ -155,6 +155,15 @@ async def _event(client, seeded, attempt_id: str, event_type: str = "tab_switch"
     return resp.json()["data"]
 
 
+async def _ack(client, seeded, attempt_id: str, *, headers=None):
+    resp = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/acknowledge-warning",
+        headers=headers or seeded["headers"]["student"],
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
 @pytest.mark.asyncio
 async def test_review_policy_flags_the_attempt_and_lets_the_candidate_continue(client, db_session):
     """Reaching the tolerance under the review policy is a flag, never a removal."""
@@ -634,8 +643,8 @@ async def test_stopped_candidate_may_ask_but_only_the_lecturer_reopens(client, d
 
 
 @pytest.mark.asyncio
-async def test_a_counted_warning_opens_a_ten_second_gap(client, db_session, monkeypatch):
-    """A burst cannot empty the allowance: the next warning waits ten seconds.
+async def test_a_counted_warning_opens_a_five_second_gap(client, db_session, monkeypatch):
+    """A burst cannot empty the allowance: the next warning waits five seconds.
 
     The candidate sees one warning at a time. A second signal inside the gap is
     still written to the lecturer's timeline, with the suppression recorded, but
@@ -643,12 +652,13 @@ async def test_a_counted_warning_opens_a_ten_second_gap(client, db_session, monk
     """
     from campusflow.domain.exams import service as exams_service
 
-    monkeypatch.setattr(exams_service, "PROCTORING_WARNING_COOLDOWN_SECONDS", 10)
+    monkeypatch.setattr(exams_service, "PROCTORING_WARNING_COOLDOWN_SECONDS", 5)
     seeded = await _seed_assessment(db_session, tag="GAP", max_violations=10, policy="remove")
     attempt_id = await _begin(client, seeded, "browser_warning_gap")
 
     first = await _event(client, seeded, attempt_id)
     assert first["violations_count"] == 1
+    assert first["warning_pending"] is True
     assert "warning 1 of 10" in first["warning"].lower()
 
     # Same sitting, a different signal, three seconds later at most: recorded,
@@ -656,6 +666,7 @@ async def test_a_counted_warning_opens_a_ten_second_gap(client, db_session, monk
     second = await _event(client, seeded, attempt_id, "window_blur")
     assert second["violations_count"] == 1
     assert second["warning"] is None
+    assert second["warning_pending"] is True
 
     timeline = await client.get(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
@@ -666,17 +677,160 @@ async def test_a_counted_warning_opens_a_ten_second_gap(client, db_session, monk
     assert [event["event_type"] for event in events] == ["tab_switch", "window_blur"]
     assert events[1]["details"]["suppressed_by_cooldown"] is True
     assert events[1]["details"]["counted"] is False
-    assert events[1]["details"]["cooldown_seconds_remaining"] >= 1
+    assert events[1]["details"]["suppressed_until_acknowledged"] is True
 
-    # Ten seconds pass (backdated rather than slept): the next signal counts.
+    # The old clock is irrelevant while the modal is unacknowledged. Backdating
+    # the count by a minute must still leave the ladder paused: the gap begins
+    # when the candidate dismisses the warning, not while they are reading it.
     attempt = (
         await db_session.execute(
             select(ExamAttempt).where(ExamAttempt.id == uuid.UUID(attempt_id))
         )
     ).scalar_one()
-    attempt.last_warning_at = datetime.now(UTC) - timedelta(seconds=11)
+    attempt.last_warning_at = datetime.now(UTC) - timedelta(seconds=60)
+    await db_session.commit()
+    held = await _event(client, seeded, attempt_id, "window_resized")
+    assert held["violations_count"] == 1
+    assert held["warning"] is None
+    assert held["warning_pending"] is True
+
+    # Acknowledging starts the disclosed gap from that click. An immediate
+    # signal is still suppressed, even though the count is far older than five
+    # seconds.
+    acked = await _ack(client, seeded, attempt_id)
+    assert acked["warning_pending"] is False
+    immediate = await _event(client, seeded, attempt_id, "context_menu")
+    assert immediate["violations_count"] == 1
+    assert immediate["warning"] is None
+
+    # Ten seconds after the acknowledgement (backdated rather than slept): the
+    # next signal counts.
+    attempt = (
+        await db_session.execute(
+            select(ExamAttempt).where(ExamAttempt.id == uuid.UUID(attempt_id))
+        )
+    ).scalar_one()
+    attempt.warning_acknowledged_at = datetime.now(UTC) - timedelta(seconds=6)
     await db_session.commit()
 
     third = await _event(client, seeded, attempt_id, "fullscreen_exit")
     assert third["violations_count"] == 2
+    assert third["warning_pending"] is True
     assert "warning 2 of 10" in third["warning"].lower()
+
+
+@pytest.mark.asyncio
+async def test_camera_cues_cannot_walk_the_ladder_inside_the_gap(
+    client, db_session, monkeypatch
+):
+    """The cues a covered lens produces are one warning, then evidence only.
+
+    This is the case the candidate reported: a face out of frame and an
+    obstruction arrive together while the first modal is still on screen. They
+    must not become warning 2 before it has been read and acknowledged.
+    """
+    from campusflow.domain.exams import service as exams_service
+
+    monkeypatch.setattr(exams_service, "PROCTORING_WARNING_COOLDOWN_SECONDS", 5)
+    seeded = await _seed_assessment(db_session, tag="CAM", max_violations=10, policy="remove")
+    attempt_id = await _begin(client, seeded, "browser_camera_gap")
+
+    first = await _event(client, seeded, attempt_id, "face_not_visible")
+    assert first["violations_count"] == 1
+    assert first["warning_pending"] is True
+
+    second = await _event(client, seeded, attempt_id, "camera_obstructed")
+    assert second["violations_count"] == 1
+    assert second["warning"] is None
+    assert second["warning_pending"] is True
+
+    await _ack(client, seeded, attempt_id)
+    third = await _event(client, seeded, attempt_id, "camera_obstructed")
+    assert third["violations_count"] == 1
+    assert third["warning"] is None
+
+    attempt = (
+        await db_session.execute(
+            select(ExamAttempt).where(ExamAttempt.id == uuid.UUID(attempt_id))
+        )
+    ).scalar_one()
+    attempt.warning_acknowledged_at = datetime.now(UTC) - timedelta(seconds=6)
+    await db_session.commit()
+
+    fourth = await _event(client, seeded, attempt_id, "camera_obstructed")
+    assert fourth["violations_count"] == 2
+    assert "warning 2 of 10" in fourth["warning"].lower()
+
+
+@pytest.mark.asyncio
+async def test_only_the_owner_can_acknowledge_a_warning(client, db_session):
+    seeded = await _seed_assessment(db_session, tag="ACKOWN", max_violations=10, policy="remove")
+    attempt_id = await _begin(client, seeded, "browser_ack_owner")
+    await _event(client, seeded, attempt_id)
+
+    other = User(
+        email="student.policy.ackowner.other@campusflow.edu",
+        hashed_password=get_password_hash("StudentPass123!"),
+        first_name="Other",
+        last_name="Candidate",
+        status="active",
+    )
+    db_session.add(other)
+    await db_session.flush()
+    await assign_role_to_user(db_session, other.id, "student")
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/acknowledge-warning",
+        headers={"Authorization": f"Bearer {create_access_token({'sub': str(other.id)})}"},
+    )
+    assert resp.status_code == 403, resp.text
+
+    # The owner's warning is still pending: a failed attempt by somebody else
+    # must not close the gate.
+    owned = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/acknowledge-warning",
+        headers=seeded["headers"]["student"],
+    )
+    assert owned.status_code == 200, owned.text
+    assert owned.json()["data"]["warning_pending"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_warning_clock_ahead_of_the_server_cannot_be_overtaken(
+    client, db_session, monkeypatch
+):
+    """A future timestamp still holds the gate.
+
+    Two detectors can report within the same tick, and a stale read used to let
+    both increment the counter. The comparison lives in the UPDATE's WHERE
+    clause now, so even a timestamp the server has not reached yet closes the
+    gap instead of opening it.
+    """
+    from campusflow.domain.exams import service as exams_service
+
+    monkeypatch.setattr(exams_service, "PROCTORING_WARNING_COOLDOWN_SECONDS", 5)
+    seeded = await _seed_assessment(db_session, tag="SKEW", max_violations=10, policy="remove")
+    attempt_id = await _begin(client, seeded, "browser_warning_skew")
+
+    attempt = (
+        await db_session.execute(
+            select(ExamAttempt).where(ExamAttempt.id == uuid.UUID(attempt_id))
+        )
+    ).scalar_one()
+    attempt.last_warning_at = datetime.now(UTC) + timedelta(seconds=5)
+    await db_session.commit()
+
+    suppressed = await _event(client, seeded, attempt_id, "window_blur")
+    assert suppressed["violations_count"] == 0
+    assert suppressed["warning"] is None
+
+    timeline = await client.get(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=seeded["headers"]["faculty"],
+    )
+    assert timeline.status_code == 200, timeline.text
+    event = timeline.json()["data"][0]
+    assert event["event_type"] == "window_blur"
+    assert event["details"]["suppressed_by_cooldown"] is True
+    assert event["details"]["counted"] is False

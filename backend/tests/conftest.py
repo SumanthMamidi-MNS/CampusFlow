@@ -91,7 +91,7 @@ async def client(app):
 def _no_warning_cooldown(monkeypatch):
     """Keep the suite's rapid event sequences about the ladder, not about time.
 
-    The shipped cooldown is ten seconds; a test that fires three cues in a
+    The shipped cooldown is five seconds; a test that fires three cues in a
     row to reach a threshold would otherwise have to sleep or rewrite clocks in
     every fixture. The cooldown has its own test, which turns it back up.
     """

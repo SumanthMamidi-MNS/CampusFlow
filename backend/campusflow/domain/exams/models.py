@@ -128,6 +128,13 @@ class ExamAttempt(BaseModel):
     last_warning_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When the candidate acknowledged the warning above. The next warning can
+    # only be counted after this moment, and only once the disclosed gap has
+    # elapsed from it. A null value beside a non-null ``last_warning_at`` means
+    # the warning is still on screen and the ladder is deliberately paused.
+    warning_acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # A candidate has at most one row per attempt number. Duplicate rows were
     # possible before this constraint (Wave 2 reported `attempt_number = 1`

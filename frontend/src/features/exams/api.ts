@@ -332,6 +332,27 @@ export function useRecordProctoringEvent(attemptId: string) {
   });
 }
 
+export function useAcknowledgeWarning(attemptId: string) {
+  return useMutation({
+    mutationFn: async (): Promise<{
+      warning_pending: boolean;
+      violations_count: number;
+      max_violations: number;
+      warning_cooldown_seconds: number;
+    }> => {
+      const res = await apiClient.post<
+        ApiResponse<{
+          warning_pending: boolean;
+          violations_count: number;
+          max_violations: number;
+          warning_cooldown_seconds: number;
+        }>
+      >(`/exam-attempts/${attemptId}/acknowledge-warning`);
+      return res.data.data;
+    },
+  });
+}
+
 export function useProctoringTimeline(attemptId: string | null) {
   return useQuery({
     queryKey: ['proctoring-timeline', attemptId],

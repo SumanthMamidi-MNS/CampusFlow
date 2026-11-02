@@ -58,8 +58,8 @@ This document preserves durable technical context, implementation constraints, a
 - **Clock Integrity:** Never trust client-reported timestamps for exam duration. Duration and expiration are strictly computed from `started_at` recorded on the server.
 - **Auto-Grading Safety:** Auto-grading routines must run idempotently on exam submission. Objective questions (MCQ, MSQ, True/False, Numerical) grade immediately; subjective questions (Short/Long answer) enter the manual grading queue.
 - **Observable proctoring, disclosed and on-device:** Camera cues are measured in the
-  candidate's browser — presence and head direction, prohibited devices, a hand at the face,
-  mouth movement and sustained voice — and are recorded with browser telemetry (`tab_switch`,
+  candidate's browser — presence and head direction, prohibited devices, a hand at the face and a
+  sustained voice — and are recorded with browser telemetry (`tab_switch`,
   `window_blur`, `fullscreen_exit`, `copy_paste_attempt`, `context_menu`). Nothing is streamed:
   a confirmed camera cue attaches one still to the event, and no audio is recorded, stored or
   transmitted (ADR-024–032). The old "no webcam" rule from ADR-013 is historical; do not use it
@@ -69,9 +69,10 @@ This document preserves durable technical context, implementation constraints, a
   `exam.config["max_violations"]` with a default of `DEFAULT_MAX_VIOLATIONS = 10` and an authored
   range of 1–20. Under `remove` (the default) reaching it **locks** the attempt with
   `max_violations_exceeded`; it does not auto-submit. Under `review` it flags the attempt for
-  faculty and the candidate keeps working. A counted warning also stamps `last_warning_at`, and
-  no further warning can be counted for `PROCTORING_WARNING_COOLDOWN_SECONDS` (10); signals in
-  that gap are recorded but annotated `suppressed_by_cooldown` (ADR-034).
+  faculty and the candidate keeps working. A counted warning stamps `last_warning_at` and waits
+  for the candidate's acknowledgement; once acknowledged, no further warning can be counted for
+  `PROCTORING_WARNING_COOLDOWN_SECONDS` (5); signals in that gap are recorded but annotated
+  `suppressed_by_cooldown` (ADR-034, ADR-037, ADR-039).
 - **Neutral Candidate Copy:** Warning strings must stay calm and informational. No strobe,
   no shouting, no "breach" language. Follow the responsible-UX rules in AGENTS.md §13.
 - **Faculty-authorised resumption:** `POST /exams/{exam_id}/attempts/{attempt_id}/unlock`
@@ -766,24 +767,68 @@ layout or its disclosed numbers change, re-shoot it with
 (a one-step `scratch/tour-brief.mjs` module), or the landing page will show an old-allowance paper
 beside a ten-warning product.
 
-### "Two tabs" was not a navigation the app performs
+### "Two tabs" was two overlays (and browser state), not a navigation
 
 There is no `window.open` in `frontend/src`; the demo launcher uses `window.location.replace`, which
 is a same-tab navigation by definition. The only new-tab links in the product are the tour's
 "Full size" image, the author profile on the landing page, and a course material's external "Open
-Link". A second CampusFlow tab therefore comes from the browser (session restore, a manually opened
-tab, or the automation/preview browser), not from the demo flow. The shared preview browser can
-carry an `about:blank` tab in the background; close it before treating a tab count as a finding.
+Link". Pressing "Take demo exam" was checked in the browser: the URL changed and the tab count did
+not. A real second CampusFlow tab therefore comes from the browser (session restore, a manually
+opened tab, or the automation/preview browser), not from the demo flow.
+
+The two panels in the report were the **warning modal and the observation gate** rendering at the
+same time: the warning sat at `z-60` over the camera gate at `z-57`. They are now mutually exclusive,
+with one blocking overlay at a time in priority order (warning → camera gate → full-screen gate).
+Do not reintroduce a second full-page layer "just in case"; it reads as a duplicated tab and the
+count behind it contradicts the modal. The shared preview browser can still carry a background tab;
+close it before treating a browser tab count as a finding.
+
+### A mouth cue that spends warnings must earn them
+
+`mouth_movement_detected` is opt-in and off by default (ADR-039). The pixel heuristic (mouth band
+motion versus a forehead reference) fired on still, silent faces — jaw shifts, cheek movement and
+compression noise can pass both `MOUTH_MOTION_MIN` and `MOUTH_DOMINANCE`. Because every confirmed
+cue spends a warning, that is a false accusation with a real cost. Do not turn it back on by
+default, and do not remove the voice check as the supported talking signal. The module and its
+harness stay for an author who explicitly enables the experiment; the server default, the demo
+config, the client fallback and the authoring form must all stay off.
 
 ### A warning ladder needs a clock between the rungs
 
 The allowance is ten, and `ExamAttempt.last_warning_at` gates the next count. The gate is checked
 inside `record_proctoring_event`, not in the browser: a client burst, a duplicated listener or a
-reload cannot spend the ladder faster than the candidate can read it. A signal inside the ten-second
+reload cannot spend the ladder faster than the candidate can read it. The clock starts at the
+acknowledgement, not the count (ADR-037), and it is five seconds since ADR-039. A signal inside the
 gap is still written to `proctoring_events` with `counted: false`, `suppressed_by_cooldown: true` and
 `cooldown_seconds_remaining`; a camera cue still raises the review flag. Do not "simplify" this by
 deleting suppressed events — the lecturer needs the timeline, and the counter needs to explain why it
 did not move.
+
+The gate is part of the conditional `UPDATE`, not a read followed by a write (ADR-035). Two
+detectors reporting in the same second used to load the same null timestamp and both increment; the
+row lock plus the `WHERE` predicate now lets exactly one win. Compare epoch seconds, not datetimes
+(SQLite returns naive values while PostgreSQL keeps the offset), and keep
+`synchronize_session=False` on the statement. Concurrent `tab_switch` + `window_blur` and
+`looking_away` + `face_not_visible` requests were both checked live: one counted, one suppressed.
+
+Full-screen is requested synchronously at the top of `beginAttempt`, before the camera handshake or
+the start request, because the click is the gesture the browser trusts. The acknowledgement button
+for a warning is the second trusted moment, so it re-enters full-screen before dismissing the modal.
+A browser may always refuse; the full-screen gate then asks the candidate in words and names F11 and
+Control+Command+F. Native F11 is invisible to the Fullscreen API, so `document.fullscreenElement`
+stays null in that mode; read `fullscreen.ts`, which also treats a viewport that fills the reported
+screen as full-screen. Judging only the API element produced the "return to full screen" panel for
+candidates who were already in F11 — the reported false alarm.
+
+Chrome clears the API element one frame before F11 becomes visible to the viewport. Treat a
+full-screen loss as real only after it has persisted (900 ms in `ExamDelivery.tsx`), and use the
+same window for the gate and the `fullscreen_exit` event; reporting on `fullscreenchange` itself
+logged an exit every time somebody switched routes. The gate is armed only after the entry promise
+settles, and `canRequestFullscreen()` checks `document.fullscreenEnabled`, because
+`requestFullscreen` exists even in an iframe that can never use it. The acknowledgement clock is
+server-side: `warning_acknowledged_at` is set by the owner-only endpoint, and the conditional
+UPDATE refuses to increment while it is null or newer than `last_warning_at` (ADR-037). Do not
+move that comparison into a Python `if`; that is how the simultaneous-detector burst got through.
 
 The test suite sets `PROCTORING_WARNING_COOLDOWN_SECONDS` to 0 in an autouse fixture, because almost
 every ladder test fires three cues in a row. `test_a_counted_warning_opens_a_ten_second_gap` turns it

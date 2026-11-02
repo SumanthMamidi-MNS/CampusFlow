@@ -1254,8 +1254,8 @@ function Integrity() {
                     fault on your side, tell them now.
                   </p>
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600">
-                    After a counted warning, another cannot be counted for{' '}
-                    <strong className="text-slate-800">10 seconds</strong>. Signals inside that
+                    Once you acknowledge a warning, another cannot be counted for{' '}
+                    <strong className="text-slate-800">5 seconds</strong>. Signals inside that
                     gap are still recorded for your lecturer, without spending another warning.
                   </div>
                   <div className="mt-4 rounded-lg bg-[#1438ff] px-4 py-2.5 text-center text-[12.5px] font-semibold text-white">

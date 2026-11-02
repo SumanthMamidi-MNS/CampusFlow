@@ -46,7 +46,7 @@ export const MARQUEE = [
 export const STATS = [
   { figure: '1', label: 'server', note: 'API · database · sandbox · proxy' },
   { figure: '6', label: 'roles', note: 'one 26-permission catalogue' },
-  { figure: '100', label: 'backend tests', note: 'in the suite · CI runs PostgreSQL' },
+  { figure: '103', label: 'backend tests', note: 'in the suite · CI runs PostgreSQL' },
   { figure: '0', label: 'SaaS deps', note: 'no sign-up, no vendor' },
 ] as const;
 
@@ -214,12 +214,19 @@ export const MODULES: Module[] = [
       'An examination records what happened during the attempt and judges it against a policy the paper’s author set — disclosed to the candidate before the clock starts.',
     bullets: [
       'Tab switches, window blur, focus loss, clipboard use and full-screen exit, each timestamped against the attempt.',
-      'Optional on-device camera checks: a periodic frame, a timed obstruction threshold, and prohibited-device detection that is off unless an exam turns it on.',
+      'On-device camera checks: face and head direction, prohibited devices, and opt-in hand, voice and mouth cues — all measured in the candidate’s browser, with no video streamed.',
       'A tolerance of 1–20 events per exam, and an explicit outcome: remove the candidate, or let them continue and flag the attempt for review.',
       'A live invigilation view of active attempts as their signals arrive, and a review queue with the full timeline.',
       'Resumption and unlocking are faculty decisions written to the audit trail — never a silent reset.',
     ],
     who: ['Exam Controller', 'Faculty', 'Student'],
+    shot: {
+      src: '/tour/faculty/faculty-10-exam-grading.webp',
+      alt: 'Candidate attempts with status, score, integrity event count and the review and reopen actions a lecturer can take',
+      title: 'The review queue',
+      caption:
+        'Each candidate’s status, score and integrity events, with the review and reopen actions the lecturer is authorised for.',
+    },
   },
   {
     id: 'programming',
@@ -517,7 +524,7 @@ export const SECURITY: Rule[] = [
 export const INTEGRITY_FACTS = [
   { figure: '3', label: 'sensitivity tiers — relaxed, standard, strict — authored per paper' },
   { figure: '10', label: 'warnings by default, authored per paper between 1 and 20' },
-  { figure: '10 s', label: 'minimum gap between counted warnings; signals inside it are still logged' },
+  { figure: '5 s', label: 'minimum gap after an acknowledgement; signals inside it are still logged' },
   { figure: '90 days', label: 'default camera-evidence retention, disclosed to candidates' },
   { figure: '0', label: 'answer keys reachable from a candidate payload' },
 ] as const;
@@ -543,7 +550,7 @@ export const INTEGRITY_CUES = [
       'Clipboard and context-menu attempts, window resize, network change',
       'A probable phone, earbuds or smartwatch in the camera picture',
       'A hand held at the face past the dwell \u2014 reading off something in the hand',
-      'A sustained second voice or talking-shaped mouth movement',
+      'A sustained, loud second voice in the room',
     ],
   },
   {
@@ -597,8 +604,8 @@ export const BOOT_SEQUENCE = [
 
 export const VERIFICATION = [
   { dir: 'backend', command: 'ruff check .', result: 'clean' },
-  { dir: 'backend', command: 'pytest -q · SQLite', result: '98 passed, 2 skipped' },
-  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: 'CI · the same 100' },
+  { dir: 'backend', command: 'pytest -q · SQLite', result: '101 passed, 2 skipped' },
+  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: 'CI · the same 103' },
   { dir: 'frontend', command: 'npm run lint', result: '0 errors' },
   { dir: 'frontend', command: 'npm run build', result: 'success' },
 ];

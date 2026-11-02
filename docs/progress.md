@@ -2003,8 +2003,8 @@ the paper and warning card.
 
 ### Final pass — suite figures, the README captures and the tab question
 
-The demo-regression test brought the suite to **100 collected: 98 passed, 2 skipped**, so the figures
-that are visible to a reader were brought forward: the tests badge (`98 Passing`), the landing page's
+The demo-regression test brought the suite to **101 collected: 99 passed, 2 skipped**, so the figures
+that are visible to a reader were brought forward: the tests badge (`99 Passing`), the landing page's
 test counter and CI ledger, and the README's verification block. `docs/images/11-assessment.png` was
 regenerated from the re-shot candidate brief so the README no longer illustrates the old long-form,
 five-warning screen.
@@ -2016,8 +2016,118 @@ left the tab count unchanged. The shared preview browser already carried one bac
 tab at `#screens` from an earlier capture; that is browser state, not a navigation the product
 performs. A real paper keeps its reopen flow; only the demo restarts itself (ADR-033).
 
-**Verified after the copy changes.** `pytest` full suite → 98 passed, 2 skipped (100 collected);
+**Verified after the copy changes.** `pytest` full suite → 99 passed, 2 skipped (101 collected);
 `npm run build` → exit 0; `npm run lint` → 0 errors (15 pre-existing warnings); the demo launcher
 landed on the brief in the same tab; the brief at 1440×900 measured **823 px** against an 818 px
 viewport (one short scroll, no overflow of the integrity summary), with the ten-warning and
 ten-second chips rendered from the server's payload.
+
+### Fix — simultaneous detectors cannot double-count, and only one panel shows at a time
+
+The ten-second gap was correct for one request at a time and still failed under a burst. Two
+detectors reporting in the same second both loaded `last_warning_at = NULL`, both passed the Python
+check, and both incremented — "Warning 1 of 10" was immediately followed by "Warning 2 of 10".
+The gate is now the WHERE clause of the counter update (`last_warning_at IS NULL OR epoch <=
+now - gap`), so the row lock serialises the requests and exactly one can win; the other is written
+to the trail as `suppressed_by_cooldown`. Epoch comparison keeps SQLite (naive datetimes) and
+PostgreSQL (offset-aware) on the same path, and `synchronize_session=False` stops the ORM from
+evaluating the timestamp in Python. Two live probes — `tab_switch` + `window_blur`, and
+`looking_away` + `face_not_visible`, sent with `asyncio.gather` — both returned one counted warning
+and one `warning: null`. The new regression test pins a warning stamped ahead of the server.
+
+The "two tabs" were two full-page panels stacked at once: the warning modal at `z-60` and the
+camera observation gate at `z-57`. The warning now suppresses the gate and the full-screen cover
+until it is acknowledged, and the gate suppresses the full-screen cover, so the candidate sees one
+explanation at a time. Stale copy that called camera cues "review only" or said they did not use the
+allowance was removed from the gate, the camera-off banner, the header chip and the backend event
+catalogue; every confirmed cue is on the same ladder.
+
+Full-screen is requested synchronously on the Begin click, before the camera handshake or the start
+request, and again from the warning acknowledgement (both are trusted gestures). The full-screen
+cover is no longer suppressed by the "you left full-screen" banner, and it names F11 /
+Control+Command+F when the browser refuses. Browsers cannot enter full-screen without a gesture, so
+after an arbitrary 10-second gap the server cannot force it; the gate asks the candidate instead.
+
+**Verified.** Full suite → **99 passed, 2 skipped (101 collected)**; focused warning/demo tests → 19
+passed; `ruff check .` → clean; `npm run build` → exit 0; `npm run lint` → 0 errors (15 pre-existing
+warnings); the demo launcher still opens one tab; both concurrent API probes above produced a single
+count. The full-screen path itself cannot be exercised by the headless preview (it has no
+camera and requires a trusted click), so that part is type-checked and reviewed rather than
+browser-driven.
+
+### Fix (2026-11-02) — the warning clock starts at the acknowledgement, and full-screen stops false-alarming
+
+The reported loop had three parts, and two of them shared a cause. The "return to full screen"
+panel appeared while the candidate was already full-screen, because the gate read only
+`document.fullscreenElement`; F11 has no element, and Chrome also clears the element one frame
+before F11 becomes visible when switching routes. That same one-frame gap produced a
+`fullscreen_exit` event — a counted warning — for a transition that never left the display. The
+count could also move inside the disclosed ten seconds whenever a second detector reported while
+the candidate was still reading the modal.
+
+Full-screen is now read by `features/exams/fullscreen.ts`: the API element **or** a viewport that
+fills the reported display within 16 px (F11), so a candidate who is visibly full-screen is never
+asked to return. A loss is acted on only after it has persisted **900 ms**, and the gate, the exit
+event and the "one panel at a time" rule all use that same decision; a hidden document does not
+record a second, full-screen departure. The gate is armed only after the entry request settles, and
+`canRequestFullscreen()` requires `document.fullscreenEnabled`, so a page that cannot enter the API
+(an iframe without `allow="fullscreen"`, a blocking Permissions-Policy) gets the keyboard
+instruction instead of an impossible gate. The submit confirmation is hidden while a warning or the
+coverage gate is up, so two full-page panels can no longer appear at once.
+
+The ladder now measures from the acknowledgement, not from the count (ADR-037). A counted
+warning clears `warning_acknowledged_at`; while it is pending, the conditional UPDATE cannot
+increment at all, and the candidate's ack — an owner-only, permission-gated write — stamps the
+start of the disclosed 10 s (now 5 s — see the handover pass below). A reload restores the modal from `warning_pending` instead of stranding
+the sitting, a failed ack leaves the modal up with a retry, and migration `c8d9e0f1a2b3` backfills
+open attempts that predate the concept. `scripts/check-fullscreen.ts` pins the detector (11 checks)
+and the voice harness still passes 44/44 with the raised loudness floor (RMS 0.025, about −32 dBFS,
+plus the vowel-band and modulation tests and a 3.5 s dwell).
+
+**Verified.** Full suite → **101 passed, 2 skipped (103 collected)** in 270 s; `ruff check` on the
+exam domain → clean; `npx tsc -b` → exit 0; `npm run build` → exit 0; `npm run lint` → 0 errors (15
+pre-existing warnings); `check-fullscreen` → 11/11; `check-hand-voice-monitoring` → 44/44. A live
+HTTP probe against the running API produced warning 1, suppressed the next three signals (including
+one after the ack), and produced warning 2 only after 10.5 s. The preview browser grants neither
+the camera nor the Fullscreen API (the request resolves to no fullscreen element), so the panel
+itself was not driven end-to-end; the detector and the server gate were, and the visual path remains
+type-checked and reviewed. README, the tests badge and the landing page's figures were brought
+forward to the new suite size (103 collected; 101 passing on SQLite).
+
+### Handover pass (2026-11-02) — five seconds, the mouth cue retired, and the screens refreshed
+
+The final review produced two product changes and one documentation correction.
+
+**The gap is five seconds.** `DEFAULT_WARNING_COOLDOWN_SECONDS` is 5 (ADR-039). The clock still
+starts at the server-confirmed acknowledgement (ADR-037), the ladder is still the conditional
+UPDATE, and the candidate brief renders the value from the payload, so the disclosure, the test
+and the server cannot drift apart. The focused warning/demo suites were updated from ten to five
+and the demo test now asserts the shipped 5 in both delivery and brief.
+
+**The mouth cue is opt-in and off by default.** A real sitting produced "sustained mouth movement"
+while the candidate was silent. The cue is a pixel heuristic — a mouth band against a forehead band
+— and a jaw shift, a cheek, low-light noise or compression can clear both the absolute and
+dominance thresholds. It spends a warning like every confirmed cue, so a false positive removes an
+allowance entry the candidate never earned. `DEFAULT_MOUTH_MONITORING` is now `False` (ADR-039);
+the demo explicitly sets it off, the client treats a missing value as off, and the authoring form
+offers it as an "experimental — off by default" opt-in. The engine, event type, dwell tier and
+harness remain for an author who deliberately enables it. The second-voice check is the supported
+talking signal. The authored brief only mentions mouth movement when a paper enables it.
+
+**The landing page and the screenshots now tell the same story.** The integrity section's warning
+card was already present; its disclosure now says five seconds and its cue list names a sustained,
+loud second voice instead of mouth movement. `INTEGRITY_FACTS` now says **5 s** after an
+acknowledgement. The stale student-brief screenshot (which still showed "10s between warnings" and
+"mouth movement") was replaced with a real capture of the current demo brief at 1440×900, both as
+`frontend/public/tour/student/student-11-exam-brief.webp` and `docs/images/11-assessment.png`. The
+README therefore shows the shipped 5-second, no-mouth disclosure rather than the old build.
+
+**Verified on the final tree.** Full suite → **101 passed, 2 skipped (103 collected)** in 293 s;
+`ruff check` on the exam domain → clean; `npm run build` (including `tsc -b`) → exit 0; `npm run
+lint` → 0 errors (15 pre-existing warnings); `check-fullscreen` → 11/11;
+`check-hand-voice-monitoring` → 44/44. A live probe against the restarted API returned
+`cooldown: 5`, `mouth: False`, warning 1, a suppressed second signal, acknowledgement, a suppressed
+signal inside the gap, and warning 2 only after **5.4 s**; a fresh demo login then cleared the
+probe attempt. The preview browser still grants neither a camera nor the Fullscreen API, so a
+complete sitting with real media was not driven here; the gate logic, the detector harnesses and
+the server clock were, and the camera-dependent path remains type-checked and reviewed.
