@@ -410,7 +410,7 @@ python docs/assets/badges/build_badges.py
 
 Change the figures in `BADGES` at the top of that file (the suite size lives there and in the
 Verification block above) and rerun it. Every capsule is rebuilt from the same geometry, so the
-thirteen files cannot drift in width, padding or animation phase; the README lays them out 4 · 5 · 4
+fourteen files cannot drift in width, padding or animation phase; the README lays them out 5 · 4 · 5
 under `live-deployment.svg`, which `build_live()` writes at the reference 276 × 48. Widths come from
 the `LABEL_ADVANCE` / `VALUE_ADVANCE` tables — Chrome `measureText` results at the exact size,
 weight and letter-spacing the SVG declares — not from estimates, so a capsule fits its content with

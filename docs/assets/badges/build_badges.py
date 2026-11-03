@@ -42,6 +42,7 @@ BADGES: list[tuple[str, str, str]] = [
     ("Caddy", "TLS", "#22C55E"),
     ("Piston", "Isolate", "#FBBF24"),
     # What the platform promises
+    ("Vercel", "landing", "#E5E7EB"),
     ("Authorization", "scoped", "#A78BFA"),
     ("GitHub Actions", "CI", "#7DD3FC"),
     ("Tests", "105 passing", "#22C55E"),
@@ -66,6 +67,7 @@ LABEL_ADVANCE: dict[str, float] = {
     "GitHub Actions": 85.97,
     "Tests": 27.67,
     "License": 40.83,
+    "Vercel": 34.11,
 }
 
 VALUE_ADVANCE: dict[str, float] = {
@@ -82,6 +84,7 @@ VALUE_ADVANCE: dict[str, float] = {
     "CI": 11.88,
     "105 passing": 65.32,
     "MIT": 17.81,
+    "landing": 41.57,
 }
 
 LIVE_LABEL = "Open Live Deployment"

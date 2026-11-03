@@ -11,19 +11,20 @@
     <img src="docs/assets/badges/live-deployment.svg" alt="Open Live Deployment" height="48">
   </a>
 </p>
-
+<br><br>
 <p align="center">
   <a href="https://www.python.org/"><img src="docs/assets/badges/python.svg" alt="Python 3.12" height="31"></a>&nbsp;&nbsp;
   <a href="https://fastapi.tiangolo.com"><img src="docs/assets/badges/fastapi.svg" alt="FastAPI REST + WS" height="31"></a>&nbsp;&nbsp;
   <a href="https://react.dev/"><img src="docs/assets/badges/react.svg" alt="React 19" height="31"></a>&nbsp;&nbsp;
-  <a href="https://www.typescriptlang.org/"><img src="docs/assets/badges/typescript.svg" alt="TypeScript 6" height="31"></a>
+  <a href="https://www.typescriptlang.org/"><img src="docs/assets/badges/typescript.svg" alt="TypeScript 6" height="31"></a>&nbsp;&nbsp;
+  <a href="https://tailwindcss.com/"><img src="docs/assets/badges/tailwind.svg" alt="Tailwind v4" height="31"></a>
   <br><br>
   <a href="https://www.postgresql.org/"><img src="docs/assets/badges/postgresql.svg" alt="PostgreSQL 15" height="31"></a>&nbsp;&nbsp;
-  <a href="https://tailwindcss.com/"><img src="docs/assets/badges/tailwind.svg" alt="Tailwind v4" height="31"></a>&nbsp;&nbsp;
   <a href="https://docs.docker.com/compose/"><img src="docs/assets/badges/docker.svg" alt="Docker Compose" height="31"></a>&nbsp;&nbsp;
   <a href="https://caddyserver.com/"><img src="docs/assets/badges/caddy.svg" alt="Caddy TLS" height="31"></a>&nbsp;&nbsp;
   <a href="docs/decisions.md#adr-014-piston-sidecar-for-sandboxed-student-code-execution"><img src="docs/assets/badges/piston.svg" alt="Piston isolate" height="31"></a>
   <br><br>
+  <a href="https://campus-flow-premier.vercel.app/" target="_blank" rel="noopener"><img src="docs/assets/badges/vercel.svg" alt="Vercel: landing" height="31"></a>&nbsp;&nbsp;
   <a href="docs/architecture.md"><img src="docs/assets/badges/authorization.svg" alt="Authorization: scoped" height="31"></a>&nbsp;&nbsp;
   <a href=".github/workflows/ci.yml"><img src="docs/assets/badges/github-actions.svg" alt="GitHub Actions CI" height="31"></a>&nbsp;&nbsp;
   <a href="backend/tests/"><img src="docs/assets/badges/tests.svg" alt="Tests: 105 passing" height="31"></a>&nbsp;&nbsp;

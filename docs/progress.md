@@ -2211,11 +2211,12 @@ and the landing tour step now show the shipped disclosure rather than the previo
 `frontend/public/shots/assessment.png` was deleted: nothing referenced it, and it was a third stale
 copy of the same screen. The landing page's test figure moved from 103 to 107 in the same pass.
 
-**The badge row is now the whole story, in three rows.** Nine capsule pills became thirteen +
-a wide deployment capsule, arranged as a 4 · 5 · 4 block: the core stack (Python, FastAPI, React,
-TypeScript), then data and the runtime it ships in (PostgreSQL, Tailwind CSS, Docker Compose, Caddy,
-Piston), then what the platform promises (offering-scoped authorization, GitHub Actions, the suite,
-MIT). `live-deployment.svg` sits above them at 46 px and links to
+**The badge row is now the whole story, in three rows.** Nine capsule pills became fourteen +
+a wide deployment capsule, arranged as a 5 · 4 · 5 block: the core stack (Python, FastAPI, React,
+TypeScript, Tailwind), then data and the runtime it ships in (PostgreSQL, Docker Compose, Caddy,
+Piston), then delivery and what the platform promises (Vercel, offering-scoped authorization,
+GitHub Actions, the suite, MIT). `live-deployment.svg` sits above them at 48 px, with a blank line
+between it and the row, and links to
 [campus-flow-premier.vercel.app](https://campus-flow-premier.vercel.app/). That URL was probed
 before it was linked: it serves the SPA's landing page and answers 404 for every `/api` path, so the
 README's old "there is no public demo link" box was rewritten to say exactly that — a presentation,
@@ -2223,6 +2224,8 @@ not a writable instance — rather than contradicting the link sitting above it.
 
 **Verified.** `npx tsc -b` → exit 0; `npm run lint` → 0 errors (15 pre-existing warnings);
 `npm run build` → exit 0; the captured PNG is 1440×1176 and the WebP 1440×1176, both read back to
-confirm the columns and the counts they show; the fourteen badge files parse as XML and were
-rendered in both GitHub themes at their README sizes before shipping. No backend file changed in
+confirm the columns and the counts they show; the fifteen badge files parse as XML and were
+rendered in both GitHub themes at their README sizes before shipping. Vercel is the only hosting
+badge: Render and Neon were considered and left out, because nothing is deployed there and a badge
+is a claim an editor can click. `docker-compose.prod.yml` is the deployment that exists. No backend file changed in
 this pass, so the suite result above still stands.
