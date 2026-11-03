@@ -75,6 +75,13 @@ This document preserves durable technical context, implementation constraints, a
   `suppressed_by_cooldown` (ADR-034, ADR-037, ADR-039).
 - **Neutral Candidate Copy:** Warning strings must stay calm and informational. No strobe,
   no shouting, no "breach" language. Follow the responsible-UX rules in AGENTS.md §13.
+- **What a cue costs is server-owned:** `_proctoring_event_disposition` in
+  `campusflow.domain.exams.service` is the only classifier of a signal's cost, and
+  `COUNTED_EVENT_TYPES` is derived from the vocabulary minus the evidence and review-only sets.
+  A frontend list of "signals that count" is a bug waiting to happen — the brief renders the ids
+  the delivery payload discloses (`counted_event_types`, `review_only_event_types`). If you add a
+  signal, `test_every_signal_has_exactly_one_disposition` fails until you decide what it costs, and
+  `frontend/scripts/check-integrity-signals.ts` fails until it has a candidate-facing sentence.
 - **Faculty-authorised resumption:** `POST /exams/{exam_id}/attempts/{attempt_id}/unlock`
   requires `exams:grade`, is always audited, resets the recorded count and clears
   `last_warning_at`. Students receive 403. A student-facing unlock affordance must never be

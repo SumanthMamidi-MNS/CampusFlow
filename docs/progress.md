@@ -2178,3 +2178,40 @@ signal). The suite's first run caught one real contract break — the camera-gap
 driving `face_not_visible` as a counted cue — which was corrected rather than muted. A live HTTP
 probe with real media was not run in this pass; the server contract is covered end-to-end by the
 API tests above.
+
+### Portfolio pass (2026-11-03) — the badge row, the warning card, and the captures
+
+A review pass over the shipped change found three artefacts that still described the old posture,
+and one of them was a claim the product no longer makes.
+
+**The landing page's warning mock showed an inference costing a warning.** The card said "Warning 8
+of 10 — your face was not visible to the camera", which is precisely what ADR-040 forbids: a face
+that leaves the frame is recorded for the lecturer and never counted. The mock now shows a counted
+act (the picture covered past the disclosed grace) and states, in the card itself, that a model's
+reading of the candidate never appears there. The section's closing paragraph already carried the
+split; the card behind it now agrees with it.
+
+**The badges were redrawn in the same capsule language as the owner's other portfolio project.**
+Nine hand-tuned SVGs became one generated set: a dark obsidian capsule, a pulsing accent gem, the
+label, a hairline divider and the value in mono, with the perimeter flashing in that badge's accent
+and a specular sheen travelling down it, staggered per badge. `docs/assets/badges/build_badges.py`
+owns the content and the geometry, so `tests.svg` can no longer claim "101 Passing" while the suite
+holds 107 — it now reads **105 passing** because that is what the SQLite run reports. README displays
+them at `height="31"` in a 5 + 4 arrangement with `&nbsp;&nbsp;` spacing. AGENTS.md rule 9 and
+`development.md` describe the new convention and the regeneration command.
+
+**The brief capture aged out.** `docs/images/11-assessment.png` and
+`frontend/public/tour/student/student-11-exam-brief.webp` were captured before the disposition split,
+so they showed a single cue list and the old "every confirmed cue" wording. Both were recaptured
+from the running build at 1440 px wide through the documented puppeteer-core recipe, driving the
+demo endpoint (`POST /exams/demo/login`) and photographing the real brief: the timed-paper summary,
+the full integrity card, the two disclosed columns and the camera check. The README's table cell
+and the landing tour step now show the shipped disclosure rather than the previous one.
+
+`frontend/public/shots/assessment.png` was deleted: nothing referenced it, and it was a third stale
+copy of the same screen. The landing page's test figure moved from 103 to 107 in the same pass.
+
+**Verified.** `npx tsc -b` → exit 0; `npm run lint` → 0 errors (15 pre-existing warnings);
+`npm run build` → exit 0; the captured PNG is 1440×1176 and the WebP 1440×1176, both read back to
+confirm the columns and the counts they show. No backend file changed in this pass, so the suite
+result above still stands.

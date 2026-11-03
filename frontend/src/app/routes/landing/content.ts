@@ -46,7 +46,7 @@ export const MARQUEE = [
 export const STATS = [
   { figure: '1', label: 'server', note: 'API · database · sandbox · proxy' },
   { figure: '6', label: 'roles', note: 'one 26-permission catalogue' },
-  { figure: '103', label: 'backend tests', note: 'in the suite · CI runs PostgreSQL' },
+  { figure: '107', label: 'backend tests', note: 'in the suite · CI runs PostgreSQL' },
   { figure: '0', label: 'SaaS deps', note: 'no sign-up, no vendor' },
 ] as const;
 

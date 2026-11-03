@@ -1,35 +1,69 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 133 32" width="133" height="32" fill="none" role="img" aria-label="Python: 3.12">
+<svg xmlns="http://www.w3.org/2000/svg" width="145.1" height="31" viewBox="0 0 145.1 31" fill="none" role="img" aria-label="Python 3.12">
+  <title>Python: 3.12</title>
   <defs>
-    <linearGradient id="python-accent" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38BDF8"/>
-      <stop offset="50%" stop-color="#0284C7"/>
-      <stop offset="100%" stop-color="#0369A1"/>
+    <linearGradient id="bg_python" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#161D29" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#0A0E16" stop-opacity="0.99"/>
     </linearGradient>
-    <clipPath id="python-clip">
-      <rect x="0.5" y="0.5" width="132" height="31" rx="8"/>
+    <linearGradient id="sheen_python" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="50%" stop-color="#38BDF8" stop-opacity="0.30"/>
+      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow_python" x="-60%" y="-160%" width="220%" height="420%">
+      <feGaussianBlur stdDeviation="2.6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="clip_python">
+      <rect x="0.75" y="0.75" width="143.6" height="29.5" rx="14.75"/>
     </clipPath>
+    <style>
+      @keyframes gem_pulse_python {
+        0%, 100% { transform: scale(0.92); transform-origin: 16px 15.5px; }
+        50% { transform: scale(1.16); transform-origin: 16px 15.5px; }
+      }
+      .gem-python { animation: gem_pulse_python 2.4s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) { .gem-python { animation: none; } }
+    </style>
   </defs>
-  <style>
-    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11.5px; }
-    .card { fill: #F6F8FA; }
-    .edge { stroke: #D1D9E0; }
-    .lbl { font-weight: 600; fill: #1F2328; }
-    .val { font-weight: 700; fill: #FFFFFF; }
-    @media (prefers-color-scheme: dark) {
-      .card { fill: #161B22; }
-      .edge { stroke: #30363D; }
-      .lbl { fill: #E6EDF3; }
-    }
-  </style>
-  <g>
-    <rect class="card" x="0.5" y="0.5" width="132" height="31" rx="8"/>
-    <g clip-path="url(#python-clip)">
-      <rect x="0.5" y="0.5" width="5" height="31" fill="url(#python-accent)"/>
+
+  <rect x="0.75" y="0.75" width="143.6" height="29.5" rx="14.75" fill="url(#bg_python)"/>
+  <rect x="0.75" y="0.75" width="143.6" height="29.5" rx="14.75" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="1.2">
+    <animate attributeName="stroke" values="#FFFFFF;#38BDF8;#FFFFFF" dur="3.6s" begin="2.6s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-opacity" values="0.18;0.85;0.18" dur="3.6s" begin="2.6s" repeatCount="indefinite"/>
+  </rect>
+  <path d="M 14 1.5 L 131.1 1.5" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="0.9" stroke-linecap="round"/>
+
+  <g clip-path="url(#clip_python)">
+    <g transform="rotate(14)">
+      <rect x="-30" y="-40" width="195.1" height="18" fill="url(#sheen_python)" opacity="0">
+        <animateTransform attributeName="transform" type="translate" additive="sum"
+          values="0 -30; 0 71; 0 71; 0 -30" keyTimes="0; 0.45; 0.50; 1"
+          dur="3.6s" begin="2.6s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0; 0.8; 0.8; 0; 0" keyTimes="0; 0.10; 0.40; 0.46; 1"
+          dur="3.6s" begin="2.6s" repeatCount="indefinite"/>
+      </rect>
     </g>
-    <g transform="translate(13, 7) scale(0.72)"><path fill="#38BDF8" d="M11.95 0C5.45 0 5.86 2.8 5.86 2.8L5.87 5.7H12.1V6.65H3.6C3.6 6.65 0 6.24 0 12.74C0 19.24 3.14 18.96 3.14 18.96H5.02V16.32C5.02 16.32 4.9 13.16 8.08 13.16H14.28C14.28 13.16 17.29 13.27 17.29 10.39V2.8C17.29 2.8 17.7 0 11.95 0ZM8.9 1.83C9.52 1.83 10.02 2.33 10.02 2.95C10.02 3.57 9.52 4.07 8.9 4.07C8.28 4.07 7.78 3.57 7.78 2.95C7.78 2.33 8.28 1.83 8.9 1.83Z"/><path fill="#FACC15" d="M12.05 24C18.55 24 18.14 21.2 18.14 21.2L18.13 18.3H11.9V17.35H20.4C20.4 17.35 24 17.76 24 11.26C24 4.76 20.86 5.04 20.86 5.04H18.98V7.68C18.98 7.68 19.1 10.84 15.92 10.84H9.72C9.72 10.84 6.71 10.73 6.71 13.61V21.2C6.71 21.2 6.3 24 12.05 24ZM15.1 22.17C14.48 22.17 13.98 21.67 13.98 21.05C13.98 20.43 14.48 19.93 15.1 19.93C15.72 19.93 16.22 20.43 16.22 21.05C16.22 21.67 15.72 22.17 15.1 22.17Z"/></g>
-    <text class="lbl" x="38" y="20.4">Python</text>
-    <rect class="chip" x="87" y="3.5" width="41" height="25" rx="6.5" fill="url(#python-accent)"/>
-    <text class="val" x="107.5" y="20.4" text-anchor="middle">3.12</text>
-    <rect class="edge" x="0.5" y="0.5" width="132" height="31" rx="8" fill="none"/>
   </g>
+
+  <circle cx="16" cy="15.5" r="3.8" fill="none" stroke="#38BDF8">
+    <animate attributeName="r" values="3.8;8.5;12" dur="2.4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.85;0.25;0" dur="2.4s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-width" values="1.5;0.9;0.2" dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+  <g filter="url(#glow_python)">
+    <circle class="gem-python" cx="16" cy="15.5" r="3.7" fill="#38BDF8"/>
+  </g>
+  <circle cx="16" cy="15.5" r="1.3" fill="#FFFFFF" opacity="0.92"/>
+
+  <text x="28" y="19.9" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', sans-serif" font-size="12" font-weight="700" fill="#F8FAFC" letter-spacing="0.2">Python</text>
+  <line x1="85.7" y1="9" x2="85.7" y2="22" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="1"/>
+  <text x="95.7" y="19.6" font-family="'JetBrains Mono', Consolas, Monaco, monospace" font-size="10.5" font-weight="700" fill="#94A3B8" letter-spacing="0.25">3.12
+    <animate attributeName="fill" values="#94A3B8;#38BDF8;#94A3B8" dur="3.6s" begin="2.6s" repeatCount="indefinite"/>
+  </text>
 </svg>

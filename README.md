@@ -7,15 +7,16 @@
 </h3>
 
 <p align="center">
-  <a href="https://www.python.org/"><img src="docs/assets/badges/python.svg" alt="Python 3.12" height="30"></a>
-  <a href="https://fastapi.tiangolo.com"><img src="docs/assets/badges/fastapi.svg" alt="FastAPI REST + WS" height="30"></a>
-  <a href="https://react.dev"><img src="docs/assets/badges/react.svg" alt="React 19" height="30"></a>
-  <a href="https://www.postgresql.org/"><img src="docs/assets/badges/postgresql.svg" alt="PostgreSQL 15" height="30"></a>
-  <a href="https://docs.docker.com/compose/"><img src="docs/assets/badges/docker.svg" alt="Docker Compose" height="30"></a>
-  <a href="docs/architecture.md"><img src="docs/assets/badges/authorization.svg" alt="Authorization: offering scope" height="30"></a>
-  <a href="docs/decisions.md#adr-014-piston-sidecar-for-sandboxed-student-code-execution"><img src="docs/assets/badges/sandbox.svg" alt="Sandbox: Piston isolate" height="30"></a>
-  <a href="backend/tests/"><img src="docs/assets/badges/tests.svg" alt="101 Passing" height="30"></a>
-  <a href="LICENSE"><img src="docs/assets/badges/license.svg" alt="MIT License" height="30"></a>
+  <a href="https://www.python.org/"><img src="docs/assets/badges/python.svg" alt="Python 3.12" height="31"></a>&nbsp;&nbsp;
+  <a href="https://fastapi.tiangolo.com"><img src="docs/assets/badges/fastapi.svg" alt="FastAPI REST + WS" height="31"></a>&nbsp;&nbsp;
+  <a href="https://react.dev"><img src="docs/assets/badges/react.svg" alt="React 19" height="31"></a>&nbsp;&nbsp;
+  <a href="https://www.postgresql.org/"><img src="docs/assets/badges/postgresql.svg" alt="PostgreSQL 15" height="31"></a>&nbsp;&nbsp;
+  <a href="https://docs.docker.com/compose/"><img src="docs/assets/badges/docker.svg" alt="Docker Compose" height="31"></a>
+  <br><br>
+  <a href="docs/architecture.md"><img src="docs/assets/badges/authorization.svg" alt="Authorization: offering scope" height="31"></a>&nbsp;&nbsp;
+  <a href="docs/decisions.md#adr-014-piston-sidecar-for-sandboxed-student-code-execution"><img src="docs/assets/badges/sandbox.svg" alt="Sandbox: Piston isolate" height="31"></a>&nbsp;&nbsp;
+  <a href="backend/tests/"><img src="docs/assets/badges/tests.svg" alt="Tests: 105 passing" height="31"></a>&nbsp;&nbsp;
+  <a href="LICENSE"><img src="docs/assets/badges/license.svg" alt="MIT License" height="31"></a>
 </p>
 
 <p align="center">

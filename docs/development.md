@@ -400,10 +400,27 @@ so it cannot serve `npm run dev`; `docker-compose.prod.yml` uses it for the stat
 add a frontend container, check which image you are pointing at first — that mismatch is a startup
 failure, not a fallback.
 
+### Regenerating the README badges
+
+`docs/assets/badges/*.svg` are generated, not drawn by hand:
+
+```bash
+python docs/assets/badges/build_badges.py
+```
+
+Change the figures in `BADGES` at the top of that file (the suite size lives there and in the
+Verification block above) and rerun it. Every capsule is rebuilt from the same geometry, so the
+nine files cannot drift in width, padding or animation phase. The badge is a dark obsidian capsule
+with a pulsing accent gem, the label, a hairline divider and the value in mono; GitHub renders an
+SVG inside `<img>` as a still frame, so the capsule is designed to read correctly without motion.
+
 ### Regenerating the README screenshots
 
-`docs/images/*.png` are real captures of the running product at 1440×900, taken with `puppeteer-core`
-driving the installed Chrome (`headless: 'shell'`). Refresh them when the UI changes:
+`docs/images/*.png` are real captures of the running product at 1440 px wide, taken with
+`puppeteer-core` driving the installed Chrome (`headless: 'shell'`). The viewport is 900 px tall;
+`11-assessment.png` is a **full-page** capture because the candidate brief is taller than the
+viewport, and cropping it would hide the disclosure the image exists to show. Refresh them when the
+UI changes:
 
 ```bash
 # 1. Capture against a CLEAN seeded database — manual QA leftovers photograph as unfinished work.
@@ -458,6 +475,14 @@ The in-progress attempt cannot be captured from the seeded attempts — they are
 so the recipe creates one temporary live exam (proctoring disabled) with five questions, starts an
 attempt for a seeded student, captures the delivery screen, and deletes the exam afterwards. The
 delete is the API's own `DELETE /exams/{id}`, which leaves no orphan attempts or responses.
+
+The candidate **brief** (the pre-start screen) is simpler: call `POST /api/v1/exams/demo/login` with
+any signed-in token, take the `access_token` and `exam_id` it returns, write the token into
+`localStorage.access_token`, and navigate to `/exams/{exam_id}/take`. That is the same endpoint the
+"Take demo exam" button uses, so the capture needs no click path through the list. Wait for `#boot`
+to disappear **and** for the brief's own text ("CampusFlow Demo Assessment") before shooting: the
+component renders a placeholder shell first, and a capture taken then shows em dashes where the
+duration and marks belong.
 
 ---
 

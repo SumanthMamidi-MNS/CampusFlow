@@ -1249,9 +1249,14 @@ function Integrity() {
                     Warning 8 of 10
                   </p>
                   <p className="mt-2 text-[12.5px] leading-relaxed text-slate-600">
-                    Your face was not visible to the camera. <strong>2 warnings left</strong>{' '}
-                    before this sitting stops; only your lecturer can reopen it. If this was a
-                    fault on your side, tell them now.
+                    Your camera picture was covered for longer than the disclosed grace.{' '}
+                    <strong>2 warnings left</strong> before this sitting stops; only your lecturer
+                    can reopen it. If this was a fault on your side, tell them now.
+                  </p>
+                  <p className="mt-2 text-[11.5px] leading-relaxed text-slate-500">
+                    A model’s reading of you — a turned head, a hand at the face, a second voice —
+                    never appears in this card. Those are recorded for your lecturer and never
+                    counted against your allowance.
                   </p>
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600">
                     Once you acknowledge a warning, another cannot be counted for{' '}
