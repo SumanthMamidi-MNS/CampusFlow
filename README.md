@@ -7,11 +7,12 @@
 </h3>
 
 <p align="center">
+  <br>
   <a href="https://campus-flow-premier.vercel.app/" target="_blank" rel="noopener">
     <img src="docs/assets/badges/live-deployment.svg" alt="Open Live Deployment" height="48">
   </a>
+  <br>&nbsp;
 </p>
-<br><br>
 <p align="center">
   <a href="https://www.python.org/"><img src="docs/assets/badges/python.svg" alt="Python 3.12" height="31"></a>&nbsp;&nbsp;
   <a href="https://fastapi.tiangolo.com"><img src="docs/assets/badges/fastapi.svg" alt="FastAPI REST + WS" height="31"></a>&nbsp;&nbsp;
