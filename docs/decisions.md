@@ -771,7 +771,10 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
 ### ADR-032: A Confirmed Cue Spends a Warning, and Every Cue Ships Switched On
 
 * **Status:** Accepted (2026-10-30) — supersedes the "observation tier" classification in ADR-024,
-  ADR-028 and ADR-030, and the off-by-default switches in ADR-029.
+  ADR-028 and ADR-030, and the off-by-default switches in ADR-029. **Superseded in part 2026-11-03
+  by ADR-040:** a deliberate act (leaving the paper, closing or covering the camera, a device in
+  shot) still spends one warning, while an inference about the candidate is recorded for review
+  and never counted. The switch defaults in this ADR still stand.
 * **Context:** The observation tier was built so a model could never punish a candidate, and it did
   that job too well. Every camera cue — a hand at the face, a phone in shot, sustained talking, mouth
   movement — was recorded for review and charged nothing, so a candidate who ignored the advisory
@@ -977,3 +980,50 @@ export/import and bureau paper-assembly are unchanged; the directory reads now r
   The five-second gap means a second warning can arrive five seconds after the acknowledgement,
   never before it; signals inside the window are still recorded with `counted: false`. The
   regression tests pin both the disclosure value and the opt-in default.
+
+### ADR-040: A Leisurely Integrity Posture — Deliberate Acts Count, Inference Is Evidence
+
+* **Status:** Accepted (2026-11-03) — supersedes the counting half of ADR-032 and D-13's resolution
+  for the six inference cues. Keeps the mechanics of ADR-023/026/029/030/031/034/035/037/038/039.
+* **Context:** ADR-032 made every confirmed camera and microphone cue spend one warning, on the
+  argument that a cue recorded but never counted is indistinguishable from a detector that does
+  not work. That argument is right about a *detector* and wrong about a *charge*. Six of those cues
+  are model readings about the candidate — gaze, presence, face count, hand proximity, a second
+  voice, mouth motion — and the published evidence on exactly that inference is that it belongs to
+  a human: browser events are near-deterministic, webcam inference is only ever a flag for a
+  reviewer, and a 2022 study of automated proctoring found 74 wrong decisions across 244 attempts.
+  ADR-039 had already had to retire the mouth cue to opt-in because a pixel heuristic fired on a
+  still face and spent a warning the candidate had not earned. Charging an inference means charging
+  the model's error rate to a candidate — and the candidates who pay first are the ones with an
+  unusual room, an atypical camera, darker skin under a weak detector, or a disability. Meanwhile
+  the acts the browser itself can attest to — leaving the paper, closing the camera, covering the
+  lens, holding a phone into the picture — carry essentially no false-positive rate and are exactly
+  the deliberate routes the allowance exists to deter.
+* **Decision:** every signal in `PROCTORING_EVENT_TYPES` has exactly one **disposition**, owned by
+  the server and disclosed to the candidate before the first event:
+  - **counted** (spends one warning, climbs the ladder, can stop the paper): `tab_switch`,
+    `window_blur`, `fullscreen_exit`, the three clipboard names, `context_menu`, `window_resized`,
+    `ip_change`, `camera_off`, `camera_obstructed`, `second_device_detected`;
+  - **review_only** (recorded with its measurement, raises the review flag, never counted and never
+    able to lock or submit): `looking_away`, `face_not_visible`, `multiple_faces_detected`,
+    `hand_near_face`, `voice_detected`, `mouth_movement_detected`;
+  - **evidence** (recorded, never a finding, unchanged): `camera_snapshot`, `quick_tab_return`.
+  `REVIEW_ONLY_EVENT_TYPES` is a new set; `COUNTED_EVENT_TYPES` is derived so the three cannot
+  drift; `_proctoring_event_disposition` is the single classifier, separate from
+  `_proctoring_event_category` (which only says where a cue came from). The ingest path returns an
+  inference cue after the append and the review flag, before the conditional `UPDATE`. Every
+  proctoring response and every timeline row carries `disposition`; `ExamStudentConfig` and the
+  delivery payload carry `counted_event_types` and `review_only_event_types` from the same sets.
+  The candidate surface never raises a modal for a review-only response; the existing coverage
+  gates (a turned head, an absent face) still cover the paper, which is a display of the reading,
+  not a charge for it.
+* **Consequences:** The allowance, the two policy outcomes, the acknowledged 5 s gap, the
+  concurrency gate, the dwell tiers, obstruction grace, evidence retention and the mouth cue's
+  opt-in default are all unchanged — leisureliness comes only from which signals may spend. A
+  candidate can no longer lose a warning for a model's mistake; a candidate who closes or covers
+  the camera, or brings a phone into shot, still climbs the ladder to the stop. Every inference is
+  still on the timeline with its angle, dwell or level and still raises the review flag, so "we
+  stopped charging for it" never becomes "we stopped watching it". The tests were rewritten to the
+  new contract rather than loosened: the same evidence is asserted, with the opposite expectation.
+  If an institution decides a particular inference should be charged, that is one line in
+  `REVIEW_ONLY_EVENT_TYPES` plus an ADR — deliberately visible, not a hidden setting.

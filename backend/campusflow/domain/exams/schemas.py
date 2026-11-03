@@ -407,6 +407,13 @@ class ExamStudentConfig(BaseModel):
     # "how long can I look away" is answered before the paper rather than by a
     # warning mid-answer.
     dwell_ms: dict[str, int] = Field(default_factory=dict)
+    # Disclosed: the exact vocabulary and what each signal costs. Counted signals
+    # can spend the allowance; review-only signals are recorded for the lecturer's
+    # review and never counted (ADR-040). Sent as ids from the server's own sets,
+    # so the brief renders what the server enforces rather than a copy that can
+    # drift from it.
+    counted_event_types: list[str] = Field(default_factory=list)
+    review_only_event_types: list[str] = Field(default_factory=list)
     # Disclosed: how long the camera must be continuously obstructed before it is
     # reported, so the candidate knows the grace they actually have.
     obstruction_threshold_seconds: int = DEFAULT_OBSTRUCTION_THRESHOLD_SECONDS
@@ -515,6 +522,11 @@ class ExamDeliveryResponse(BaseModel):
     audio_monitoring_enabled: bool = DEFAULT_AUDIO_MONITORING
     mouth_monitoring_enabled: bool = DEFAULT_MOUTH_MONITORING
     dwell_ms: dict[str, int] = Field(default_factory=dict)
+    # The signal split this attempt is actually run under (ADR-040): which cues
+    # can spend the allowance and which are recorded for review only. Echoed with
+    # the delivery so the brief never promises a cost the server does not apply.
+    counted_event_types: list[str] = Field(default_factory=list)
+    review_only_event_types: list[str] = Field(default_factory=list)
     # Seconds of continuous camera obstruction before it is reported, authored
     # per exam (D-12) and echoed to the client that enforces it.
     obstruction_threshold_seconds: int = DEFAULT_OBSTRUCTION_THRESHOLD_SECONDS
@@ -610,6 +622,10 @@ class ProctoringEventResponse(BaseModel):
     severity: str
     details: dict[str, Any] | None = None
     event_category: str = "browser_signal"
+    # What this cue cost on this attempt: ``counted``, ``review_only`` or
+    # ``evidence`` (ADR-040). Separate from `event_category`, which only says
+    # where the cue came from.
+    disposition: str = "counted"
     evidence_purged_at: datetime | None = None
 
 
@@ -630,6 +646,11 @@ class ProctoringStatusResponse(BaseModel):
     # Explicit signal category lets the candidate distinguish browser telemetry,
     # model observations, and passive evidence without guessing from a message.
     event_category: str | None = None
+    # Whether this response's cue spent the allowance:
+    # ``counted`` / ``review_only`` / ``evidence`` (ADR-040). The candidate
+    # surface uses it to keep an inference cue silent — recorded and flagged, but
+    # never a modal and never a counter.
+    disposition: str | None = None
 
 
 class WarningAcknowledgementResponse(BaseModel):

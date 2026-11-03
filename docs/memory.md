@@ -712,11 +712,16 @@ silence forever while the candidate screen says a voice check is listening. The 
 the paper still starts — with `voiceScan` honestly reporting `unavailable` rather than `active`.
 Check `stream.getAudioTracks().length` before claiming to listen.
 
-**A cue that is recorded but never counted is indistinguishable from a detector that does not work.**
-The advisory tier meant a raised phone, sustained talking and mouth movement produced review items
-and zero warnings, so the candidate watching their counter saw nothing happen. Confirmed cues now
-spend the disclosed allowance (ADR-032). If a future cue is added, decide explicitly whether it
-charges the ladder; "recorded only" is a product decision that has to be argued, not a default.
+**What a cue costs is a separate decision from what it measures.** The advisory tier failed because
+a cue recorded but never counted looked like a detector that did nothing, and ADR-032 answered by
+charging everything — which charged the candidate for the model's error rate. The rule is now one
+disposition per signal (ADR-040): a deliberate act the browser can attest to (leaving the paper,
+closing or covering the camera, a device in shot) spends the allowance; an inference about the
+candidate (gaze, presence, face count, hand, voice, mouth) is recorded with its measurement and
+raises the review flag, and never touches the counter. `event_category` answers where a cue came
+from; `disposition` answers what it costs, and conflating the two is how the inference ended up
+charged in the first place. A new signal has to be added to one of the three sets —
+`test_every_signal_has_exactly_one_disposition` fails otherwise, deliberately.
 
 **Server-side duplicate debounce must not apply to a cue the client has already confirmed.**
 `PROCTORING_EVENT_DEDUPE_SECONDS` collapses a repeat of the same `event_type` inside a few seconds.

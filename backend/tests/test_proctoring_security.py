@@ -244,6 +244,26 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     assert snap_status["warning"] is None
     assert snap_status["is_locked"] is False
     assert snap_status["status"] == "in_progress"
+    assert snap_status["disposition"] == "evidence"
+
+    # 11b. A camera inference is recorded for the lecturer and never counted:
+    # the number the candidate is judged by must not move (ADR-040).
+    inference = await client.post(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+        headers=student_headers,
+        json={
+            "event_type": "looking_away",
+            "severity": "medium",
+            "details": {"direction": "right", "yaw_degrees": 55, "dwell_ms": 2400},
+        },
+    )
+    assert inference.status_code == 200, inference.text
+    inference_status = inference.json()["data"]
+    assert inference_status["violations_count"] == 1
+    assert inference_status["warning"] is None
+    assert inference_status["is_locked"] is False
+    assert inference_status["event_category"] == "camera_observation"
+    assert inference_status["disposition"] == "review_only"
 
     # 12. Camera loss is a counted warning as well as a camera observation: the
     # candidate is told, and the number they are judged by stays truthful.
@@ -258,6 +278,7 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     assert cam_status["auto_submitted"] is False
     assert cam_status["is_locked"] is False
     assert cam_status["event_category"] == "camera_observation"
+    assert cam_status["disposition"] == "counted"
 
     # 13. Oversized frames are refused instead of being stored.
     huge = await client.post(
@@ -280,6 +301,13 @@ async def test_observable_proctoring_threshold_and_faculty_review(client, db_ses
     final_types = [e["event_type"] for e in final_timeline.json()["data"]]
     assert "camera_snapshot" in final_types
     assert "camera_off" in final_types
+    assert "looking_away" in final_types
+    # The timeline states what each entry cost, so a reviewer never has to infer
+    # it from the source category (ADR-040).
+    by_type = {e["event_type"]: e["disposition"] for e in final_timeline.json()["data"]}
+    assert by_type["camera_snapshot"] == "evidence"
+    assert by_type["camera_off"] == "counted"
+    assert by_type["looking_away"] == "review_only"
 
 
 @pytest.mark.asyncio

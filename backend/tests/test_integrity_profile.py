@@ -6,12 +6,16 @@ sustained second voice. The contract these tests hold to:
 
   * a paper's dwell tier is authored per exam and disclosed as *values*, so the
     client enforces the seconds the candidate was told about;
-  * every confirmed cue is recorded as evidence, raises a faculty review, and
-    costs exactly one of the warnings the candidate was told about (D-31): a
-    cue that is recorded but never warns is indistinguishable from a detector
-    that does not work;
+  * what a cue costs is a disposition the server owns (ADR-040): a deliberate act
+    the browser can attest to spends one of the warnings the candidate was told
+    about, while a model's inference about the candidate is recorded with its
+    measurement and raises a faculty review without ever being charged;
+  * the split is disclosed before the paper starts, from the same sets the
+    ingest path applies, so the brief cannot promise a cost the server does not
+    charge;
   * the ladder is the product's — the authored allowance, then a stop that only
-    a lecturer can lift — so a camera cue and a tab switch end the same way;
+    a lecturer can lift — and a deliberate camera act (the feed stopped, the
+    picture was blocked) reaches it exactly as a tab switch does;
   * the tier is validated at authoring time, so a cohort can never be held to a
     dwell nobody authored.
 """
@@ -30,6 +34,13 @@ from campusflow.domain.departments.models import Department
 from campusflow.domain.enrollments.models import Enrollment
 from campusflow.domain.exams.models import Exam
 from campusflow.domain.exams.schemas import INTEGRITY_DWELL_MS, integrity_dwell_ms
+from campusflow.domain.exams.service import (
+    COUNTED_EVENT_TYPES,
+    NON_VIOLATION_EVENT_TYPES,
+    PROCTORING_EVENT_TYPES,
+    REVIEW_ONLY_EVENT_TYPES,
+    _proctoring_event_disposition,
+)
 from campusflow.domain.users.models import User
 
 
@@ -113,6 +124,63 @@ def test_unknown_or_missing_sensitivity_falls_back_to_standard():
     assert integrity_dwell_ms({}) == INTEGRITY_DWELL_MS["standard"]
     assert integrity_dwell_ms({"integrity_sensitivity": "paranoid"}) == INTEGRITY_DWELL_MS["standard"]
     assert integrity_dwell_ms({"integrity_sensitivity": "strict"}) == INTEGRITY_DWELL_MS["strict"]
+
+
+def test_every_signal_has_exactly_one_disposition():
+    """The three dispositions partition the vocabulary, and every name is decided.
+
+    A future cue cannot silently inherit "counted": a name added to
+    `PROCTORING_EVENT_TYPES` without a classification fails here first (ADR-040).
+    """
+    assert (
+        COUNTED_EVENT_TYPES | REVIEW_ONLY_EVENT_TYPES | NON_VIOLATION_EVENT_TYPES
+        == PROCTORING_EVENT_TYPES
+    )
+    assert not COUNTED_EVENT_TYPES & REVIEW_ONLY_EVENT_TYPES
+    assert not COUNTED_EVENT_TYPES & NON_VIOLATION_EVENT_TYPES
+    assert not REVIEW_ONLY_EVENT_TYPES & NON_VIOLATION_EVENT_TYPES
+
+    # Deliberate acts stay on the ladder, including the three camera acts whose
+    # cheapness is exactly why they must be charged.
+    for counted in (
+        "tab_switch",
+        "camera_off",
+        "camera_obstructed",
+        "second_device_detected",
+        "ip_change",
+    ):
+        assert _proctoring_event_disposition(counted) == "counted"
+    # Inference never does.
+    for cue in REVIEW_ONLY_EVENT_TYPES:
+        assert _proctoring_event_disposition(cue) == "review_only"
+    assert _proctoring_event_disposition("camera_snapshot") == "evidence"
+    assert _proctoring_event_disposition("quick_tab_return") == "evidence"
+
+
+@pytest.mark.asyncio
+async def test_the_split_is_disclosed_before_the_paper(client, db_session):
+    """The brief and the delivery carry the split the ingest path actually applies.
+
+    A candidate who is told which cues can spend the allowance, and which are
+    only recorded for their lecturer, is not surprised by a counter they were
+    never shown the rules of (ADR-040).
+    """
+    _faculty, student, exam = await _make_exam(db_session)
+    headers = {"Authorization": f"Bearer {create_access_token({'sub': str(student.id)})}"}
+
+    brief = await client.get(f"/api/v1/exams/{exam.id}/public", headers=headers)
+    assert brief.status_code == 200, brief.text
+    config = brief.json()["data"]["config"]
+    assert set(config["counted_event_types"]) == set(COUNTED_EVENT_TYPES)
+    assert set(config["review_only_event_types"]) == set(REVIEW_ONLY_EVENT_TYPES)
+    assert "camera_off" in config["counted_event_types"]
+    assert "hand_near_face" in config["review_only_event_types"]
+
+    started = await client.post(f"/api/v1/exams/{exam.id}/start", headers=headers, json={})
+    assert started.status_code == 200, started.text
+    delivery = started.json()["data"]
+    assert set(delivery["counted_event_types"]) == set(COUNTED_EVENT_TYPES)
+    assert set(delivery["review_only_event_types"]) == set(REVIEW_ONLY_EVENT_TYPES)
 
 
 @pytest.mark.asyncio
@@ -226,26 +294,25 @@ async def test_defaults_monitor_every_cue_of_an_unauthored_paper(client, db_sess
             },
         ),
         (
-            # A watch found in the wrist close-up the hand landmarker supplies.
-            # `region` is what tells a reviewer this came from the crop rather
-            # than the weak whole-frame read, so it has to survive the round trip.
-            "second_device_detected",
-            {
-                "category": "smartwatch",
-                "region": "wrist",
-                "confidence": 0.62,
-                "model": "mobilenet",
-                "confirmations": 3,
-            },
+            "looking_away",
+            {"direction": "right", "yaw_degrees": 62, "dwell_ms": 2000},
+        ),
+        (
+            "face_not_visible",
+            {"reason": "no_face_in_view", "dwell_ms": 3000},
+        ),
+        (
+            "multiple_faces_detected",
+            {"faces": 2, "dwell_ms": 1500},
         ),
     ],
 )
-async def test_camera_cues_warn_and_raise_a_review(client, db_session, event_type, details):
-    """A model cue (hand, voice, mouth, device) warns and raises a faculty review.
+async def test_inference_cues_are_recorded_and_never_counted(client, db_session, event_type, details):
+    """A model's reading of the candidate is evidence for a human, not a charge.
 
-    The candidate is told which behaviour was seen and which warning this is, the
-    lecturer gets an actionable item with the measurement attached, and the cue
-    spends exactly one unit of the disclosed allowance (D-31).
+    The candidate is told nothing and loses nothing; the lecturer receives the
+    measurement and the review flag (ADR-040). One counted browser event goes
+    first, so "unchanged" is measured against a non-zero counter.
     """
     faculty, student, exam = await _make_exam(
         db_session,
@@ -279,14 +346,15 @@ async def test_camera_cues_warn_and_raise_a_review(client, db_session, event_typ
     )
     assert event.status_code == 200, event.text
     body = event.json()["data"]
-    assert body["violations_count"] == 2, f"{event_type} must spend one warning"
+    assert body["violations_count"] == 1, f"{event_type} must never spend the allowance"
     assert body["is_locked"] is False
     assert body["auto_submitted"] is False
     assert body["status"] == "in_progress"
-    # The candidate is told the count and what was actually seen, not just that
-    # something happened.
-    assert "2 of 7" in body["warning"]
+    # Nothing is charged and nothing is announced: an inference that can be
+    # wrong is not something the candidate has to answer for at the desk.
+    assert body["warning"] is None
     assert body["event_category"] == "camera_observation"
+    assert body["disposition"] == "review_only"
 
     # The measurement travels with the event, so a reviewer can weigh the cue.
     faculty_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(faculty.id)})}"}
@@ -298,6 +366,7 @@ async def test_camera_cues_warn_and_raise_a_review(client, db_session, event_typ
     assert matching, f"{event_type} must appear on the lecturer's timeline"
     for key, value in details.items():
         assert matching[0]["details"][key] == value
+    assert matching[0]["disposition"] == "review_only"
 
     # And it raises the review flag that makes it actionable.
     flagged = await client.get(
@@ -309,13 +378,13 @@ async def test_camera_cues_warn_and_raise_a_review(client, db_session, event_typ
 
 
 @pytest.mark.asyncio
-async def test_hand_near_face_reaches_the_lock_and_only_lecturer_reopens(client, db_session):
-    """A camera cue walks the same ladder as a tab switch, stop included.
+async def test_review_only_cue_never_reaches_the_lock_and_a_deliberate_act_does(client, db_session):
+    """An inference is evidence; only a deliberate act can stop the paper.
 
-    An allowance of two is deliberately tight: the second confirmed hand cue has
-    to stop the paper, and the attempt may only come back through the lecturer's
-    unlock. Anything else would mean the candidate's most reliable route back to
-    an answer — a phone in shot — was never really watched.
+    An allowance of two makes the boundary visible: any number of hand-at-face
+    readings leaves the candidate working with a full allowance, while the
+    cheapest deliberate act — killing the camera feed — still walks the ladder to
+    the stop, which only the lecturer's unlock lifts (ADR-040).
     """
     faculty, student, exam = await _make_exam(
         db_session,
@@ -329,26 +398,52 @@ async def test_hand_near_face_reaches_the_lock_and_only_lecturer_reopens(client,
     start = await client.post(f"/api/v1/exams/{exam.id}/start", headers=headers, json={})
     attempt_id = start.json()["data"]["attempt_id"]
 
-    first = await client.post(
-        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
-        headers=headers,
-        json={"event_type": "hand_near_face", "severity": "medium", "details": {"dwell_ms": 2600}},
-    )
-    assert first.status_code == 200, first.text
-    assert first.json()["data"]["violations_count"] == 1
-    assert first.json()["data"]["is_locked"] is False
+    # More readings than the whole allowance: none of them spends anything.
+    for dwell in (2400, 2600, 2700, 3100):
+        cue = await client.post(
+            f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+            headers=headers,
+            json={
+                "event_type": "hand_near_face",
+                "severity": "medium",
+                "details": {"dwell_ms": dwell},
+            },
+        )
+        assert cue.status_code == 200, cue.text
+        body = cue.json()["data"]
+        assert body["violations_count"] == 0, "an inference must never spend the allowance"
+        assert body["warning"] is None
+        assert body["is_locked"] is False
+        assert body["disposition"] == "review_only"
 
-    second = await client.post(
-        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
-        headers=headers,
-        json={"event_type": "hand_near_face", "severity": "medium", "details": {"dwell_ms": 2700}},
+    # The lecturer still receives every one of them, with its measurement.
+    faculty_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(faculty.id)})}"}
+    timeline = await client.get(
+        f"/api/v1/exam-attempts/{attempt_id}/proctoring-events", headers=faculty_headers
     )
-    assert second.status_code == 200, second.text
-    locked = second.json()["data"]
+    hands = [e for e in timeline.json()["data"] if e["event_type"] == "hand_near_face"]
+    assert len(hands) == 4
+    assert {e["disposition"] for e in hands} == {"review_only"}
+    assert [e["details"]["dwell_ms"] for e in hands] == [2400, 2600, 2700, 3100]
+
+    # A deliberate act is still charged, and the ladder still stops the paper.
+    for _ in range(2):
+        off = await client.post(
+            f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
+            headers=headers,
+            json={
+                "event_type": "camera_off",
+                "severity": "high",
+                "details": {"reason": "track_ended"},
+            },
+        )
+        assert off.status_code == 200, off.text
+    locked = off.json()["data"]
     assert locked["violations_count"] == 2
     assert locked["is_locked"] is True
     assert locked["status"] == "locked_violation"
-    assert "hand" in locked["warning"].lower()
+    assert locked["disposition"] == "counted"
+    assert "camera" in locked["warning"].lower()
     # Answers are kept, and the candidate is told who can lift the stop.
     assert "lecturer" in locked["warning"].lower()
 
@@ -359,7 +454,6 @@ async def test_hand_near_face_reaches_the_lock_and_only_lecturer_reopens(client,
     # Still stopped: the request is a message to the lecturer, not a key.
     assert asked.json()["data"]["status"] == "locked_violation"
 
-    faculty_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(faculty.id)})}"}
     reopened = await client.post(
         f"/api/v1/exams/{exam.id}/attempts/{attempt_id}/unlock",
         headers=faculty_headers,
@@ -368,10 +462,10 @@ async def test_hand_near_face_reaches_the_lock_and_only_lecturer_reopens(client,
     assert reopened.status_code == 200, reopened.text
     assert reopened.json()["data"]["status"] == "in_progress"
 
-    # A fresh allowance, so the next cue is warning 1 again.
-    third = await client.post(
+    # A fresh allowance, and the review-only cue is still free afterwards.
+    after = await client.post(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
         headers=headers,
         json={"event_type": "hand_near_face", "severity": "medium", "details": {"dwell_ms": 2400}},
     )
-    assert third.json()["data"]["violations_count"] == 1
+    assert after.json()["data"]["violations_count"] == 0

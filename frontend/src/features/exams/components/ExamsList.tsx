@@ -856,8 +856,8 @@ export function ExamsList() {
                       Hand-at-face check
                       <span className="mt-0.5 block text-[11px] text-slate-500">
                         Catches the pattern of reading from a phone held below the shot or a
-                        sheet raised to eye level. It raises a warning the candidate sees,
-                        spends one of their warnings, and is recorded for your review.
+                        sheet raised to eye level. It is recorded for your review with its
+                        measurement and never counted against the candidate's allowance.
                       </span>
                     </span>
                   </label>
@@ -873,8 +873,8 @@ export function ExamsList() {
                       <span className="mt-0.5 block text-[11px] text-slate-500">
                       Sees a second person who never enters the frame. Only loudness and shape
                       are measured on the candidate’s own device — <strong>no audio is
-                      recorded, stored or transmitted</strong>. A confirmed cue raises a
-                      warning the candidate sees and is recorded for your review.
+                      recorded, stored or transmitted</strong>. A confirmed cue is recorded
+                      for your review and never counted against the candidate's allowance.
                       </span>
                     </span>
                   </label>
@@ -891,8 +891,9 @@ export function ExamsList() {
                         An opt-in experiment: it measures movement in the camera picture —
                         <strong>no speech is recognised and no audio is captured</strong>. The
                         pixel heuristic can mistake a jaw, a cheek or camera noise for speech,
-                        and a misfire spends a warning, so it is off in the demo and for new
-                        papers. The second-voice check is the supported talking signal.
+                        and a misfire would put a wrong observation in front of you, so it is
+                        off in the demo and for new papers. The second-voice check is the
+                        supported talking signal.
                       </span>
                     </span>
                   </label>

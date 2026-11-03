@@ -915,9 +915,12 @@ function IntegrityLogModal({
                 judgement. They do not by themselves determine a breach.
               </p>
               <p className="mb-3 text-[11px] text-slate-500">
-                Browser/page events are direct session telemetry. Camera and microphone entries
-                are model/sensor observations that can be wrong; they are review leads, not proof.
-                A removed image is shown as expired and cannot be recovered from this log.
+                Browser/page events are direct session telemetry, and closing or blocking the
+                camera is a deliberate act: those are counted by exam policy. Camera and
+                microphone inferences — a turned head, a hand at the face, a second voice — are
+                model/sensor readings that can be wrong, so they are recorded here for your
+                review and never counted against the candidate. A removed image is shown as
+                expired and cannot be recovered from this log.
               </p>
               <ol className="space-y-3 border-l border-slate-200 pl-4">
                 {timeline.map((event) => (
@@ -948,11 +951,13 @@ function IntegrityLogModal({
                             : 'border-indigo-100 bg-indigo-50 text-indigo-800'
                       }`}
                     >
-                      {event.event_category === 'camera_observation'
-                        ? 'Camera / sensor cue · counted by exam policy · reviewable'
-                        : event.event_category === 'evidence'
+                      {event.disposition === 'review_only'
+                        ? 'Camera / sensor inference · recorded for review · never counted'
+                        : event.disposition === 'evidence' || event.event_category === 'evidence'
                           ? 'Passive evidence · never counted'
-                          : 'Browser / page telemetry · counted by exam policy'}
+                          : event.event_category === 'camera_observation'
+                            ? 'Camera / sensor cue · counted by exam policy'
+                            : 'Browser / page telemetry · counted by exam policy'}
                     </p>
                     {event.evidence_purged_at && (
                       <p className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">

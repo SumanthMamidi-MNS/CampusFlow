@@ -803,6 +803,8 @@ stateDiagram-v2
 > [!IMPORTANT]
 > CampusFlow implements **observable, rules-based proctoring**, not AI/webcam proctoring. This is a deliberate decision based on privacy, reliability, legal, and infrastructure considerations.
 
+> **Current posture (ADR-040, 2026-11-03).** What a cue costs is a separate decision from what it measures. Leaving the paper, closing or covering the camera, and a phone/earbud/watch in shot are **counted** on the disclosed allowance; a turned head, an absent face, a second face, a hand at the face, a sustained second voice and (opt-in) mouth motion are **recorded with their measurement and never counted** — they raise the lecturer's review flag and nothing else. The event table and the "does not do" list below describe the pre-camera release; the shipped on-device checks are documented in `architecture.md` and ADR-024–032/040. Nothing is streamed, no audio is recorded, and no model decides a breach.
+
 **What the system monitors (client-side, reported to server):**
 
 | Event | Detection Method | Severity |

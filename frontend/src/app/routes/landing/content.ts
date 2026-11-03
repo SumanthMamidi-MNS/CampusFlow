@@ -530,37 +530,35 @@ export const INTEGRITY_FACTS = [
 ] as const;
 
 /**
- * What a paper records, and what the lecturer receives (ADR-029, ADR-032).
+ * What a paper charges for, and what it simply records (ADR-040).
  *
- * Every confirmed cue — browser event or camera measurement — spends exactly one
- * of the disclosed warnings. None of them is a verdict on its own: each warning
- * also carries what was seen and, for a camera cue, a still, and a person
- * decides. The split is between the ladder and the evidence, not between
- * "counted" and "advisory", because the advisory tier no longer exists.
+ * The split is between an act the browser can attest to and a reading a model
+ * makes about the candidate. Leaving the paper, closing or covering the camera,
+ * and a phone in shot are deliberate acts: they spend the disclosed allowance.
+ * A turned head, an absent face, a second face, a hand at the face, a second
+ * voice and even mouth movement are inferences that can be wrong, so they are
+ * recorded with their measurement and sent to the lecturer, never charged. None
+ * of them is a verdict: a person decides.
  */
 export const INTEGRITY_CUES = [
   {
     tier: 'counts toward the disclosed allowance' as const,
     items: [
       'Leaving the paper — tab switch, focus loss, full-screen exit',
-      'Head turned past the threshold for the tier, sustained',
-      'No face in frame for the tier\u2019s absence window',
-      'Two or more faces at the desk',
-      'Camera stopped or obstructed past the authored grace',
-      'Clipboard and context-menu attempts, window resize, network change',
+      'Camera stopped, or covered past the authored grace',
       'A probable phone, earbuds or smartwatch in the camera picture',
-      'A hand held at the face past the dwell \u2014 reading off something in the hand',
-      'A sustained, loud second voice in the room',
+      'Clipboard and context-menu attempts, window resize, network change',
     ],
   },
   {
-    tier: 'what the lecturer reviews' as const,
+    tier: 'recorded for your lecturer — never counted' as const,
     items: [
-      'The warning as the candidate saw it, with the cue that raised it',
-      'A still frame attached to a confirmed camera warning',
-      'The full event timeline for the sitting, kept after frames expire',
-      'The disclosed ladder \u2014 how many warnings, and what the last one does',
-      'A human decision: a cue can be mistaken and never fails a candidate by itself',
+      'Head turned past the threshold for the tier, sustained',
+      'No face in frame for the tier\u2019s absence window',
+      'Two or more faces at the desk',
+      'A hand held at the face past the dwell',
+      'A sustained, loud second voice in the room',
+      'Talking-shaped mouth movement, when a paper authors it',
     ],
   },
 ] as const;
@@ -604,8 +602,8 @@ export const BOOT_SEQUENCE = [
 
 export const VERIFICATION = [
   { dir: 'backend', command: 'ruff check .', result: 'clean' },
-  { dir: 'backend', command: 'pytest -q · SQLite', result: '101 passed, 2 skipped' },
-  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: 'CI · the same 103' },
+  { dir: 'backend', command: 'pytest -q · SQLite', result: '105 passed, 2 skipped' },
+  { dir: 'backend', command: 'pytest -q · PostgreSQL', result: 'CI · the same 107' },
   { dir: 'frontend', command: 'npm run lint', result: '0 errors' },
   { dir: 'frontend', command: 'npm run build', result: 'success' },
 ];

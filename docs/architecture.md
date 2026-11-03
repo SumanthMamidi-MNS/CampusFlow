@@ -246,9 +246,9 @@ as `camera_snapshot` event details on the attempt and shown only to staff holdin
 `camera_off` (the required camera stopped; one event per outage, so a long hardware fault
 neither floods the timeline nor repeatedly alarms the candidate),
 `camera_obstructed` (a frame that stops changing, after the authored policy grace),
-`second_device_detected` (a phone in view), and the face-monitoring signals
-`looking_away`, `face_not_visible` and `multiple_faces_detected` — evidence for a lecturer,
-never a verdict.
+`second_device_detected` (a phone in view) — all three deliberate acts, all counted on the
+disclosed ladder — and the face-monitoring signals `looking_away`, `face_not_visible` and
+`multiple_faces_detected`, which are evidence for a lecturer and never counted (ADR-040).
 - **Face and head-direction monitoring (ADR-028/029, on by default with the camera):** BlazeFace
 runs over a 320 px copy of the required frame every 700 ms in the candidate's browser and
 returns a face count and three landmarks. Yaw is geometry — the nose tip's offset from the
@@ -261,9 +261,10 @@ preserves the prior 2 s turned, 3 s absent and 1.5 s second-face thresholds. A p
 condition is re-reported every 20 s. `unreadable` frames (glare, too far, partial view) never
 count as away time, so a bad frame cannot punish anyone. Confirmed conditions temporarily
 **cover the question** until a sustained return; answers and timer are untouched. Confirmed
-camera observations, like obstruction, camera loss and device detections, spend one unit of the
-disclosed warning allowance and also raise the lecturer's review flag (ADR-032); none of them
-ever determines a breach by itself. Nothing about this check is streamed: the detector runs
+face observations raise the lecturer's review flag with their angle, direction and dwell and are
+**never** counted against the allowance (ADR-040): an inference that can be wrong is a lead for a
+human, while the deliberate camera acts — the feed stopped, the picture blocked, a device in
+shot — still spend one warning each. Neither kind ever determines a breach by itself. Nothing about this check is streamed: the detector runs
 locally and only the resulting event, with the evidence frame that the trail already attaches to
 reported observations, is sent.
 - **Per-exam integrity profile (ADR-029):** `integrity_sensitivity` (`relaxed`, `standard`,
@@ -271,8 +272,9 @@ reported observations, is sent.
 `face_monitoring_enabled`, `hand_monitoring_enabled` and `audio_monitoring_enabled` default on;
 `mouth_monitoring_enabled` is opt-in and off by default (ADR-039), because the mouth-motion
 heuristic false-fired on still faces and spent warnings the candidate had not earned. Hand
-proximity and sustained voice are confirmed on-device and spend one warning each; audio is
-analysed in memory from the existing camera stream, with no recording or transcript. When a
+proximity and sustained voice are confirmed on-device and recorded for review without spending
+the allowance (ADR-040); audio is analysed in memory from the existing camera stream, with no
+recording or transcript. When a
 signal is disabled or its model/permission is unavailable, the candidate sees that it is
 unavailable rather than an assurance that it ran.
   - **Retention and erasure (ADR-026):** frames are personal data and do not live forever.

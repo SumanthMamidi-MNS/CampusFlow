@@ -94,6 +94,13 @@ export interface ExamStudentConfig {
    * cannot spend another warning, so a burst cannot empty the allowance.
    */
   warning_cooldown_seconds?: number;
+  /**
+   * The disclosed split (ADR-040): which signals can spend the allowance, and
+   * which are recorded for the lecturer's review and never counted. Sent as ids
+   * from the server's own sets, so the brief cannot promise a different cost.
+   */
+  counted_event_types?: string[];
+  review_only_event_types?: string[];
   /** Disclosed to the candidate before the paper starts. */
   warning_policy?: ExamWarningPolicy;
   /** On-device camera analysis for prohibited electronics (ADR-024). */
@@ -266,6 +273,9 @@ export interface ExamDelivery {
   max_violations?: number;
   /** Server-owned gap between counted warnings, echoed for the brief copy. */
   warning_cooldown_seconds?: number;
+  /** The disposition split this attempt is actually run under (ADR-040). */
+  counted_event_types?: string[];
+  review_only_event_types?: string[];
   /** A counted warning still awaits acknowledgement (restored on a resume). */
   warning_pending?: boolean;
   device_detection_enabled?: boolean;
@@ -360,6 +370,8 @@ export interface ProctoringEvent {
   details?: Record<string, any> | null;
   /** Server-classified source; camera/model observations are never violations. */
   event_category?: 'browser_signal' | 'camera_observation' | 'evidence';
+  /** What the cue cost: a counted warning, review-only evidence, or neither. */
+  disposition?: 'counted' | 'review_only' | 'evidence';
   /** Present after the retained image has been erased. */
   evidence_purged_at?: string | null;
 }
@@ -376,6 +388,12 @@ export interface ProctoringStatus {
   /** The policy in force for this attempt, as the server enforces it. */
   warning_policy?: ExamWarningPolicy;
   event_category?: 'browser_signal' | 'camera_observation' | 'evidence' | null;
+  /**
+   * Whether this response's cue spent the allowance (ADR-040). `review_only`
+   * means it was recorded for the lecturer and must not raise a modal or a
+   * counter on the candidate's screen.
+   */
+  disposition?: 'counted' | 'review_only' | 'evidence' | null;
 }
 
 export interface UnlockAttemptPayload {

@@ -1274,8 +1274,10 @@ function Integrity() {
           <p className="mt-8 max-w-3xl text-[13px] leading-relaxed text-slate-400">
             Every camera cue runs inside the candidate’s own browser: the picture is measured
             there and only a confirmed warning’s still is attached for the lecturer — nothing is
-            streamed, and no audio is ever recorded or transmitted. Every confirmed cue costs one
-            warning, on the same ladder as leaving the paper. The tier a paper runs at, every
+            streamed, and no audio is ever recorded or transmitted. A deliberate act — leaving the
+            paper, closing or covering the camera, a phone in shot — spends one of the disclosed
+            warnings; a model’s reading of you, like a turned head or a hand at the face, is
+            recorded for your lecturer and never counted. The tier a paper runs at, every
             threshold it implies and every cue it switches on are shown to the candidate before
             they start. The last two hardening waves came from auditing the
             running stack rather than the test suite: candidate sessions could read answer keys and

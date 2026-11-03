@@ -412,12 +412,13 @@ async def test_integrity_allowance_is_disclosed_and_only_browser_events_consume_
 
 
 @pytest.mark.asyncio
-async def test_face_and_head_direction_signals_are_counted_and_reviewable(client, db_session):
-    """Camera inferences warn the candidate, reach review, and name what was seen.
+async def test_face_and_head_direction_signals_are_recorded_and_never_counted(client, db_session):
+    """Camera inferences reach review with their measurement and cost nothing.
 
-    Presence and gaze models can fail under lighting, positioning and accessibility
-    conditions, which is why each one is a warning the candidate can answer to
-    their lecturer — not a silent verdict, and not silence either (D-31).
+    Presence and gaze models can fail under lighting, positioning and
+    accessibility conditions, so a reading is evidence for the lecturer and never
+    a charge against the candidate (ADR-040): the allowance is untouched, no
+    warning is raised on screen, and the review queue still receives it.
     """
     faculty, student, exam = await _make_proctored_fixture(db_session)
     headers = {"Authorization": f"Bearer {create_access_token({'sub': str(student.id)})}"}
@@ -439,12 +440,13 @@ async def test_face_and_head_direction_signals_are_counted_and_reviewable(client
         )
         assert ev.status_code == 200, ev.text
         body = ev.json()["data"]
-        assert body["violations_count"] >= 1, f"{event_type} must spend a warning"
+        assert body["violations_count"] == 0, f"{event_type} must never spend the allowance"
         assert body["is_locked"] is False
         assert body["auto_submitted"] is False
         assert body["status"] == "in_progress"
-        assert body["warning"], f"{event_type} must tell the candidate what was seen"
+        assert body["warning"] is None, f"{event_type} must not raise a warning"
         assert body["event_category"] == "camera_observation"
+        assert body["disposition"] == "review_only"
 
     timeline = await client.get(
         f"/api/v1/exam-attempts/{attempt_id}/proctoring-events",
@@ -457,6 +459,16 @@ async def test_face_and_head_direction_signals_are_counted_and_reviewable(client
     # The measurement travels with the event, so a reviewer can weigh the angle
     # rather than trusting a label.
     assert events["looking_away"]["details"]["yaw_degrees"] == 62
+    assert {e["disposition"] for e in events.values()} == {"review_only"}
+
+    # And the queue the lecturer works from still receives the attempt.
+    faculty_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(faculty.id)})}"}
+    flagged = await client.get(
+        f"/api/v1/exams/{exam.id}/attempts",
+        params={"flagged_only": True},
+        headers=faculty_headers,
+    )
+    assert [a["id"] for a in flagged.json()["data"]] == [attempt_id]
 
 
 @pytest.mark.asyncio

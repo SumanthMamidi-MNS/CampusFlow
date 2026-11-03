@@ -325,9 +325,9 @@ def build_student_exam(exam: Exam, questions_count: int) -> ExamStudentResponse:
         end_window=exam.end_window,
         instructions=exam.instructions,
         status=exam.status,
-        questions_count=questions_count,
-        config=ExamStudentConfig(
-            proctoring_enabled=bool(config.get("proctoring_enabled", True)),
+        questions_count=questions_count,            config=ExamStudentConfig(
+                **_disclosed_integrity_vocabulary(),
+                proctoring_enabled=bool(config.get("proctoring_enabled", True)),
         max_attempts=max_attempts,
         max_violations=_resolve_max_violations(exam),
         warning_cooldown_seconds=PROCTORING_WARNING_COOLDOWN_SECONDS,
@@ -1254,6 +1254,7 @@ async def start_or_resume_attempt(
         }
 
     return ExamDeliveryResponse(
+        **_disclosed_integrity_vocabulary(),
         attempt_id=attempt.id,
         exam_id=exam.id,
         exam_title=exam.title,
@@ -1980,6 +1981,13 @@ PROCTORING_EVENT_TYPES = frozenset(
         # a blink or a frame drop is never an event, so the angle, direction and
         # measured dwell travel with the event for the reviewer.
         #
+        # These six cues measure the candidate, not an act the candidate
+        # performed. The browser reports a tab switch as a fact; the model
+        # reports "looking away" as an estimate. Charging the estimate means
+        # charging the model's error rate to the candidate (ADR-040), so they are
+        # recorded for the lecturer, raise the review flag, and never spend the
+        # allowance. See REVIEW_ONLY_EVENT_TYPES.
+        #
         # Turning away from the paper is the cheating path the other signals
         # cannot see — the camera is alive, the tab is focused, and the
         # candidate is reading someone else's screen.
@@ -1992,20 +2000,21 @@ PROCTORING_EVENT_TYPES = frozenset(
         # A hand held at or over the face for the disclosed dwell. This is the
         # signal for reading off a phone held below the shot or a crib sheet
         # raised to eye level: the face is present, the camera is alive, and the
-        # candidate is visibly occupied with something in their hand (ADR-032).
-        # Counted on the warning ladder; see HAND_AUDIO_OBSERVATION_EVENT_TYPES.
+        # candidate is visibly occupied with something in their hand.
+        # Recorded for the lecturer, never counted; see REVIEW_ONLY_EVENT_TYPES.
         "hand_near_face",
         # A second voice, sustained, picked up by the candidate's own device for
         # the disclosed dwell: someone is reading answers out of frame. Detected
-        # from the audio track only, never recorded or transcribed here
-        # (ADR-032). Counted on the warning ladder.
+        # from the audio track only, never recorded or transcribed here.
+        # Recorded for the lecturer, never counted; see REVIEW_ONLY_EVENT_TYPES.
         "voice_detected",
         # Talking-shaped mouth motion sustained while the candidate faces the
         # paper: repeating an answer aloud for someone off-frame, or reading back
         # what was dictated. This is measured as pixel motion in the mouth band
         # that the forehead band does not share (frontend/src/features/exams/
         # mouth-monitoring.ts) — never speech recognition, never audio, never a
-        # transcript. Counted on the warning ladder (ADR-032).
+        # transcript. Recorded for the lecturer, never counted; see
+        # REVIEW_ONLY_EVENT_TYPES.
         "mouth_movement_detected",
         # The candidate returned to the assessment within the 5-second grace
         # after leaving it. Disclosed, deliberate good behaviour — recorded
@@ -2038,9 +2047,11 @@ DEVICE_OBSERVATION_EVENT_TYPES = frozenset({"second_device_detected"})
 
 # Cues from the candidate's own camera and microphone. Each is confirmed on the
 # client (a sustained dwell, or several agreeing scans) before it is reported,
-# and each spends one unit of the allowance (D-31). The alternative this
-# replaced — recording them as review-only — meant a candidate could talk, hold
-# a phone to the lens and keep earphones in while the screen said nothing.
+# and each is review-only (ADR-040): a hand at the face and a second voice are
+# readings of a model, not acts the browser can attest to. They reach the
+# lecturer's timeline and review flag with their measurement, and they never
+# spend the allowance. The deliberate route to the same misconduct — covering
+# the lens, closing the camera, a phone held in shot — stays counted.
 HAND_AUDIO_OBSERVATION_EVENT_TYPES = frozenset({"hand_near_face", "voice_detected"})
 
 # Mouth motion and the device model are named separately so the audit trail and
@@ -2048,10 +2059,12 @@ HAND_AUDIO_OBSERVATION_EVENT_TYPES = frozenset({"hand_near_face", "voice_detecte
 MOUTH_OBSERVATION_EVENT_TYPES = frozenset({"mouth_movement_detected"})
 
 # Every signal derived from camera or microphone input. They are classified as
-# `camera_observation` for the timeline — a reviewer should know a model saw it —
-# but they are counted, not advisory: the warning ladder below treats them like
-# any browser signal, because a warning the candidate never sees is not a
-# warning.
+# `camera_observation` for the timeline — a reviewer should know a model saw it.
+# That source label is not a disposition: `camera_off`, `camera_obstructed` and
+# `second_device_detected` are deliberate acts and spend the allowance, while the
+# six inference cues are review-only evidence (ADR-040).
+# `_proctoring_event_disposition` answers what a cue costs; this set only answers
+# where it came from.
 CAMERA_OBSERVATION_EVENT_TYPES = frozenset(
     {
         "camera_off",
@@ -2064,6 +2077,32 @@ CAMERA_OBSERVATION_EVENT_TYPES = frozenset(
         *MOUTH_OBSERVATION_EVENT_TYPES,
     }
 )
+
+# Inference cues: measured *about* the candidate by a model running on the
+# candidate's own device. They are evidence for a human, never a charge against
+# the candidate (ADR-040). Recorded with their measurement, queued on the
+# lecturer's review flag, absent from the allowance and from the ladder.
+#
+# The research basis is not sentimental: browser events are near-deterministic,
+# webcam inference is only ever a flag for a human, and an auto-proctoring study
+# in 2022 produced 74 wrong decisions across 244 attempts. A system that spends
+# a warning on a model's estimate punishes the model's error rate.
+REVIEW_ONLY_EVENT_TYPES = frozenset(
+    {
+        "looking_away",
+        "face_not_visible",
+        "multiple_faces_detected",
+        "hand_near_face",
+        "voice_detected",
+        "mouth_movement_detected",
+    }
+)
+
+# What a confirmed cue costs, derived so the three dispositions cannot drift
+# apart: every name in the vocabulary is either evidence, review-only, or
+# counted. A test pins the partition, so a new signal cannot silently inherit
+# "counted" without a decision.
+COUNTED_EVENT_TYPES = PROCTORING_EVENT_TYPES - NON_VIOLATION_EVENT_TYPES - REVIEW_ONLY_EVENT_TYPES
 
 # A single frame is downscaled client-side; this ceiling only stops a hostile
 # client from using the proctoring trail as unbounded blob storage.
@@ -2105,6 +2144,38 @@ def _proctoring_event_category(event_type: str) -> str:
     if event_type in CAMERA_OBSERVATION_EVENT_TYPES:
         return "camera_observation"
     return "browser_signal"
+
+
+def _proctoring_event_disposition(event_type: str) -> str:
+    """What a confirmed cue costs: ``counted``, ``review_only`` or ``evidence``.
+
+    Deliberately separate from `_proctoring_event_category`. The category says
+    where a cue came from (a browser event, a camera model, a passive frame); the
+    disposition says whether the candidate is charged for it. Collapsing the two
+    is what once let every inference cue spend a warning.
+    """
+    if event_type in NON_VIOLATION_EVENT_TYPES:
+        return "evidence"
+    if event_type in REVIEW_ONLY_EVENT_TYPES:
+        return "review_only"
+    return "counted"
+
+
+def _observation_audit_action(event_type: str) -> str:
+    """The audit action a camera or microphone observation is filed under."""
+    if event_type in DEVICE_OBSERVATION_EVENT_TYPES:
+        return "exam.attempt_flagged_device_observation"
+    if event_type in HAND_AUDIO_OBSERVATION_EVENT_TYPES | MOUTH_OBSERVATION_EVENT_TYPES:
+        return f"exam.attempt_observation_{event_type}"
+    return f"exam.attempt_camera_observation_{event_type}"
+
+
+def _disclosed_integrity_vocabulary() -> dict[str, list[str]]:
+    """The signal split a candidate is entitled to read before the clock starts."""
+    return {
+        "counted_event_types": sorted(COUNTED_EVENT_TYPES),
+        "review_only_event_types": sorted(REVIEW_ONLY_EVENT_TYPES),
+    }
 
 
 def _warning_is_pending(attempt: ExamAttempt) -> bool:
@@ -2296,29 +2367,23 @@ async def purge_proctoring_evidence(
 
 
 def _camera_observation_message(event_type: str) -> str:
-    """One short sentence naming what a confirmed camera/mic cue actually saw.
+    """One short sentence naming what a *counted* camera cue actually saw.
 
     Kept separate from the ladder so the count and the observation read as one
     notice ("Warning 3 of 7 — a phone-shaped object was visible to your camera"),
     rather than the candidate having to work out which warning caused `3`.
+
+    Only deliberate camera acts reach the ladder (ADR-040), so only they are
+    described here. An inference cue is never part of a warning; its measurement
+    is described on the lecturer's timeline instead.
     """
     if event_type in DEVICE_OBSERVATION_EVENT_TYPES:
         return "A phone, earbuds or a watch was visible to your camera"
-    if event_type == "hand_near_face":
-        return "a hand was held at your face"
-    if event_type == "voice_detected":
-        return "your microphone heard sustained talking"
-    if event_type in MOUTH_OBSERVATION_EVENT_TYPES:
-        return "your camera saw sustained mouth movement"
     if event_type == "camera_off":
         return "your camera feed stopped"
     if event_type == "camera_obstructed":
         return "your camera picture was blocked or frozen"
-    if event_type == "looking_away":
-        return "your head was turned away from the paper"
-    if event_type == "face_not_visible":
-        return "your face was not visible to the camera"
-    return "more than one face was visible to your camera"
+    return "your camera reported an integrity observation"
 
 
 def _integrity_warning(
@@ -2467,6 +2532,10 @@ async def record_proctoring_event(
             ),
         )
 
+    # What this cue costs is decided once, here, from the server-owned split: an
+    # inference cue is admitted to the trail and stops before the ladder.
+    disposition = _proctoring_event_disposition(payload.event_type)
+
     # Evidence frames are small, downscaled JPEGs. Anything larger is a hostile
     # client trying to use the append-only trail as blob storage, so it is
     # refused outright rather than silently truncated.
@@ -2524,6 +2593,7 @@ async def record_proctoring_event(
                 warning=None,
                 warning_pending=_warning_is_pending(attempt),
                 event_category=category,
+                disposition=disposition,
             )
 
     # Record the event in the append-only proctoring trail.
@@ -2536,9 +2606,29 @@ async def record_proctoring_event(
     )
     db.add(event)
 
-    # Evidence-only signals stop here: a frame or an excused quick return does
-    # not consume the allowance and does not imply a review finding.
-    if payload.event_type in NON_VIOLATION_EVENT_TYPES:
+    # Passive evidence and inference cues stop here. A frame or an excused quick
+    # return implies no finding at all; an inference cue is a finding *for a
+    # human*, so it raises the review flag and is recorded with its measurement,
+    # but it never consumes the allowance and never reaches the ladder (ADR-040).
+    #
+    # This is the whole posture in one branch: the candidate is not charged for a
+    # model's estimate, and the lecturer still receives it.
+    if disposition in {"evidence", "review_only"}:
+        if disposition == "review_only":
+            await _raise_review_flag(
+                db,
+                attempt,
+                student_user=student_user,
+                action=_observation_audit_action(payload.event_type),
+                extra_data={
+                    "event_type": payload.event_type,
+                    "details": details,
+                    "disposition": disposition,
+                    "integrity_sensitivity": _resolve_integrity_sensitivity(attempt.exam),
+                    "violations_count": attempt.proctor_violations_count,
+                    "max_violations": max_violations,
+                },
+            )
         await db.commit()
         return ProctoringStatusResponse(
             violations_count=attempt.proctor_violations_count,
@@ -2550,6 +2640,7 @@ async def record_proctoring_event(
             warning=None,
             warning_pending=_warning_is_pending(attempt),
             event_category=_proctoring_event_category(payload.event_type),
+            disposition=disposition,
         )
 
     # A counted warning pauses the ladder twice over. It stays paused until the
@@ -2651,26 +2742,22 @@ async def record_proctoring_event(
     await db.commit()
     await db.refresh(attempt)
 
-    # Camera and microphone cues are classified for the timeline, and raise the
-    # lecturer's review flag, but they are *counted*: the allowance below applies
-    # to them exactly as it does to a tab switch (ADR-032). A suppressed cue is
-    # still evidence and still raises the flag; it just does not spend a warning.
+    # A counted camera cue — the camera stopped, the picture was blocked, a phone
+    # was in shot — raises the lecturer's review flag like any other observation.
+    # (The inference cues returned above with their own flag.) A cue suppressed by
+    # the disclosed gap is still evidence and still raises the flag; it just does
+    # not spend a second warning.
     observation_detail: str | None = None
     if payload.event_type in CAMERA_OBSERVATION_EVENT_TYPES:
-        if payload.event_type in DEVICE_OBSERVATION_EVENT_TYPES:
-            action = "exam.attempt_flagged_device_observation"
-        elif payload.event_type in HAND_AUDIO_OBSERVATION_EVENT_TYPES | MOUTH_OBSERVATION_EVENT_TYPES:
-            action = f"exam.attempt_observation_{payload.event_type}"
-        else:
-            action = f"exam.attempt_camera_observation_{payload.event_type}"
         await _raise_review_flag(
             db,
             attempt,
             student_user=student_user,
-            action=action,
+            action=_observation_audit_action(payload.event_type),
             extra_data={
                 "event_type": payload.event_type,
                 "details": details,
+                "disposition": disposition,
                 "integrity_sensitivity": _resolve_integrity_sensitivity(attempt.exam),
                 "violations_count": attempt.proctor_violations_count,
                 "max_violations": max_violations,
@@ -2697,6 +2784,7 @@ async def record_proctoring_event(
                 if payload.event_type in CAMERA_OBSERVATION_EVENT_TYPES
                 else "browser_signal"
             ),
+            disposition="counted",
         )
 
     # Browser/page telemetry and confirmed camera cues share one ladder below.
@@ -2779,6 +2867,7 @@ async def record_proctoring_event(
         warning=warning,
         warning_pending=_warning_is_pending(attempt),
         event_category="camera_observation" if is_camera_cue else "browser_signal",
+        disposition="counted",
     )
 
 
@@ -3038,6 +3127,7 @@ async def get_proctoring_timeline(
                 details=details,
                 evidence_purged_at=purged_at,
                 event_category=_proctoring_event_category(event.event_type),
+                disposition=_proctoring_event_disposition(event.event_type),
             )
         )
     return responses

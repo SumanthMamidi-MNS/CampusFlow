@@ -238,8 +238,8 @@ cd ../frontend && npm run lint && npm run build
 
 ```
 backend   ruff check .                                    → clean
-backend   pytest -q (SQLite)                              → 101 passed,  2 skipped
-backend   pytest -q (PostgreSQL)                          →  103 in the suite · CI
+backend   pytest -q (SQLite)                              → 105 passed,  2 skipped
+backend   pytest -q (PostgreSQL)                          →  107 in the suite · CI
 frontend  npm run lint                                    →   0 errors
 frontend  npm run build                                   →  success
 ```

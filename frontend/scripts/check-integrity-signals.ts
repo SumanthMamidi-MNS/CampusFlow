@@ -35,6 +35,8 @@ import {
   categoriseClassifierLabel,
   wristCropFromNormalised,
 } from '../src/features/exams/device-detection.ts';
+import { INTEGRITY_SIGNAL_LABELS } from '../src/features/exams/integrity-disclosure.ts';
+import { readFileSync } from 'node:fs';
 
 const WIDTH = 320;
 const HEIGHT = 240;
@@ -395,6 +397,54 @@ check(
     'confirmation happens on the configured streak',
     confirmedAt === DEVICE_MODEL_CONFIG.confirmations - 1,
     String(confirmedAt)
+  );
+}
+
+// ── Disclosed vocabulary (ADR-040) ─────────────────────────────────────────
+// The brief renders the split the server enforces. The server's own sets are
+// read out of the Python source rather than copied here, so a signal added
+// without a candidate sentence fails this harness instead of shipping as raw
+// snake_case — and a sentence that outlives its signal fails too.
+
+console.log('\ndisclosed vocabulary');
+
+function frozensetNames(source: string, marker: string): string[] {
+  const start = source.indexOf(marker);
+  if (start === -1) return [];
+  const end = source.indexOf('\n)', start);
+  const block = source.slice(start, end === -1 ? undefined : end);
+  return [...block.matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
+}
+
+{
+  const source = readFileSync(
+    new URL('../../backend/campusflow/domain/exams/service.py', import.meta.url),
+    'utf8'
+  );
+  const vocabulary = frozensetNames(source, 'PROCTORING_EVENT_TYPES = frozenset(');
+  const reviewOnly = frozensetNames(source, 'REVIEW_ONLY_EVENT_TYPES = frozenset(');
+  const evidence = frozensetNames(source, 'NON_VIOLATION_EVENT_TYPES = frozenset(');
+
+  check('the server vocabulary was found', vocabulary.length >= 20, String(vocabulary.length));
+  check('the review-only set was found', reviewOnly.length === 6, String(reviewOnly.length));
+  check('the evidence set was found', evidence.length === 2, String(evidence.length));
+
+  for (const id of vocabulary) {
+    const sentence = INTEGRITY_SIGNAL_LABELS[id];
+    check(`"${id}" has a candidate sentence`, Boolean(sentence && sentence.length > 4));
+  }
+  for (const id of Object.keys(INTEGRITY_SIGNAL_LABELS)) {
+    check(`"${id}" is a signal the server can send`, vocabulary.includes(id));
+  }
+  check(
+    'the review-only and evidence sets do not overlap',
+    reviewOnly.every((id) => !evidence.includes(id) && vocabulary.includes(id))
+  );
+  check(
+    'the deliberate camera acts are not review-only',
+    ['camera_off', 'camera_obstructed', 'second_device_detected'].every(
+      (id) => !reviewOnly.includes(id) && vocabulary.includes(id)
+    )
   );
 }
 

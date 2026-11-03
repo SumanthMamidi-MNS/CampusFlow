@@ -2131,3 +2131,50 @@ signal inside the gap, and warning 2 only after **5.4 s**; a fresh demo login th
 probe attempt. The preview browser still grants neither a camera nor the Fullscreen API, so a
 complete sitting with real media was not driven here; the gate logic, the detector harnesses and
 the server clock were, and the camera-dependent path remains type-checked and reviewed.
+
+### Leisurely integrity posture (2026-11-03) — deliberate acts count, inference is evidence
+
+A candidate reported losing warnings for things they had not done: a turned head, a hand near the
+face, a jaw shift that the mouth heuristic read as talking. ADR-032 had made every confirmed
+camera and microphone cue spend one warning, so a model's estimate was charged to the candidate.
+The published evidence on exactly that inference says it belongs to a human — browser events are
+near-deterministic, webcam inference is only ever a flag for a reviewer, and an automated
+proctoring study in 2022 produced 74 wrong decisions across 244 attempts. ADR-040 splits what a
+cue *measures* from what it *costs*.
+
+**Three dispositions, owned by the server.** `REVIEW_ONLY_EVENT_TYPES` is new
+(`looking_away`, `face_not_visible`, `multiple_faces_detected`, `hand_near_face`, `voice_detected`,
+`mouth_movement_detected`); `COUNTED_EVENT_TYPES` is derived from the vocabulary so the three sets
+cannot drift; `_proctoring_event_disposition` is the single classifier, deliberately separate from
+`_proctoring_event_category` (which only says where a cue came from). The ingest path admits a
+review-only cue to the append-only trail, raises the lecturer's review flag, commits and returns —
+before the conditional `UPDATE` that moves the counter. `camera_off`, `camera_obstructed` and
+`second_device_detected` are deliberate acts and stay counted, on the same ladder as a tab switch.
+
+**The split is disclosed, not described.** `ExamStudentConfig` and the delivery payload carry
+`counted_event_types` and `review_only_event_types` from the same sets the ingest path reads, so the
+brief cannot promise a cost the server does not charge. The brief renders two columns
+(“Counts toward your allowance” / “Recorded for your lecturer — never counted”) through
+`integrity-disclosure.ts`; every proctoring response and every timeline row carries `disposition`.
+The candidate surface never raises a modal for a review-only response, and the coverage gates for a
+turned head or an absent face stay exactly as they were — they display the reading, they no longer
+charge for it. The lecturer's timeline labels each row with what it cost, not just where it came
+from.
+
+**Tests were rewritten to the new contract, never loosened.** The parametrised
+"hand/voice/mouth/device spends one warning" became "six inference cues leave the counter alone,
+keep their measurement and the review flag"; the hand-cue lock test became "an inference never
+reaches the lock, a deliberate camera act still does"; `test_every_signal_has_exactly_one_disposition`
+fails if a future signal is added without a decision; the disclosure test pins both payloads; and
+the cooldown test now drives `camera_off` (a counted camera act) rather than `face_not_visible`,
+because the latter correctly no longer touches the ladder.
+
+**Verified on this tree.** Full suite → **105 passed, 2 skipped (107 collected)**; `ruff check .` →
+clean; `npx tsc -b` → exit 0; `npm run build` → exit 0; `npm run lint` → 0 errors (15 pre-existing
+warnings); `check-integrity-signals` → **95/95**, including a new cross-check that reads
+`PROCTORING_EVENT_TYPES`, `REVIEW_ONLY_EVENT_TYPES` and `NON_VIOLATION_EVENT_TYPES` out of the
+Python source and fails if any signal lacks a candidate sentence (or a sentence outlives its
+signal). The suite's first run caught one real contract break — the camera-gap test was still
+driving `face_not_visible` as a counted cue — which was corrected rather than muted. A live HTTP
+probe with real media was not run in this pass; the server contract is covered end-to-end by the
+API tests above.

@@ -358,6 +358,11 @@ async def test_authorization_matrix_and_leak_canaries(client, db_session):
         "audio_monitoring_enabled",
         "mouth_monitoring_enabled",
         "dwell_ms",
+        # The disposition split (ADR-040): which cues can spend the allowance and
+        # which are recorded for review only. Ids from the server's own sets, so
+        # the brief renders what the ingest path enforces.
+        "counted_event_types",
+        "review_only_event_types",
         "demo",
     }
 

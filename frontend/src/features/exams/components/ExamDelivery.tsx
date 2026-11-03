@@ -67,6 +67,7 @@ import {
   extractRegion,
   mouthRegions,
 } from '../mouth-monitoring';
+import { signalSentences } from '../integrity-disclosure';
 import {
   VoiceMonitor,
   createVoiceAnalyser,
@@ -382,6 +383,13 @@ export function ExamDelivery() {
     delivery?.warning_cooldown_seconds ??
     examBrief?.config?.warning_cooldown_seconds ??
     5;
+  // The disposition split, disclosed by the server (ADR-040). The brief renders
+  // these ids rather than a hand-kept list, so a signal the server counts cannot
+  // be shown as free — or the other way round.
+  const countedEventTypes =
+    delivery?.counted_event_types ?? examBrief?.config?.counted_event_types ?? [];
+  const reviewOnlyEventTypes =
+    delivery?.review_only_event_types ?? examBrief?.config?.review_only_event_types ?? [];
   // The demonstration paper is the one assessment a candidate may restart
   // without staff: asking a lecturer to reopen it is a dead end in a demo that
   // has no lecturer. Everything else keeps the real reopen flow.
@@ -826,21 +834,21 @@ export function ExamDelivery() {
         return {
           tone: 'amber',
           title: 'Face the screen to continue',
-          body: 'A sustained head turn was observed. Your question is temporarily covered while you return to the screen. The cue is recorded and, if it is counted, spends one of the disclosed warnings.',
+          body: 'A sustained head turn was observed. Your question is temporarily covered while you return to the screen. The cue is recorded for your lecturer and never counted against your allowance.',
         };
       }
       if (faceGate === 'multiple_faces') {
         return {
           tone: 'amber',
           title: 'One candidate should be in view',
-          body: 'More than one face remained in view. Your question is temporarily covered while the camera view clears. The cue is recorded for your lecturer and, if counted, spends one warning.',
+          body: 'More than one face remained in view. Your question is temporarily covered while the camera view clears. The cue is recorded for your lecturer and never counted against your allowance.',
         };
       }
       if (faceGate === 'no_face') {
         return {
           tone: 'amber',
           title: 'Move into the camera view',
-          body: 'Your face was not visible for the required dwell. Your question is temporarily covered until the camera can observe you again. The cue is recorded and counts on the same ladder as leaving the paper.',
+          body: 'Your face was not visible for the required dwell. Your question is temporarily covered until the camera can observe you again. The cue is recorded for your lecturer and never counted against your allowance.',
         };
       }
     }
@@ -1076,8 +1084,8 @@ export function ExamDelivery() {
   // ── On-device hand-at-face monitoring ──────────────────────────────────────
   // The cue for reading off a phone held below the shot or a sheet raised to
   // eye level: face present, camera alive, head mostly forward, but a hand sits
-  // at the face. Observation tier on the server, so it raises a review and never
-  // spends the allowance (ADR-029). The face landmarks come from the same
+  // at the face. Review-only on the server (ADR-040), so it raises a review and
+  // never spends the allowance. The face landmarks come from the same
   // detector the face loop already runs, so the two measurements agree on where
   // the head is instead of guessing separately.
   //
@@ -1221,8 +1229,8 @@ export function ExamDelivery() {
   // not a second model, so it costs two thumbnail crops every 200 ms; the bands
   // are positioned from the face the face loop just found rather than from a
   // detector of its own, so the two checks always agree on where the face is.
-  // Counted on the server like every confirmed cue: a warning the candidate
-  // sees, plus a review flag (ADR-032).
+  // Review-only on the server (ADR-040): recorded with its dominance measurement
+  // and a review flag, never a counted warning.
   useEffect(() => {
     if (!hasBegun || !proctoringEnabled || !mouthMonitoringEnabled) {
       setMouthScan('off');
@@ -1351,7 +1359,7 @@ export function ExamDelivery() {
   // The analyser reuses the call element's own stream, so the candidate is not
   // prompted twice and the camera is not contended for; frames are read as
   // numbers and discarded, so nothing is recorded. A sustained voice raises a
-  // review and spends one warning (ADR-032) — headphones included, because the
+  // review and never spends the allowance (ADR-040) — headphones included, because the
   // analyser measures the room through the microphone, not the earpiece.
   useEffect(() => {
     if (!hasBegun || !proctoringEnabled || !audioMonitoringEnabled) {
@@ -1689,6 +1697,14 @@ export function ExamDelivery() {
             res.warning ||
               'This session is locked and awaits your lecturer’s authorisation to resume.'
           );
+          return;
+        }
+        // A review-only cue is evidence for the lecturer, not a charge. The
+        // server recorded it and raised the review flag; the candidate's screen
+        // stays silent about it (ADR-040) — the coverage gates are what answer a
+        // turned head or an absent face, and a modal here would turn a model's
+        // estimate into a penalty.
+        if (res.disposition === 'review_only') {
           return;
         }
         if (res.warning) {
@@ -2411,6 +2427,16 @@ export function ExamDelivery() {
                     browser. <strong>No audio is recorded, stored or sent.</strong>
                   </li>
                   <li>
+                    <strong>What counts, and what is only recorded.</strong> Leaving the paper,
+                    closing or covering the camera, and a phone, earbuds or a smartwatch in the
+                    picture spend one of your warnings. Camera inferences — a turned head, no face
+                    in view, a second face, a hand at the face
+                    {audioMonitoringEnabled ? ', a second voice' : ''}
+                    {mouthMonitoringEnabled && faceMonitoringEnabled ? ', mouth movement' : ''} —
+                    are recorded for your lecturer and never counted against you. The full split
+                    is listed below.
+                  </li>
+                  <li>
                     Every warning covers the paper until you acknowledge it. Only then does the{' '}
                     <strong>{warningCooldownSeconds}-second</strong> gap begin, so a second warning
                     can never replace the one you are reading; signals in the gap are recorded
@@ -2439,6 +2465,30 @@ export function ExamDelivery() {
                     )}
                   </li>
                 </ul>
+                {(countedEventTypes.length > 0 || reviewOnlyEventTypes.length > 0) && (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-lg border border-rose-300/70 bg-white/70 p-2.5">
+                      <p className="text-[10.5px] font-bold uppercase tracking-wide text-rose-900">
+                        Counts toward your allowance
+                      </p>
+                      <ul className="mt-1 space-y-0.5 pl-4 text-[11px] leading-snug list-disc marker:text-rose-400">
+                        {signalSentences(countedEventTypes).map((sentence) => (
+                          <li key={sentence}>{sentence}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="rounded-lg border border-slate-300 bg-white/70 p-2.5">
+                      <p className="text-[10.5px] font-bold uppercase tracking-wide text-slate-700">
+                        Recorded for your lecturer — never counted
+                      </p>
+                      <ul className="mt-1 space-y-0.5 pl-4 text-[11px] leading-snug list-disc marker:text-slate-400">
+                        {signalSentences(reviewOnlyEventTypes).map((sentence) => (
+                          <li key={sentence}>{sentence}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
                 <details className="group mt-2">
                   <summary className="cursor-pointer text-[11px] font-semibold text-rose-800 underline decoration-rose-300 underline-offset-2 hover:text-rose-900">
                     What each check can see — full disclosure
@@ -2448,9 +2498,10 @@ export function ExamDelivery() {
                       <p>
                         <strong>Your face and head direction are checked on your own device</strong>,
                         frame by frame. No picture leaves your machine for that check — only a
-                        resulting warning (head turned away, no face visible, a second face)
-                        reaches your lecturer with a still frame, and it spends one of your
-                        warnings. This paper runs at the{' '}
+                        resulting observation (head turned away, no face visible, a second face)
+                        reaches your lecturer with a still frame. These are inferences: they are
+                        recorded for your lecturer and never counted against your allowance. This
+                        paper runs at the{' '}
                         <strong>{SENSITIVITY_LABEL[sensitivity]} sensitivity</strong>: turning
                         fully away from the screen for more than{' '}
                         {Math.round((dwellMs.turn ?? 2000) / 1000)} seconds, or leaving the frame
@@ -2463,9 +2514,9 @@ export function ExamDelivery() {
                         <strong>Hands are checked on your own device.</strong> If a hand stays at
                         your face for more than {Math.round((dwellMs.hand ?? 3500) / 1000)}{' '}
                         seconds — the pattern of reading from something held up to your eyes, a
-                        phone included — it raises a warning you can see and is recorded for your
-                        lecturer to look at. Hands on your desk, your chin, your pen or your
-                        glasses are of no interest to it.
+                        phone included — it is recorded for your lecturer to look at and never
+                        counted against your allowance. Hands on your desk, your chin, your pen or
+                        your glasses are of no interest to it.
                       </p>
                     )}
                     {audioMonitoringEnabled && (
@@ -2486,11 +2537,12 @@ export function ExamDelivery() {
                         mouth band of your picture keeps moving while the rest of your face stays
                         still for more than {Math.round((dwellMs.mouth ?? 3000) / 1000)} seconds —
                         the shape of talking, for example reading an answer aloud to someone
-                        off-camera — it raises a warning and is recorded for your lecturer to look
-                        at. <strong>Nothing you say is heard, recognised or stored</strong>: this
-                        measures pixels, not speech, and no audio is captured for it. A cough, a
-                        yawn or a drink may spend a warning; you can explain it to your lecturer,
-                        who decides whether the paper continues.
+                        off-camera — it is recorded for your lecturer to look at and never
+                        counted against your allowance. <strong>Nothing you say is heard,
+                        recognised or stored</strong>: this measures pixels, not speech, and no
+                        audio is captured for it. A cough, a yawn or a drink can look like talking;
+                        you can explain it to your lecturer, who decides whether the paper
+                        continues.
                       </p>
                     )}
                     <p>
@@ -2582,8 +2634,9 @@ export function ExamDelivery() {
                       Looks for prohibited devices{' '}
                       <strong>on your own device</strong> — no video is sent anywhere. A
                       probable phone, earbuds or smartwatch (read from a close-up of your
-                      wrist) is logged for your lecturer to review; it never fails you by
-                      itself. Put them away before you begin.
+                      wrist) is a deliberate act: it is logged for your lecturer and spends one
+                      of your warnings. It never fails you by itself. Put them away before you
+                      begin.
                     </p>
                   )}
                   {cameraReady ? (
@@ -2787,7 +2840,7 @@ export function ExamDelivery() {
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                     : 'border-rose-300 bg-rose-50 text-rose-700'
                 }`}
-                title="Every confirmed cue — browser event or camera observation — spends one of the disclosed warnings."
+                title="Leaving the paper, closing or covering the camera, and a device in shot each spend one of the disclosed warnings. Camera inferences are recorded for your lecturer and never counted."
               >
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${

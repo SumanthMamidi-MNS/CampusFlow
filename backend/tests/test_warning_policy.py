@@ -723,11 +723,13 @@ async def test_a_counted_warning_opens_a_five_second_gap(client, db_session, mon
 async def test_camera_cues_cannot_walk_the_ladder_inside_the_gap(
     client, db_session, monkeypatch
 ):
-    """The cues a covered lens produces are one warning, then evidence only.
+    """A second camera act inside the gap is evidence only, never a warning.
 
-    This is the case the candidate reported: a face out of frame and an
-    obstruction arrive together while the first modal is still on screen. They
-    must not become warning 2 before it has been read and acknowledged.
+    This is the case the candidate reported: the feed stops and the picture
+    blocks while the first modal is still on screen. They must not become
+    warning 2 before it has been read and acknowledged. Both are deliberate acts
+    and therefore counted (ADR-040); an inference cue would already have
+    returned before the ladder, which `test_integrity_profile.py` pins.
     """
     from campusflow.domain.exams import service as exams_service
 
@@ -735,7 +737,7 @@ async def test_camera_cues_cannot_walk_the_ladder_inside_the_gap(
     seeded = await _seed_assessment(db_session, tag="CAM", max_violations=10, policy="remove")
     attempt_id = await _begin(client, seeded, "browser_camera_gap")
 
-    first = await _event(client, seeded, attempt_id, "face_not_visible")
+    first = await _event(client, seeded, attempt_id, "camera_off")
     assert first["violations_count"] == 1
     assert first["warning_pending"] is True
 
