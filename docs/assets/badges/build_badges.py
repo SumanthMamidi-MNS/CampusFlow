@@ -4,23 +4,22 @@ Run from the repository root:
 
     python docs/assets/badges/build_badges.py
 
-Why a generator: nine hand-tuned files drifted in width, padding and animation
-timing, and `tests.svg` still read "101 Passing" long after the suite had grown.
-The badge content lives in `BADGES` below, so the figures in the README are
-changed in one place and every capsule is rebuilt from the same geometry.
+Geometry is not guessed. Every label and value was measured in Chrome with the
+exact family, size, weight and letter-spacing the SVG declares, and the advances
+live in `LABEL_ADVANCE` / `VALUE_ADVANCE` below. A capsule is then laid out the
+way the reference set is: gem at 16, label at 28, an 8 px gap to the divider,
+8 px to the value, 13 px of right padding. No empty space is left inside a pill,
+and a longer label widens the capsule instead of crowding the divider.
 
 Each badge is a dark obsidian capsule: a pulsing accent gem, the label, a
 hairline divider and the value in mono. The perimeter flashes in the badge's own
-accent and a specular sheen travels down the capsule once every 3.6 s. The
-gestures are staggered per badge so a row does not bloom in lockstep.
+accent and a specular sheen travels down the capsule once every 3.6 s, staggered
+per badge so a row does not bloom in lockstep. `live-deployment.svg` is the wide
+royal-indigo action capsule above the row, matching the reference at 276 × 48.
 
-`live_deployment.svg` is the one wide capsule above them: the public landing
-page, in the same language at a larger size.
-
-GitHub serves README images through <img>, which does not run script or CSS
+GitHub serves README images through <img>, which does not run CSS or SMIL
 animation; the capsules are therefore designed to read correctly as a still
-frame, and the motion is a bonus wherever an SVG is opened directly. Nothing in
-a badge is load-bearing for comprehension.
+frame, and the motion is a bonus wherever an SVG is opened directly.
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ BADGES: list[tuple[str, str, str]] = [
     ("FastAPI", "REST + WS", "#34D399"),
     ("React", "19", "#22D3EE"),
     ("TypeScript", "6", "#3178C6"),
-    # Data, interface and the runtime it ships in
+    # Data, interface, and the runtime it ships in
     ("PostgreSQL", "15", "#818CF8"),
     ("Tailwind", "v4", "#38BDF8"),
     ("Docker", "Compose", "#60A5FA"),
@@ -49,19 +48,50 @@ BADGES: list[tuple[str, str, str]] = [
     ("License", "MIT", "#F472B6"),
 ]
 
+# Text advances measured in Chrome (Segoe UI / system sans at 700 12px, and
+# JetBrains Mono / Consolas at 700 10.8px), before letter-spacing. Regenerate
+# them with `document.createElement("canvas").getContext("2d").measureText` in a
+# browser if a label or value changes; do not eyeball a width.
+LABEL_ADVANCE: dict[str, float] = {
+    "Python": 40.34,
+    "FastAPI": 41.90,
+    "React": 30.91,
+    "TypeScript": 59.71,
+    "PostgreSQL": 64.86,
+    "Tailwind": 46.96,
+    "Docker": 39.75,
+    "Caddy": 35.26,
+    "Piston": 35.28,
+    "Authorization": 78.04,
+    "GitHub Actions": 85.97,
+    "Tests": 27.67,
+    "License": 40.83,
+}
+
+VALUE_ADVANCE: dict[str, float] = {
+    "3.12": 23.75,
+    "REST + WS": 53.44,
+    "19": 11.88,
+    "6": 5.94,
+    "15": 11.88,
+    "v4": 11.88,
+    "Compose": 41.57,
+    "TLS": 17.81,
+    "Isolate": 41.57,
+    "scoped": 35.63,
+    "CI": 11.88,
+    "105 passing": 65.32,
+    "MIT": 17.81,
+}
+
 LIVE_LABEL = "Open Live Deployment"
-LIVE_ACCENT = "#818CF8"
 
-LABEL_TEXT_X = 28.0
-LABEL_CHAR_W = 6.62  # bold 12px system sans, averaged over the labels above
-VALUE_CHAR_W = 6.34  # bold 10.5px mono, averaged over the values above
-LABEL_PAD = 8.0  # slack so no glyph touches the divider
-DIVIDER_GAP = 10.0
-VALUE_GAP = 10.0
-RIGHT_PAD = 16.0
-
-LIVE_WIDTH = 312
-LIVE_HEIGHT = 46
+LABEL_X = 28.0
+LABEL_SPACING = 0.2
+VALUE_SPACING = 0.25
+DIVIDER_GAP = 8.0
+VALUE_GAP = 8.0
+RIGHT_PAD = 13.0
 
 
 def _slug(label: str) -> str:
@@ -75,11 +105,11 @@ def _begin(ident: str) -> float:
 
 def build(label: str, value: str, accent: str) -> str:
     ident = _slug(label)
-    label_w = LABEL_CHAR_W * len(label) + LABEL_PAD
-    divider_x = round(LABEL_TEXT_X + label_w + DIVIDER_GAP, 1)
+    label_adv = LABEL_ADVANCE[label] + LABEL_SPACING * (len(label) - 1)
+    divider_x = round(LABEL_X + label_adv + DIVIDER_GAP, 1)
     value_x = round(divider_x + VALUE_GAP, 1)
-    value_w = VALUE_CHAR_W * len(value) + LABEL_PAD
-    width = round(value_x + value_w + RIGHT_PAD, 1)
+    value_adv = VALUE_ADVANCE[value] + VALUE_SPACING * (len(value) - 1)
+    width = round(value_x + value_adv + RIGHT_PAD, 1)
     inner = width - 1.5
     begin = _begin(ident)
 
@@ -92,37 +122,22 @@ def build(label: str, value: str, accent: str) -> str:
     </linearGradient>
     <linearGradient id="sheen_{ident}" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0"/>
-      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.06"/>
-      <stop offset="50%" stop-color="{accent}" stop-opacity="0.30"/>
-      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.45"/>
+      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.08"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
-    <filter id="glow_{ident}" x="-60%" y="-160%" width="220%" height="420%">
-      <feGaussianBlur stdDeviation="2.6" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
     <clipPath id="clip_{ident}">
       <rect x="0.75" y="0.75" width="{inner:g}" height="29.5" rx="14.75"/>
     </clipPath>
-    <style>
-      @keyframes gem_pulse_{ident} {{
-        0%, 100% {{ transform: scale(0.92); transform-origin: 16px 15.5px; }}
-        50% {{ transform: scale(1.16); transform-origin: 16px 15.5px; }}
-      }}
-      .gem-{ident} {{ animation: gem_pulse_{ident} 2.4s ease-in-out infinite; }}
-      @media (prefers-reduced-motion: reduce) {{ .gem-{ident} {{ animation: none; }} }}
-    </style>
   </defs>
 
   <rect x="0.75" y="0.75" width="{inner:g}" height="29.5" rx="14.75" fill="url(#bg_{ident})"/>
-  <rect x="0.75" y="0.75" width="{inner:g}" height="29.5" rx="14.75" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="1.2">
-    <animate attributeName="stroke" values="#FFFFFF;{accent};#FFFFFF" dur="3.6s" begin="{begin}s" repeatCount="indefinite"/>
-    <animate attributeName="stroke-opacity" values="0.18;0.85;0.18" dur="3.6s" begin="{begin}s" repeatCount="indefinite"/>
+  <rect x="0.75" y="0.75" width="{inner:g}" height="29.5" rx="14.75" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1.2">
+    <animate attributeName="stroke" values="rgba(255,255,255,0.18);{accent};rgba(255,255,255,0.18)" dur="3.6s" begin="{begin}s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-width" values="1.1;1.7;1.1" dur="3.6s" begin="{begin}s" repeatCount="indefinite"/>
   </rect>
-  <path d="M 14 1.5 L {width - 14:g} 1.5" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="0.9" stroke-linecap="round"/>
+  <path d="M 14 1.5 L {width - 14:g} 1.5" stroke="rgba(255,255,255,0.35)" stroke-width="0.9" stroke-linecap="round"/>
 
   <g clip-path="url(#clip_{ident})">
     <g transform="rotate(14)">
@@ -130,7 +145,7 @@ def build(label: str, value: str, accent: str) -> str:
         <animateTransform attributeName="transform" type="translate" additive="sum"
           values="0 -30; 0 71; 0 71; 0 -30" keyTimes="0; 0.45; 0.50; 1"
           dur="3.6s" begin="{begin}s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0; 0.8; 0.8; 0; 0" keyTimes="0; 0.10; 0.40; 0.46; 1"
+        <animate attributeName="opacity" values="0; 0.85; 0.85; 0; 0" keyTimes="0; 0.10; 0.40; 0.46; 1"
           dur="3.6s" begin="{begin}s" repeatCount="indefinite"/>
       </rect>
     </g>
@@ -141,14 +156,14 @@ def build(label: str, value: str, accent: str) -> str:
     <animate attributeName="opacity" values="0.85;0.25;0" dur="2.4s" repeatCount="indefinite"/>
     <animate attributeName="stroke-width" values="1.5;0.9;0.2" dur="2.4s" repeatCount="indefinite"/>
   </circle>
-  <g filter="url(#glow_{ident})">
-    <circle class="gem-{ident}" cx="16" cy="15.5" r="3.7" fill="{accent}"/>
-  </g>
-  <circle cx="16" cy="15.5" r="1.3" fill="#FFFFFF" opacity="0.92"/>
+  <circle cx="16" cy="15.5" r="3.4" fill="{accent}">
+    <animate attributeName="r" values="3.4;4.4;3.4" dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="16" cy="15.5" r="1.4" fill="#FFFFFF" opacity="0.95"/>
 
-  <text x="{LABEL_TEXT_X:g}" y="19.9" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', sans-serif" font-size="12" font-weight="700" fill="#F8FAFC" letter-spacing="0.2">{label}</text>
-  <line x1="{divider_x:g}" y1="9" x2="{divider_x:g}" y2="22" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="1"/>
-  <text x="{value_x:g}" y="19.6" font-family="'JetBrains Mono', Consolas, Monaco, monospace" font-size="10.5" font-weight="700" fill="#94A3B8" letter-spacing="0.25">{value}
+  <text x="{LABEL_X:g}" y="19.8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', sans-serif" font-size="12" font-weight="700" fill="#F8FAFC" letter-spacing="{LABEL_SPACING}px">{label}</text>
+  <line x1="{divider_x:g}" y1="9" x2="{divider_x:g}" y2="22" stroke="rgba(255,255,255,0.22)" stroke-width="1.0"/>
+  <text x="{value_x:g}" y="19.5" font-family="'JetBrains Mono', Consolas, Monaco, monospace" font-size="10.8" font-weight="700" fill="#94A3B8" letter-spacing="{VALUE_SPACING}px">{value}
     <animate attributeName="fill" values="#94A3B8;{accent};#94A3B8" dur="3.6s" begin="{begin}s" repeatCount="indefinite"/>
   </text>
 </svg>
@@ -156,81 +171,63 @@ def build(label: str, value: str, accent: str) -> str:
 
 
 def build_live() -> str:
-    """The public landing page, as one wider capsule."""
-    w, h = LIVE_WIDTH, LIVE_HEIGHT
-    inner_w, inner_h = w - 1.5, h - 1.5
-    mid = h / 2
-    gem_x = 30
-    label_x = 48
-    arrow_x = w - 30
-    accent = LIVE_ACCENT
+    """The public landing page, as the wide royal-indigo action capsule.
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" fill="none" role="img" aria-label="{LIVE_LABEL}">
+    Matches the reference capsule exactly: 276 × 48, midnight-indigo body, an
+    indigo border that breathes, a beating indicator, the label at 46 and the
+    arrow at 238 that nudges right. Only the target differs.
+    """
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="276" height="48" viewBox="0 0 276 48" fill="none" role="img" aria-label="{LIVE_LABEL}">
   <title>{LIVE_LABEL}</title>
   <defs>
-    <linearGradient id="bg_live" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1B2133" stop-opacity="0.98"/>
-      <stop offset="100%" stop-color="#0A0E16" stop-opacity="0.99"/>
+    <linearGradient id="bg_live_large" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#231E56" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#0E1226" stop-opacity="0.99"/>
     </linearGradient>
-    <linearGradient id="sheen_live" x1="0%" y1="0%" x2="0%" y2="100%">
+    <linearGradient id="sheen_live_large" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0"/>
-      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.06"/>
-      <stop offset="50%" stop-color="{accent}" stop-opacity="0.32"/>
-      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.10"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
-    <filter id="glow_live" x="-60%" y="-160%" width="220%" height="420%">
-      <feGaussianBlur stdDeviation="3.2" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <clipPath id="clip_live">
-      <rect x="0.75" y="0.75" width="{inner_w:g}" height="{inner_h:g}" rx="22.25"/>
+    <clipPath id="clip_live_large">
+      <rect x="0.75" y="0.75" width="274.5" height="46.5" rx="23.25"/>
     </clipPath>
-    <style>
-      @keyframes gem_pulse_live {{
-        0%, 100% {{ transform: scale(0.92); transform-origin: {gem_x}px {mid}px; }}
-        50% {{ transform: scale(1.16); transform-origin: {gem_x}px {mid}px; }}
-      }}
-      .gem-live {{ animation: gem_pulse_live 2.4s ease-in-out infinite; }}
-      @media (prefers-reduced-motion: reduce) {{ .gem-live {{ animation: none; }} }}
-    </style>
   </defs>
 
-  <rect x="0.75" y="0.75" width="{inner_w:g}" height="{inner_h:g}" rx="22.25" fill="url(#bg_live)"/>
-  <rect x="0.75" y="0.75" width="{inner_w:g}" height="{inner_h:g}" rx="22.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="1.4">
-    <animate attributeName="stroke" values="#FFFFFF;{accent};#FFFFFF" dur="3.6s" repeatCount="indefinite"/>
-    <animate attributeName="stroke-opacity" values="0.22;0.9;0.22" dur="3.6s" repeatCount="indefinite"/>
+  <rect x="0.75" y="0.75" width="274.5" height="46.5" rx="23.25" fill="url(#bg_live_large)"/>
+  <rect x="0.75" y="0.75" width="274.5" height="46.5" rx="23.25" fill="none" stroke="#6366F1" stroke-width="1.6">
+    <animate attributeName="stroke" values="#6366F1;#A5B4FC;#6366F1" dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-width" values="1.4;2.2;1.4" dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
   </rect>
-  <path d="M 26 1.6 L {w - 26} 1.6" stroke="#FFFFFF" stroke-opacity="0.34" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 28 2 L 248 2" stroke="rgba(255,255,255,0.4)" stroke-width="1.2" stroke-linecap="round"/>
 
-  <g clip-path="url(#clip_live)">
-    <g transform="rotate(10)">
-      <rect x="-40" y="-60" width="{w + 80}" height="24" fill="url(#sheen_live)" opacity="0">
+  <g clip-path="url(#clip_live_large)">
+    <g transform="rotate(14)">
+      <rect x="-30" y="-55" width="356" height="26" fill="url(#sheen_live_large)" opacity="0">
         <animateTransform attributeName="transform" type="translate" additive="sum"
-          values="0 -40; 0 106; 0 106; 0 -40" keyTimes="0; 0.45; 0.50; 1"
-          dur="3.6s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0; 0.85; 0.85; 0; 0" keyTimes="0; 0.10; 0.40; 0.46; 1"
-          dur="3.6s" repeatCount="indefinite"/>
+          values="0 -45; 0 103; 0 103; 0 -45" keyTimes="0; 0.45; 0.50; 1"
+          dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0; 0.9; 0.9; 0; 0" keyTimes="0; 0.10; 0.40; 0.46; 1"
+          dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
       </rect>
     </g>
   </g>
 
-  <circle cx="{gem_x}" cy="{mid}" r="5.4" fill="none" stroke="{accent}">
-    <animate attributeName="r" values="5.4;11.5;16" dur="2.4s" repeatCount="indefinite"/>
-    <animate attributeName="opacity" values="0.85;0.25;0" dur="2.4s" repeatCount="indefinite"/>
-    <animate attributeName="stroke-width" values="1.8;1;0.2" dur="2.4s" repeatCount="indefinite"/>
+  <circle cx="26" cy="24" r="5" fill="none" stroke="#818CF8">
+    <animate attributeName="r" values="5;11;16" dur="2.2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.9;0.25;0" dur="2.2s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-width" values="1.8;1.0;0.2" dur="2.2s" repeatCount="indefinite"/>
   </circle>
-  <g filter="url(#glow_live)">
-    <circle class="gem-live" cx="{gem_x}" cy="{mid}" r="5.2" fill="{accent}"/>
-  </g>
-  <circle cx="{gem_x}" cy="{mid}" r="1.8" fill="#FFFFFF" opacity="0.95"/>
+  <circle cx="26" cy="24" r="4.5" fill="#818CF8">
+    <animate attributeName="r" values="4.5;5.5;4.5" dur="2.2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="26" cy="24" r="2" fill="#FFFFFF" opacity="0.95"/>
 
-  <text x="{label_x}" y="{mid + 5.4:g}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', sans-serif" font-size="15" font-weight="700" fill="#F8FAFC" letter-spacing="0.2">{LIVE_LABEL}</text>
-  <text x="{arrow_x}" y="{mid + 5.2:g}" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="600" fill="{accent}">&#8594;
-    <animate attributeName="fill" values="{accent};#FFFFFF;{accent}" dur="3.6s" repeatCount="indefinite"/>
+  <text x="46" y="29.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', sans-serif" font-size="15" font-weight="800" fill="#FFFFFF" letter-spacing="0.3px">{LIVE_LABEL}</text>
+  <text x="238" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#C7D2FE">&#8594;
+    <animate attributeName="x" values="238;242;238" dur="1.8s" repeatCount="indefinite"/>
   </text>
 </svg>
 """

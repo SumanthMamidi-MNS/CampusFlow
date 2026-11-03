@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://campus-flow-premier.vercel.app/" target="_blank" rel="noopener">
-    <img src="docs/assets/badges/live-deployment.svg" alt="Open Live Deployment" height="46">
+    <img src="docs/assets/badges/live-deployment.svg" alt="Open Live Deployment" height="48">
   </a>
 </p>
 

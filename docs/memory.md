@@ -533,8 +533,11 @@ This document preserves durable technical context, implementation constraints, a
 - **Badge geometry is generated, not hand-tuned.** The nine `docs/assets/badges/*.svg` files are
   written by `build_badges.py`: change the figures in `BADGES` and rerun it rather than editing an
   SVG. Each is a 31px-tall dark capsule with a pulsing accent gem, the label, a hairline divider and
-  the value in mono, laid out from per-character width estimates plus 8px of slack so a longer label
-  widens the capsule instead of colliding with the divider. Displayed at `height="31"`. GitHub
+  the value in mono, laid out from **Chrome text measurements** (`LABEL_ADVANCE` / `VALUE_ADVANCE`)
+  with the reference gaps — 8px to the divider, 8px to the value, 13px of right padding — so a
+  capsule has no empty space inside it and a longer label widens it instead of crowding the divider.
+  Re-measure with `measureText` in a browser after changing a label; do not eyeball a width.
+  Displayed at `height="31"`. GitHub
   serves an SVG inside `<img>` as a still frame — neither CSS nor SMIL animation runs there — so the
   capsule has to read correctly without motion; the flash, sheen and gem pulse are a bonus wherever
   the file is opened directly. `live-deployment.svg` is the same language at 46 px and points at

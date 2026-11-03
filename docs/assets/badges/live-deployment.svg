@@ -1,68 +1,53 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="312" height="46" viewBox="0 0 312 46" fill="none" role="img" aria-label="Open Live Deployment">
+<svg xmlns="http://www.w3.org/2000/svg" width="276" height="48" viewBox="0 0 276 48" fill="none" role="img" aria-label="Open Live Deployment">
   <title>Open Live Deployment</title>
   <defs>
-    <linearGradient id="bg_live" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1B2133" stop-opacity="0.98"/>
-      <stop offset="100%" stop-color="#0A0E16" stop-opacity="0.99"/>
+    <linearGradient id="bg_live_large" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#231E56" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#0E1226" stop-opacity="0.99"/>
     </linearGradient>
-    <linearGradient id="sheen_live" x1="0%" y1="0%" x2="0%" y2="100%">
+    <linearGradient id="sheen_live_large" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0"/>
-      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.06"/>
-      <stop offset="50%" stop-color="#818CF8" stop-opacity="0.32"/>
-      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.10"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
-    <filter id="glow_live" x="-60%" y="-160%" width="220%" height="420%">
-      <feGaussianBlur stdDeviation="3.2" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <clipPath id="clip_live">
-      <rect x="0.75" y="0.75" width="310.5" height="44.5" rx="22.25"/>
+    <clipPath id="clip_live_large">
+      <rect x="0.75" y="0.75" width="274.5" height="46.5" rx="23.25"/>
     </clipPath>
-    <style>
-      @keyframes gem_pulse_live {
-        0%, 100% { transform: scale(0.92); transform-origin: 30px 23.0px; }
-        50% { transform: scale(1.16); transform-origin: 30px 23.0px; }
-      }
-      .gem-live { animation: gem_pulse_live 2.4s ease-in-out infinite; }
-      @media (prefers-reduced-motion: reduce) { .gem-live { animation: none; } }
-    </style>
   </defs>
 
-  <rect x="0.75" y="0.75" width="310.5" height="44.5" rx="22.25" fill="url(#bg_live)"/>
-  <rect x="0.75" y="0.75" width="310.5" height="44.5" rx="22.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="1.4">
-    <animate attributeName="stroke" values="#FFFFFF;#818CF8;#FFFFFF" dur="3.6s" repeatCount="indefinite"/>
-    <animate attributeName="stroke-opacity" values="0.22;0.9;0.22" dur="3.6s" repeatCount="indefinite"/>
+  <rect x="0.75" y="0.75" width="274.5" height="46.5" rx="23.25" fill="url(#bg_live_large)"/>
+  <rect x="0.75" y="0.75" width="274.5" height="46.5" rx="23.25" fill="none" stroke="#6366F1" stroke-width="1.6">
+    <animate attributeName="stroke" values="#6366F1;#A5B4FC;#6366F1" dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-width" values="1.4;2.2;1.4" dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
   </rect>
-  <path d="M 26 1.6 L 286 1.6" stroke="#FFFFFF" stroke-opacity="0.34" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 28 2 L 248 2" stroke="rgba(255,255,255,0.4)" stroke-width="1.2" stroke-linecap="round"/>
 
-  <g clip-path="url(#clip_live)">
-    <g transform="rotate(10)">
-      <rect x="-40" y="-60" width="392" height="24" fill="url(#sheen_live)" opacity="0">
+  <g clip-path="url(#clip_live_large)">
+    <g transform="rotate(14)">
+      <rect x="-30" y="-55" width="356" height="26" fill="url(#sheen_live_large)" opacity="0">
         <animateTransform attributeName="transform" type="translate" additive="sum"
-          values="0 -40; 0 106; 0 106; 0 -40" keyTimes="0; 0.45; 0.50; 1"
-          dur="3.6s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0; 0.85; 0.85; 0; 0" keyTimes="0; 0.10; 0.40; 0.46; 1"
-          dur="3.6s" repeatCount="indefinite"/>
+          values="0 -45; 0 103; 0 103; 0 -45" keyTimes="0; 0.45; 0.50; 1"
+          dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0; 0.9; 0.9; 0; 0" keyTimes="0; 0.10; 0.40; 0.46; 1"
+          dur="3.6s" begin="0.0s" repeatCount="indefinite"/>
       </rect>
     </g>
   </g>
 
-  <circle cx="30" cy="23.0" r="5.4" fill="none" stroke="#818CF8">
-    <animate attributeName="r" values="5.4;11.5;16" dur="2.4s" repeatCount="indefinite"/>
-    <animate attributeName="opacity" values="0.85;0.25;0" dur="2.4s" repeatCount="indefinite"/>
-    <animate attributeName="stroke-width" values="1.8;1;0.2" dur="2.4s" repeatCount="indefinite"/>
+  <circle cx="26" cy="24" r="5" fill="none" stroke="#818CF8">
+    <animate attributeName="r" values="5;11;16" dur="2.2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.9;0.25;0" dur="2.2s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-width" values="1.8;1.0;0.2" dur="2.2s" repeatCount="indefinite"/>
   </circle>
-  <g filter="url(#glow_live)">
-    <circle class="gem-live" cx="30" cy="23.0" r="5.2" fill="#818CF8"/>
-  </g>
-  <circle cx="30" cy="23.0" r="1.8" fill="#FFFFFF" opacity="0.95"/>
+  <circle cx="26" cy="24" r="4.5" fill="#818CF8">
+    <animate attributeName="r" values="4.5;5.5;4.5" dur="2.2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="26" cy="24" r="2" fill="#FFFFFF" opacity="0.95"/>
 
-  <text x="48" y="28.4" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', sans-serif" font-size="15" font-weight="700" fill="#F8FAFC" letter-spacing="0.2">Open Live Deployment</text>
-  <text x="282" y="28.2" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="600" fill="#818CF8">&#8594;
-    <animate attributeName="fill" values="#818CF8;#FFFFFF;#818CF8" dur="3.6s" repeatCount="indefinite"/>
+  <text x="46" y="29.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', sans-serif" font-size="15" font-weight="800" fill="#FFFFFF" letter-spacing="0.3px">Open Live Deployment</text>
+  <text x="238" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#C7D2FE">&#8594;
+    <animate attributeName="x" values="238;242;238" dur="1.8s" repeatCount="indefinite"/>
   </text>
 </svg>

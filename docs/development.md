@@ -411,7 +411,10 @@ python docs/assets/badges/build_badges.py
 Change the figures in `BADGES` at the top of that file (the suite size lives there and in the
 Verification block above) and rerun it. Every capsule is rebuilt from the same geometry, so the
 thirteen files cannot drift in width, padding or animation phase; the README lays them out 4 · 5 · 4
-under `live-deployment.svg`, which `build_live()` writes at 46 px from `LIVE_LABEL`. The badge is a
+under `live-deployment.svg`, which `build_live()` writes at the reference 276 × 48. Widths come from
+the `LABEL_ADVANCE` / `VALUE_ADVANCE` tables — Chrome `measureText` results at the exact size,
+weight and letter-spacing the SVG declares — not from estimates, so a capsule fits its content with
+the reference gaps and no slack. The badge is a
 dark obsidian capsule with a pulsing accent gem, the label, a hairline divider and the value in
 mono; GitHub renders an SVG inside `<img>` as a still frame, so the capsule is designed to read
 correctly without motion. Renaming a badge means deleting the old file: the generator writes its
