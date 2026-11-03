@@ -410,9 +410,12 @@ python docs/assets/badges/build_badges.py
 
 Change the figures in `BADGES` at the top of that file (the suite size lives there and in the
 Verification block above) and rerun it. Every capsule is rebuilt from the same geometry, so the
-nine files cannot drift in width, padding or animation phase. The badge is a dark obsidian capsule
-with a pulsing accent gem, the label, a hairline divider and the value in mono; GitHub renders an
-SVG inside `<img>` as a still frame, so the capsule is designed to read correctly without motion.
+thirteen files cannot drift in width, padding or animation phase; the README lays them out 4 · 5 · 4
+under `live-deployment.svg`, which `build_live()` writes at 46 px from `LIVE_LABEL`. The badge is a
+dark obsidian capsule with a pulsing accent gem, the label, a hairline divider and the value in
+mono; GitHub renders an SVG inside `<img>` as a still frame, so the capsule is designed to read
+correctly without motion. Renaming a badge means deleting the old file: the generator writes its
+own set and does not prune.
 
 ### Regenerating the README screenshots
 

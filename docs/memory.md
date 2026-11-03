@@ -537,7 +537,9 @@ This document preserves durable technical context, implementation constraints, a
   widens the capsule instead of colliding with the divider. Displayed at `height="31"`. GitHub
   serves an SVG inside `<img>` as a still frame — neither CSS nor SMIL animation runs there — so the
   capsule has to read correctly without motion; the flash, sheen and gem pulse are a bonus wherever
-  the file is opened directly.
+  the file is opened directly. `live-deployment.svg` is the same language at 46 px and points at
+  the public landing page; it is a link to a presentation of the product, not to a writable
+  instance, and the README says so in one sentence beside it.
 - **The landing page mirrors seven screenshots.** `frontend/public/shots/*.png` are copies of
   `docs/images/` (`dashboard`, `exam-workspace`, `programming`, `course-workspace`, `examinations`,
   `question-banks`, `student-dashboard`), because the SPA cannot serve files from `docs/`. The

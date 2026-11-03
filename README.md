@@ -7,14 +7,25 @@
 </h3>
 
 <p align="center">
+  <a href="https://campus-flow-premier.vercel.app/" target="_blank" rel="noopener">
+    <img src="docs/assets/badges/live-deployment.svg" alt="Open Live Deployment" height="46">
+  </a>
+</p>
+
+<p align="center">
   <a href="https://www.python.org/"><img src="docs/assets/badges/python.svg" alt="Python 3.12" height="31"></a>&nbsp;&nbsp;
   <a href="https://fastapi.tiangolo.com"><img src="docs/assets/badges/fastapi.svg" alt="FastAPI REST + WS" height="31"></a>&nbsp;&nbsp;
-  <a href="https://react.dev"><img src="docs/assets/badges/react.svg" alt="React 19" height="31"></a>&nbsp;&nbsp;
-  <a href="https://www.postgresql.org/"><img src="docs/assets/badges/postgresql.svg" alt="PostgreSQL 15" height="31"></a>&nbsp;&nbsp;
-  <a href="https://docs.docker.com/compose/"><img src="docs/assets/badges/docker.svg" alt="Docker Compose" height="31"></a>
+  <a href="https://react.dev/"><img src="docs/assets/badges/react.svg" alt="React 19" height="31"></a>&nbsp;&nbsp;
+  <a href="https://www.typescriptlang.org/"><img src="docs/assets/badges/typescript.svg" alt="TypeScript 6" height="31"></a>
   <br><br>
-  <a href="docs/architecture.md"><img src="docs/assets/badges/authorization.svg" alt="Authorization: offering scope" height="31"></a>&nbsp;&nbsp;
-  <a href="docs/decisions.md#adr-014-piston-sidecar-for-sandboxed-student-code-execution"><img src="docs/assets/badges/sandbox.svg" alt="Sandbox: Piston isolate" height="31"></a>&nbsp;&nbsp;
+  <a href="https://www.postgresql.org/"><img src="docs/assets/badges/postgresql.svg" alt="PostgreSQL 15" height="31"></a>&nbsp;&nbsp;
+  <a href="https://tailwindcss.com/"><img src="docs/assets/badges/tailwind.svg" alt="Tailwind v4" height="31"></a>&nbsp;&nbsp;
+  <a href="https://docs.docker.com/compose/"><img src="docs/assets/badges/docker.svg" alt="Docker Compose" height="31"></a>&nbsp;&nbsp;
+  <a href="https://caddyserver.com/"><img src="docs/assets/badges/caddy.svg" alt="Caddy TLS" height="31"></a>&nbsp;&nbsp;
+  <a href="docs/decisions.md#adr-014-piston-sidecar-for-sandboxed-student-code-execution"><img src="docs/assets/badges/piston.svg" alt="Piston isolate" height="31"></a>
+  <br><br>
+  <a href="docs/architecture.md"><img src="docs/assets/badges/authorization.svg" alt="Authorization: scoped" height="31"></a>&nbsp;&nbsp;
+  <a href=".github/workflows/ci.yml"><img src="docs/assets/badges/github-actions.svg" alt="GitHub Actions CI" height="31"></a>&nbsp;&nbsp;
   <a href="backend/tests/"><img src="docs/assets/badges/tests.svg" alt="Tests: 105 passing" height="31"></a>&nbsp;&nbsp;
   <a href="LICENSE"><img src="docs/assets/badges/license.svg" alt="MIT License" height="31"></a>
 </p>
@@ -222,11 +233,13 @@ Signing in as the demo student from the examinations page provisions a complete 
 questions, integrity signals, auto-grading, scorecard. These credentials exist **only** in a locally
 seeded database; a production deployment starts empty apart from the Campus Lead you provision.
 
-> **Why there is no public demo link.** A live instance would be a writable, multi-tenant
-> examination platform with a privileged code sandbox and real proctoring data — not something to
-> leave on a public URL. The stack above *is* the demo: five minutes to a complete product,
-> screenshots included. An instance opens on a product landing page — the one screen a signed-out
-> visitor can reach; every other route waits for a session.
+> **What the public link is — and what it is not.**
+> [campus-flow-premier.vercel.app](https://campus-flow-premier.vercel.app/) serves the product's
+> landing page: the one screen a signed-out visitor may reach. It is a presentation, not a writable
+> instance — the hosted bundle is the SPA alone and answers 404 for every `/api` path, so there is
+> nothing there to hold real proctoring data or a privileged code sandbox. The full stack *is* the
+> demo: five minutes to a complete product, screenshots included. A real deployment is a
+> multi-tenant examination platform, and that is what the Compose project above is for.
 
 ## Verification
 
