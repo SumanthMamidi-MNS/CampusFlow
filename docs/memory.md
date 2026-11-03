@@ -530,14 +530,20 @@ This document preserves durable technical context, implementation constraints, a
   embedder's `color-scheme`, so a page that sets `color-scheme: light` gets the light fills. Inline
   in the DOM, the same media query follows the operating system and ignores the page's
   `color-scheme`. Verify badge and lockup previews through `<img>`, or the preview will lie.
-- **Badge geometry is measured, not guessed.** The nine `docs/assets/badges/*.svg` files are sized
-  from a Chrome measurement of the badge font (`600 11.5px` for the label, `700 11.5px` for the
-  value); when a label or value changes, re-measure before editing the viewBox, and check that the
-  label still clears the value chip by a few units. Displayed at `height="30"` from a 32px canvas.
-- **The landing page mirrors eight screenshots.** `frontend/public/shots/*.png` are copies of
+- **Badge geometry is generated, not hand-tuned.** The nine `docs/assets/badges/*.svg` files are
+  written by `build_badges.py`: change the figures in `BADGES` and rerun it rather than editing an
+  SVG. Each is a 31px-tall dark capsule with a pulsing accent gem, the label, a hairline divider and
+  the value in mono, laid out from per-character width estimates plus 8px of slack so a longer label
+  widens the capsule instead of colliding with the divider. Displayed at `height="31"`. GitHub
+  serves an SVG inside `<img>` as a still frame — neither CSS nor SMIL animation runs there — so the
+  capsule has to read correctly without motion; the flash, sheen and gem pulse are a bonus wherever
+  the file is opened directly.
+- **The landing page mirrors seven screenshots.** `frontend/public/shots/*.png` are copies of
   `docs/images/` (`dashboard`, `exam-workspace`, `programming`, `course-workspace`, `examinations`,
-  `question-banks`, `assessment`, `student-dashboard`), because the SPA cannot serve files from
-  `docs/`. Recapture both copies together — a stale second copy photographs as an older product.
+  `question-banks`, `student-dashboard`), because the SPA cannot serve files from `docs/`. The
+  candidate brief is the exception: the landing page shows it as the tour WebP
+  (`/tour/student/student-11-exam-brief.webp`), so only `docs/images/11-assessment.png` and that WebP
+  exist and they are recaptured together. A stale copy photographs as an older product.
 - **`/` is conditional, and that is the only public screen.** `HomePage` in `frontend/src/app/router.tsx`
   shows the landing page when signed out and the dashboard (inside `RootLayout`) when signed in;
   every other protected path still redirects to `/auth/login`. Do not add API calls to the landing
